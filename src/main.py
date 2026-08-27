@@ -24,6 +24,24 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config import (  # noqa: E402
+    LIFE_ELECTROLYSIS_ENERGY_PER_O2,
+    LIFE_ELECTROLYSIS_WATER_PER_O2,
+    LIFE_FOOD_PER_CREW_DAY,
+    LIFE_HYDROPONICS_ENERGY_PER_FOOD,
+    LIFE_HYDROPONICS_WATER_PER_FOOD,
+    LIFE_ICE_HORIZON_DAYS,
+    LIFE_ICE_MELT_RATE_PER_DAY,
+    LIFE_ICE_PREMIUM_MAX,
+    LIFE_ICE_RESERVE_T,
+    LIFE_ICE_TO_WATER_YIELD,
+    LIFE_LOW_STOCK_FRACTION,
+    LIFE_OXYGEN_PER_CREW_DAY,
+    LIFE_SHORTAGE_MORALE_DRAIN_PER_DAY,
+    LIFE_SOLAR_ENERGY_PER_DAY,
+    LIFE_START_FOOD,
+    LIFE_START_OXYGEN,
+    LIFE_START_WATER,
+    LIFE_WATER_PER_CREW_DAY,
     MARKET_BASE_PRICES,
     REDISPATCH_SCAN_DAYS,
     SHIP_CLASSES,
@@ -34,8 +52,8 @@ from src.config import (  # noqa: E402
 )
 from src.simulation.bodies import TRADE_TARGETS  # noqa: E402
 from src.config import SIM_SECONDS_PER_DAY  # noqa: E402
-from src.mining import assay_lines  # noqa: E402
-from src.market import Market  # noqa: E402
+from src.mining import assay_lines, plan_extraction  # noqa: E402
+from src.market import Contracts, Market  # noqa: E402
 from src.operations import OpsSimulation  # noqa: E402
 from src.simulation.orbital_sim import OrbitalSimulation  # noqa: E402
 
@@ -55,6 +73,11 @@ class Colony:
 
     def __init__(self):
         self.state = colony_state.initial_state()
+        # Life-support stocks live alongside the upstream resources; the
+        # upstream game never touches these keys, the orbital game ticks them.
+        self.state["resources"]["oxygen"] = LIFE_START_OXYGEN
+        self.state["resources"]["food"] = LIFE_START_FOOD
+        self.state["resources"]["water"] = LIFE_START_WATER
 
     def receive(self, cargo: dict[str, float]) -> dict:
         """Store a freighter's delivery using the upstream storage rules."""
@@ -79,9 +102,19 @@ class Game:
         self.sim = OpsSimulation(ship_names=ship_names)
         self.colony = Colony()
         self.market = Market()
+        self.contracts = Contracts(self.market)
         self.credits = START_CREDITS
         self.auto_repair = True
         self.credits_history: list[tuple[float, float]] = []
+        # Fraction of the colony's power budget in use; drives the ambient hum.
+        self.power_load = 0.2
+        self._life_shortage_flag = False
+        # One-shot flags the flight-orientation checklist watches.
+        self.tutorial_text = ""
+        self._tut = {"dispatched": False, "sold": False, "drilled": False,
+                     "bought": False, "saved": False, "done": False}
+        # Alert edges, so tones play once per incident instead of every frame.
+        self._alert_edges = {"flare": False, "hull": False, "shortage": False}
         self.scene = None
         self.hud = None
         self.follow_target: str | None = None
@@ -172,9 +205,12 @@ class Game:
         self.sim.step(dt_days)
         self.sim.recover_mines(dt_days)
         self.market.update(dt_days)
+        self._tick_life_support(dt_days)
+        self._tick_contracts()
         self._sample_credits_history()
         self._book_deliveries()
         self._refuel_and_redispatch(dt_days)
+        self._tick_tutorial()
 
         if self.scene is not None:
             self.scene.update(self.sim)
@@ -199,6 +235,14 @@ class Game:
             stored = sum(result["stored"].values())
             overflow = sum(result["overflow"].values())
             self.deliveries_booked += 1
+            for contract in self.contracts.register_delivery(delivery.cargo):
+                reward = self.contracts.complete(contract)
+                self.credits += reward
+                self.say(
+                    f"Order filled: {contract.tonnes:,.0f} t {contract.resource} for "
+                    f"{contract.faction} -- {reward:,.0f} cr.",
+                    seconds=8.0,
+                )
             if stored > 0:
                 self.say(
                     f"{delivery.ship} delivered {stored:,.0f} t from {delivery.body}"
@@ -209,21 +253,34 @@ class Game:
 
     # -- market & fleet actions ----------------------------------------------
     def sell_all(self) -> None:
-        """Sell every marketable ore in colony storage at today's prices."""
+        """Sell marketable ore at today's prices, honouring the ice reserve.
+
+        The colonists eat ice (melted into water for oxygen and food), so the
+        reserve is never put on the market. Standing with Earth factions moves
+        the prices; a sale also pays the fleet, which crews appreciate.
+        """
         resources = self.colony.state.get("resources", {})
-        lots = {
-            res: float(amount)
-            for res, amount in resources.items()
-            if res in MARKET_BASE_PRICES and amount >= 1.0
-        }
+        lots: dict[str, float] = {}
+        for res, amount in resources.items():
+            if res not in MARKET_BASE_PRICES or amount < 1.0:
+                continue
+            if res == "ice":
+                amount = max(0.0, amount - LIFE_ICE_RESERVE_T)
+            if amount >= 1.0:
+                lots[res] = float(amount)
         if not lots:
-            self.say("No ore in colony storage worth selling.")
+            self.say("No ore in colony storage worth selling (ice reserve held back).")
             return
+        multiplier = self.contracts.price_multiplier()
         proceeds, sold = self.market.sell(lots)
+        proceeds *= multiplier
         colony_state.add_resources(self.colony.state, {res: -amount for res, amount in sold.items()})
         self.credits += proceeds
+        self._tut["sold"] = True
+        self.sim.crew_payday()
         detail = ", ".join(f"{res} {amount:,.0f} t" for res, amount in sorted(sold.items()))
-        self.say(f"Sold {detail} to Earth for {proceeds:,.0f} cr.", seconds=8.0)
+        note = f" (Earth standing x{multiplier:.2f})" if abs(multiplier - 1.0) > 0.005 else ""
+        self.say(f"Sold {detail} to Earth for {proceeds:,.0f} cr{note}.", seconds=8.0)
 
     def buy_ship_class(self, cls_key: str) -> None:
         """Commission a new ship class from the treasury."""
@@ -242,10 +299,12 @@ class Game:
             self.say(message)
             return
         self.credits -= spec["price"]
+        self._tut["bought"] = True
         self.say(f"{message} Bill: {spec['price']:,.0f} cr.", seconds=8.0)
 
     def toggle_drill(self) -> None:
         self.sim.mining_mode = "drill" if self.sim.mining_mode == "scrape" else "scrape"
+        self._tut["drilled"] = True
         flavour = (
             "core drilling: fuller holds, hull wear, incident risk"
             if self.sim.mining_mode == "drill"
@@ -261,14 +320,16 @@ class Game:
     # -- save / load ----------------------------------------------------------
     def save_game(self, slot: str = "quick") -> None:
         payload = {
-            "version": 1,
+            "version": 2,
             "credits": self.credits,
             "auto_repair": self.auto_repair,
             "market": self.market.to_json(),
+            "contracts": self.contracts.to_json(),
             "colony": self.colony.state,
             "sim": self.sim.to_json(),
         }
         path = colony_savegame.save_slot(slot, payload)
+        self._tut["saved"] = True
         self.say(f"Game saved ({os.path.basename(path)}).")
 
     def load_game(self, slot: str = "quick") -> None:
@@ -279,6 +340,7 @@ class Game:
         self.credits = float(data.get("credits", START_CREDITS))
         self.auto_repair = bool(data.get("auto_repair", True))
         self.market = Market.from_json(data["market"])
+        self.contracts = Contracts.from_json(data.get("contracts", {}), self.market)
         self.colony.state = data["colony"]
         self.sim = OpsSimulation.from_json(data["sim"])
         self.credits_history = []
@@ -307,7 +369,58 @@ class Game:
             "mined_t": float(self.sim.stats.get("ore_mined_t", 0.0)),
             "incidents": int(self.sim.stats.get("incidents", 0)),
             "hull": dict(self.sim.hull),
+            "crew_line": self._crew_hud_line(),
+            "weather": self.sim.weather_alert(),
+            "contract_line": self._contract_hud_line(),
+            "rep_line": self._reputation_hud_line(),
+            "life_line": self._life_hud_line(),
+            "tutorial": self.tutorial_text,
+            "power_load": self.power_load,
         }
+
+    def _crew_hud_line(self) -> str:
+        morale = self.sim.fleet_morale()
+        worst_name, worst_fatigue = "", 0.0
+        for ship in self.sim.ships:
+            _, fatigue = self.sim.crew_stats(ship.name)
+            if fatigue > worst_fatigue:
+                worst_name, worst_fatigue = ship.name, fatigue
+        base = f"Crew morale {morale:.0f}/100"
+        if worst_fatigue > 70.0:
+            return f"{base} | {worst_name} crew tired ({worst_fatigue:.0f}%)"
+        return base
+
+    def _contract_hud_line(self) -> str:
+        if not self.contracts.active:
+            return "No Earth orders (offers every ~40 d)"
+        contract = min(self.contracts.active, key=lambda c: c.deadline_day)
+        pct = 100.0 * contract.progress / max(1.0, contract.tonnes)
+        days_left = max(0.0, contract.deadline_day - self.market.day)
+        return (f"Order: {contract.resource} {pct:.0f}% by {days_left:,.0f} d "
+                f"({contract.faction})")
+
+    def _reputation_hud_line(self) -> str:
+        avg = self.contracts.average_reputation()
+        mult = self.contracts.price_multiplier()
+        return f"Earth standing {avg:+.0f} (prices x{mult:.2f})"
+
+    def _life_hud_line(self) -> str:
+        resources = self.colony.state.get("resources", {})
+        low = LIFE_LOW_STOCK_FRACTION * 100.0
+
+        def pct(key: str, start: float) -> float:
+            return 100.0 * resources.get(key, 0.0) / max(1e-9, start)
+
+        line = (f"Life: O2 {pct('oxygen', LIFE_START_OXYGEN):.0f}% "
+                f"food {pct('food', LIFE_START_FOOD):.0f}% "
+                f"water {pct('water', LIFE_START_WATER):.0f}%")
+        if getattr(self, "_life_shortage_flag", False):
+            return "ALERT: LIFE SUPPORT SHORTAGE - crews suffering"
+        if min(pct('oxygen', LIFE_START_OXYGEN),
+               pct('food', LIFE_START_FOOD),
+               pct('water', LIFE_START_WATER)) < low:
+            return line + "  (LOW)"
+        return line
 
     @staticmethod
     def _sparkline(history: list[tuple[float, float]]) -> str:
@@ -324,6 +437,124 @@ class Game:
             ramps[int((value - low) / (high - low) * (len(ramps) - 1))]
             for value in values[::step]
         )
+
+    # -- colony life support ---------------------------------------------------
+    def _tick_life_support(self, dt_days: float) -> None:
+        """Consume and produce oxygen, food and water for the whole crew.
+
+        The loop closes through water: an ice refinery melts stored ice, an
+        electrolyser makes oxygen from water, hydroponics makes food from
+        water -- all drawing on the colony's energy cell, topped up by the
+        solar array. A shortage grinds on every crew's morale. This is why
+        selling every tonne of ice to Earth is a real decision.
+        """
+        state = self.colony.state
+        resources = state.setdefault("resources", {})
+        crew_count = sum(len(roster) for roster in self.sim.crew.values())
+        if crew_count == 0:
+            return
+
+        # The colony's solar array keeps the lights on.
+        max_energy = state.get("max_energy", 30)
+        resources["energy"] = min(max_energy, resources.get("energy", 0.0) + LIFE_SOLAR_ENERGY_PER_DAY * dt_days)
+        energy_used = 0.0
+
+        # Ice refinery: top the water tank up when it runs low.
+        water_low = 0.5 * LIFE_START_WATER
+        if resources.get("water", 0.0) < water_low and resources.get("ice", 0.0) > 0.0:
+            melt = min(LIFE_ICE_MELT_RATE_PER_DAY * dt_days,
+                       resources.get("ice", 0.0),
+                       max(0.0, water_low - resources.get("water", 0.0)) / LIFE_ICE_TO_WATER_YIELD)
+            resources["ice"] = resources.get("ice", 0.0) - melt
+            resources["water"] = resources.get("water", 0.0) + melt * LIFE_ICE_TO_WATER_YIELD
+            energy_used += 0.1 * melt
+
+        need_o2 = crew_count * LIFE_OXYGEN_PER_CREW_DAY * dt_days
+        need_food = crew_count * LIFE_FOOD_PER_CREW_DAY * dt_days
+        need_water = crew_count * LIFE_WATER_PER_CREW_DAY * dt_days
+
+        # Electrolysis: cover the oxygen need and refill the buffer toward its
+        # starting level, so a transient stall (a fleet-wide refuel, say) can
+        # actually be recovered from instead of draining the tanks forever.
+        want_o2 = need_o2 + max(0.0, LIFE_START_OXYGEN - resources.get("oxygen", 0.0))
+        spare_water = max(0.0, resources.get("water", 0.0) - need_water)
+        budget = max(0.0, resources.get("energy", 0.0))
+        made_o2 = min(want_o2,
+                      spare_water / LIFE_ELECTROLYSIS_WATER_PER_O2,
+                      budget / LIFE_ELECTROLYSIS_ENERGY_PER_O2)
+        resources["water"] = resources.get("water", 0.0) - made_o2 * LIFE_ELECTROLYSIS_WATER_PER_O2
+        resources["energy"] = resources.get("energy", 0.0) - made_o2 * LIFE_ELECTROLYSIS_ENERGY_PER_O2
+        energy_used += made_o2 * LIFE_ELECTROLYSIS_ENERGY_PER_O2
+        resources["oxygen"] = resources.get("oxygen", 0.0) + made_o2
+
+        # Hydroponics: cover the calorie need and refill the food buffer.
+        want_food = need_food + max(0.0, LIFE_START_FOOD - resources.get("food", 0.0))
+        spare_water = max(0.0, resources.get("water", 0.0) - need_water)
+        budget = max(0.0, resources.get("energy", 0.0))
+        made_food = min(want_food,
+                        spare_water / LIFE_HYDROPONICS_WATER_PER_FOOD,
+                        budget / LIFE_HYDROPONICS_ENERGY_PER_FOOD)
+        resources["water"] = resources.get("water", 0.0) - made_food * LIFE_HYDROPONICS_WATER_PER_FOOD
+        resources["energy"] = resources.get("energy", 0.0) - made_food * LIFE_HYDROPONICS_ENERGY_PER_FOOD
+        energy_used += made_food * LIFE_HYDROPONICS_ENERGY_PER_FOOD
+        resources["food"] = resources.get("food", 0.0) + made_food
+
+        # The crew breathes, eats and drinks.
+        resources["oxygen"] = max(0.0, resources.get("oxygen", 0.0) - need_o2)
+        resources["food"] = max(0.0, resources.get("food", 0.0) - need_food)
+        resources["water"] = max(0.0, resources.get("water", 0.0) - need_water)
+
+        # Shortages grind everyone down; the HUD and the audio alert pick up
+        # the flag from _life_shortage().
+        self._life_shortage_flag = (
+            resources.get("oxygen", 0.0) <= 0.0 or resources.get("food", 0.0) <= 0.0
+        )
+        if self._life_shortage_flag:
+            self.sim.apply_hardship(LIFE_SHORTAGE_MORALE_DRAIN_PER_DAY * dt_days)
+
+        # Power load feeds the ambient hum and the HUD readout.
+        reference = max(1.0, LIFE_SOLAR_ENERGY_PER_DAY * 4.0)
+        load = 0.15 + 0.6 * (energy_used / dt_days) / reference
+        self.power_load = min(1.0, max(0.05, load))
+
+    def _tick_contracts(self) -> None:
+        """Post fresh Earth orders and retire overdue ones."""
+        offer = self.contracts.maybe_offer()
+        if offer is not None and not self.headless:
+            self.say(
+                f"{offer.faction} orders {offer.tonnes:,.0f} t of {offer.resource} "
+                f"by day {offer.deadline_day:,.0f} for {offer.reward_credits:,.0f} cr.",
+                seconds=8.0,
+            )
+        for contract in self.contracts.expire_overdue():
+            if not self.headless:
+                self.say(
+                    f"{contract.faction} cancelled its order for {contract.resource} "
+                    f"-- standing {self.contracts.reputation[contract.faction]:+.0f}.",
+                    seconds=8.0,
+                )
+
+    # -- flight-orientation checklist -------------------------------------------
+    TUTORIAL_STEPS = (
+        ("dispatched", "Welcome, director. Pick a target with TAB, then press ENTER to dispatch a freighter."),
+        ("sold", "A run is on its way. Press S to sell stored ore on the Earth market -- watch the price flood."),
+        ("drilled", "Nice. Press X to switch mining policy to core drilling: fuller holds, more wear and risk."),
+        ("bought", "Press 1-4 to commission a scout, freighter, refinery or hauler once the treasury allows."),
+        ("saved", "Press F5 to quick-save. F9 loads. Keep the crews fed, paid and rested -- good luck, director."),
+    )
+
+    def _tick_tutorial(self) -> None:
+        if self._tut.get("done"):
+            self.tutorial_text = ""
+            return
+        if self.sim.missions:
+            self._tut["dispatched"] = True
+        for key, text in self.TUTORIAL_STEPS:
+            if not self._tut.get(key):
+                self.tutorial_text = text
+                return
+        self._tut["done"] = True
+        self.tutorial_text = ""
 
     def _refuel_and_redispatch(self, dt_days: float) -> None:
         """Top up docked freighters from colony energy and send them back out.
@@ -362,13 +593,68 @@ class Game:
             # Manual dispatch (ENTER) stays available at any propellant level.
             if ship.delta_v < 0.85 * self.sim.class_spec(ship.name)["delta_v"]:
                 continue
-            options = self.sim.affordable_targets(ship)
-            if not options:
+            target = self._choose_auto_target(ship)
+            if target is None:
                 continue
-            # Options come back cheapest first; send the idle freighter on the
-            # most expensive run it can still finish, so the propellant budget
-            # buys the highest-value cargo.
-            self.sim.dispatch(ship, options[-1][0])
+            self.sim.dispatch(ship, target)
+
+    def _life_ice_premium(self) -> float:
+        """Extra credits-per-tonne on ice while the pantry runs low.
+
+        Counts the tank plus the ice still in storage (melt-able), measured
+        against a full round-trip horizon so the fleet stocks up *before*
+        the shortage, not after it.
+        """
+        resources = self.colony.state.get("resources", {})
+        crew_count = sum(len(roster) for roster in self.sim.crew.values())
+        if crew_count == 0:
+            return 0.0
+        water = resources.get("water", 0.0) + LIFE_ICE_TO_WATER_YIELD * resources.get("ice", 0.0)
+        days_left = water / (crew_count * (LIFE_WATER_PER_CREW_DAY
+                                           + LIFE_OXYGEN_PER_CREW_DAY * LIFE_ELECTROLYSIS_WATER_PER_O2
+                                           + LIFE_FOOD_PER_CREW_DAY * LIFE_HYDROPONICS_WATER_PER_FOOD))
+        urgency = max(0.0, 1.0 - days_left / LIFE_ICE_HORIZON_DAYS)
+        return LIFE_ICE_PREMIUM_MAX * urgency
+
+    def _estimate_run_value(self, target_key: str, ship) -> float:
+        """Estimated value of one hold at ``target_key``, life support included.
+
+        Ice is priced at market plus the life-support premium, so a low pantry
+        outbids silver and the fleet keeps the colonists fed.
+        """
+        spec = self.sim.class_spec(ship.name)
+        payload = plan_extraction(
+            target_key,
+            self.sim.ledger,
+            self.sim.reserved.get(target_key),
+            capacity_t=ship.capacity,
+            mode=self.sim.mining_mode,
+            mine_bonus=spec["mine_bonus"] * self.sim.crew_yield_factor(ship.name),
+            hull_pct=self.sim.mining_hull(ship),
+        )
+        ice_price = self.market.price("ice") + self._life_ice_premium()
+        return sum(
+            (ice_price if ore == "ice" else self.market.price(ore)) * tonnes
+            for ore, tonnes in payload.items()
+        )
+
+    def _choose_auto_target(self, ship):
+        """Most valuable run the ship can actually finish.
+
+        Replaces the old "most expensive affordable" heuristic: value per
+        delta-v reads the same vein state the miners do, so a thinned field
+        naturally loses the ranking to fresher, richer rocks.
+        """
+        best_key = None
+        best_ratio = 0.0
+        for key, cost in self.sim.affordable_targets(ship):
+            value = self._estimate_run_value(key, ship)
+            if value <= 0.0:
+                continue
+            ratio = value / max(cost, 1.0)
+            if ratio > best_ratio:
+                best_key, best_ratio = key, ratio
+        return best_key
 
 
 def run_headless(sim_days: float, frames_per_day: int = 4, verbose: bool = True,

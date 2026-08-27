@@ -85,8 +85,11 @@ class OrbitalHUD:
         self.ops_lines = [
             Text(text="", parent=camera.ui, position=(0.485, 0.055 - i * 0.026, -0.1),
                  scale=0.62, origin=(-0.5, 0))
-            for i in range(4)
+            for i in range(7)
         ]
+        self.tutorial = Text(text="", parent=camera.ui, position=(0.0, -0.42, -0.1),
+                             scale=0.55, color=color.rgba(0.55, 0.9, 1.0, 0.95),
+                             origin=(0.0, 0))
 
     # -- helpers -------------------------------------------------------------
     def selected_target(self) -> str:
@@ -199,7 +202,27 @@ class OrbitalHUD:
             if worn else "All hulls sound"
         )
         lines[2].color = color.red if worn else color.white
-        lines[3].text = ""
+
+        crew_line = extra.get("crew_line", "")
+        lines[3].text = crew_line
+        lines[3].color = color.orange if "tired" in crew_line else color.white
+
+        weather = extra.get("weather", "")
+        lines[4].text = weather or "Space weather: quiet"
+        lines[4].color = color.red if weather.startswith("ALERT") else color.white
+
+        lines[5].text = extra.get("contract_line", "")
+        lines[5].color = color.yellow
+
+        summary = "  ".join(filter(None, (extra.get("rep_line", ""), extra.get("life_line", ""))))
+        lines[6].text = summary
+        if "ALERT" in summary:
+            lines[6].color = color.red
+        elif "LOW" in summary:
+            lines[6].color = color.orange
+        else:
+            lines[6].color = color.white
+        self.tutorial.text = extra.get("tutorial", "")
 
     def _clear_ops_panel(self) -> None:
         self.credits.text = ""
@@ -208,3 +231,4 @@ class OrbitalHUD:
             line.text = ""
         for line in self.ops_lines:
             line.text = ""
+        self.tutorial.text = ""

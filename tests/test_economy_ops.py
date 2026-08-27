@@ -18,6 +18,8 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.config import (  # noqa: E402
+    LIFE_START_FOOD,
+    LIFE_START_OXYGEN,
     MARKET_BASE_PRICES,
 
     MINING_ORES,
@@ -35,7 +37,7 @@ from src.mining import (  # noqa: E402
 )
 from src.operations import OpsSimulation  # noqa: E402
 from src.simulation.orbital_sim import Leg  # noqa: E402
-from src.simulation.bodies import BODIES  # noqa: E402
+from src.simulation.bodies import BODIES, TRADE_TARGETS  # noqa: E402
 
 
 def run_until_idle(sim: OpsSimulation, dt_days: float = 3.0, max_steps: int = 900) -> None:
@@ -471,6 +473,155 @@ def test_weather_state_survives_a_json_round_trip():
     assert restored.debris_active is True
     assert restored._debris_timer == pytest.approx(77.0)
     assert [m.to_json() for m in restored.crew["Kestrel"]] == [m.to_json() for m in sim.crew["Kestrel"]]
+
+
+# --------------------------------------------------------------------------
+# Earth faction contracts and reputation
+# --------------------------------------------------------------------------
+
+def test_contract_lifecycle_through_the_game():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.market.day = 100.0  # force the offer window open
+    game.contracts._next_offer_day = 50.0
+    offer = game.contracts.maybe_offer()
+    assert offer is not None
+    assert offer.resource in MARKET_BASE_PRICES
+    assert offer.reward_credits > 0.0
+
+    credits_before = game.credits
+    # Half the order is not enough to complete it.
+    partial = game.contracts.register_delivery({offer.resource: offer.tonnes / 2.0})
+    assert partial == []
+    assert game.contracts.active[0].progress == pytest.approx(offer.tonnes / 2.0)
+    assert game.credits == credits_before
+
+    for completed in game.contracts.register_delivery({offer.resource: offer.tonnes}):
+        game.credits += game.contracts.complete(completed)
+    assert game.credits > credits_before
+    assert game.contracts.reputation[offer.faction] == pytest.approx(12.0)
+    assert not game.contracts.active
+
+
+def test_overdue_orders_cost_reputation():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.market.day = 100.0
+    game.contracts._next_offer_day = 50.0
+    offer = game.contracts.maybe_offer()
+    assert offer is not None
+    game.market.day = offer.deadline_day + 1.0
+    overdue = game.contracts.expire_overdue()
+    assert [c.id for c in overdue] == [offer.id]
+    assert game.contracts.reputation[offer.faction] == pytest.approx(-18.0)
+    assert game.contracts.price_multiplier() < 1.0
+
+
+def test_reputation_moves_sale_proceeds():
+    from src.main import Game
+
+    low, high = Game(headless=True), Game(headless=True)
+    for faction in low.contracts.reputation:
+        low.contracts.reputation[faction] = -100.0
+        high.contracts.reputation[faction] = 100.0
+    assert high.contracts.price_multiplier() > low.contracts.price_multiplier()
+    lots = {"iron": 100.0}
+    proceeds_low, _ = low.market.sell(dict(lots))
+    proceeds_high, _ = high.market.sell(dict(lots))
+    assert proceeds_high * high.contracts.price_multiplier() > proceeds_low * low.contracts.price_multiplier()
+
+
+def test_sell_all_holds_back_the_life_support_ice_reserve():
+    from src.config import LIFE_ICE_RESERVE_T
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.colony.state["resources"]["ice"] = LIFE_ICE_RESERVE_T + 50.0
+    game.sell_all()
+    assert game.colony.state["resources"]["ice"] == pytest.approx(LIFE_ICE_RESERVE_T)
+
+
+# --------------------------------------------------------------------------
+# Colony life support
+# --------------------------------------------------------------------------
+
+def test_life_support_keeps_oxygen_and_food_up_while_ice_remains():
+    from src.main import Game
+
+    game = Game(headless=True)
+    oxygen, food = [], []
+    for _ in range(120):
+        game.update(2.0)
+        oxygen.append(game.colony.state["resources"]["oxygen"])
+        food.append(game.colony.state["resources"]["food"])
+    # Production covers the crew while the ice refinery feeds water in.
+    assert min(oxygen) > 0.5 * LIFE_START_OXYGEN
+    assert min(food) > 0.5 * LIFE_START_FOOD
+    assert game.colony.state["resources"]["ice"] < 190.0  # the refinery is eating ice
+    assert not getattr(game, "_life_shortage_flag", False)
+
+
+def test_life_support_shortage_grinds_morale():
+    from src.main import Game
+
+    game = Game(headless=True)
+    resources = game.colony.state["resources"]
+    resources.update({"oxygen": 0.0, "food": 0.0, "water": 0.0, "ice": 0.0, "energy": 0.0})
+    morale_before = game.sim.fleet_morale()
+    for _ in range(30):
+        game.update(1.0)
+    assert game._life_shortage_flag
+    assert game.sim.fleet_morale() < morale_before - 10.0
+
+
+# --------------------------------------------------------------------------
+# Value-aware auto-dispatch and the orientation checklist
+# --------------------------------------------------------------------------
+
+def test_auto_dispatch_chooses_a_target_and_skips_worked_out_veins():
+    from src.main import Game
+    from src.mining import body_fingerprint, vein_size
+
+    game = Game(headless=True)
+    ship = game.sim.ships[0]
+    assert game._choose_auto_target(ship) in TRADE_TARGETS
+
+    # Work every field to nothing: with no vein left the planned hold is
+    # empty, so the dispatcher has nothing worth flying.
+    for key in TRADE_TARGETS:
+        game.sim.ledger.extracted[key] = {
+            ore: 40.0 * vein_size(key, ore) for ore in body_fingerprint(key)
+        }
+    assert game._estimate_run_value(TRADE_TARGETS[0], ship) == pytest.approx(0.0)
+    assert game._choose_auto_target(ship) is None
+
+
+def test_tutorial_walks_the_whole_checklist(monkeypatch, tmp_path):
+    from src.game import savegame as colony_savegame
+    from src.main import Game
+
+    monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
+    game = Game(headless=True)
+    game.update(1.0)
+    # The auto-dispatcher launches a fuelled ship on its own, so the first
+    # checklist step completes without the player pressing ENTER.
+    assert game._tut["dispatched"]
+    assert "S" in game.tutorial_text
+    game.sell_all()
+    game.update(1.0)
+    assert "X" in game.tutorial_text
+    game.toggle_drill()
+    game.update(1.0)
+    assert "1-4" in game.tutorial_text
+    game.credits = 99999.0
+    game.buy_ship_class("scout")
+    game.update(1.0)
+    assert "F5" in game.tutorial_text
+    game.save_game("tutorial")
+    game.update(1.0)
+    assert game._tut["done"] and game.tutorial_text == ""
 
 
 # --------------------------------------------------------------------------
