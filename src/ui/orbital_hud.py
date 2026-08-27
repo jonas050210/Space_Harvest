@@ -148,7 +148,7 @@ class OrbitalHUD:
             eta = f"  ETA {report['eta_days']:,.0f}d" if report["status"] in ("outbound", "inbound", "pending") else ""
             hull = f"  H{report['hull']:3.0f}%" if "hull" in report else ""
             line.text = (
-                f"{report['name']:<7}{report['status']:<9}{report['at']:<21}"
+                f"{report['name']:<8}{report['status']:<9}{report['at']:<20}"
                 f"{report['delta_v_left']:>6,.0f} m/s{eta}{hull}"
             )
             line.color = (

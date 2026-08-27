@@ -2,6 +2,8 @@
 
 A compact 3-D colony-tycoon / orbital-logistics prototype. The upstream `asteroid-colony` regions are real heliocentric bodies, and freighters fly patched-conic supply chains with launch windows, delta-v budgets, capture/docking burns, layovers, and deliveries booked into the upstream colony economy.
 
+On top of the verified astrodynamics core sits a colony-operations layer: every rock has a procedural ore fingerprint whose veins deplete as you mine them, a dynamic Earth market pays (and crashes) for your ore, ships wear their hulls and can be repaired, and four ship classes turn profits into fleet growth.
+
 Read `project.md` for the full architecture, units, controls, QA results, known limits, and owner commands.
 
 ## Quick start
@@ -24,6 +26,11 @@ python3 -m venv .venv
 - O: toggle orbits
 - F: follow freighter
 - C: overview camera
+- S: sell stored ore on the Earth market (prices flood when you dump)
+- X: toggle surface scraping / core drilling (fuller holds, more wear and risk)
+- M: toggle automatic hull maintenance (bills the treasury)
+- 1–4: commission a scout / freighter / refinery / hauler
+- F5 / F9: quick-save / quick-load (`saves/` JSON)
 - Mouse wheel: zoom
 - Esc: quit
 

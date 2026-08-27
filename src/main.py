@@ -357,6 +357,11 @@ class Game:
         for ship in self.sim.ships:
             if ship.name in self.sim.missions or ship.origin != "colony":
                 continue
+            # Auto-dispatch waits for a near-full tank: launching on a sliver
+            # of propellant condemns the ship to the cheapest hop forever.
+            # Manual dispatch (ENTER) stays available at any propellant level.
+            if ship.delta_v < 0.85 * self.sim.class_spec(ship.name)["delta_v"]:
+                continue
             options = self.sim.affordable_targets(ship)
             if not options:
                 continue
@@ -366,8 +371,14 @@ class Game:
             self.sim.dispatch(ship, options[-1][0])
 
 
-def run_headless(sim_days: float, frames_per_day: int = 4, verbose: bool = True) -> Game:
-    """Drive the game loop with no window; used by the self-test and CI."""
+def run_headless(sim_days: float, frames_per_day: int = 4, verbose: bool = True,
+                 sell_period_days: float = 90.0) -> Game:
+    """Drive the game loop with no window; used by the self-test and CI.
+
+    The self-test exercises the whole economy: every ``sell_period_days`` the
+    colony sells its ore so the treasury funds maintenance and the fleet keeps
+    flying instead of decaying into a grounded state.
+    """
     game = Game(headless=True)
     dt_days = 1.0 / frames_per_day
     game.sim.warp_days_per_second = 1.0  # dt already carries the time step
@@ -376,8 +387,24 @@ def run_headless(sim_days: float, frames_per_day: int = 4, verbose: bool = True)
     game.sim.dispatch(game.sim.ships[0], "inner_belt")
     game.sim.dispatch(game.sim.ships[1], "metallic_belt")
 
+    next_sale = sell_period_days * SIM_SECONDS_PER_DAY
+    buy_index = 0
+    next_buy_check = 180.0 * SIM_SECONDS_PER_DAY
     for _ in range(int(sim_days * frames_per_day)):
         game.update(dt_days)
+        if sell_period_days and game.sim.time >= next_sale:
+            next_sale += sell_period_days * SIM_SECONDS_PER_DAY
+            game.sell_all()
+        # Reinvest profits: keep a small standing fleet growing while the
+        # treasury can cushion the bill, so the demo shows real progression.
+        if game.sim.time >= next_buy_check:
+            next_buy_check += 180.0 * SIM_SECONDS_PER_DAY
+            if len(game.sim.ships) < 6:
+                cls_key = BUY_MENU[buy_index % len(BUY_MENU)]
+                price = SHIP_CLASSES[cls_key]["price"]
+                if game.credits > price + 3000.0:
+                    buy_index += 1
+                    game.buy_ship_class(cls_key)
 
     if verbose:
         print(f"[headless] {game.frames} frames over {sim_days:,.0f} sim-days")

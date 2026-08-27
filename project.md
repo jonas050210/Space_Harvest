@@ -3,7 +3,7 @@
 Master document for **Asteroid-Colony Proto: Orbital Supply Chains**. This file intentionally contains setup, architecture, controls, QA evidence, known limits, and owner hand-off notes so the repo only needs this document plus `README.md`.
 
 Repository: https://github.com/jonas050210/asteroid-colony-proto  
-Branch used by Arena: `arena/01a0418d-asteroid-colony-proto`  
+Branch used by Arena: `arena/01a041a3-asteroid-colony-proto`  
 Target PC: i7-12700F / 32 GB / RTX 4060 Ti 8 GB.
 
 ---
@@ -35,7 +35,8 @@ If Xvfb/libGL is unavailable, `scripts/capture_frame.py` falls back to a clearly
 * Keep the virtualenv at `asteroid-colony-proto/.venv`; `.venv/` is snapshot-excluded.
 * Do not vendor binary AI/model weights. `vendor/ai-vision` is code-only.
 * Dependencies: `numpy`, `pillow`, `ursina>=6`, `pytest`; `matplotlib` is used for porkchop plots.
-* Generated artifacts are intentionally small. Final workspace excluding `.venv`: about 6.3 MB and 327 files.
+* Savegames are runtime artifacts in `saves/` (gitignored), written through the vendored upstream `savegame` slots.
+* Generated artifacts are intentionally small. Final workspace excluding `.venv`/`.git`: about 4.8 MB and 334 files.
 
 ---
 
@@ -47,14 +48,18 @@ The upstream `asteroid-colony` economic regions are modelled as real heliocentri
 | --- | --- |
 | Upstream colony game | Vendored unmodified in `src/game/` and `vendor/asteroid-colony-upstream/`; upstream 25-test script passes. |
 | Heliocentric bodies | Colony, inner belt, metallic belt, Aurelia/gas giant orbit with moon Nix, deep belt, and derelict zone with requested AU/e/i values. |
-| Astrodynamics | Numpy-only universal-variable Kepler, elements conversion, Hohmann sanity checks, single-rev Izzo Lambert, porkchop windows and secant refinement. |
+| Astrodynamics | Numpy-only universal-variable Kepler, elements conversion, Hohmann sanity checks, single-rev Izzo Lambert, porkchop windows and secant refinement. Byte-identical to the verified core; `OpsSimulation` extends it by subclassing, never by editing. |
 | Mission simulation | PENDING → OUTBOUND → capture/unload → WAITING → INBOUND → dock, with exact event jumps and separate burn billing. |
 | Economy bridge | Cargo stored through upstream logistics; overflow is reported; research points accrue per stored tonne. |
 | Fleet operations | Full round-trip affordability, stale-window re-solve, plan-cache TTL, idle scan throttle, refuel from colony energy, honest dry-drift failure mode. |
-| Rendering | Ursina sun/halo, line-mesh orbits, bodies, freighters, fading trails, camera presets/follow. |
-| HUD | Clock/warp, selected target, transfer plan, fleet status, ETA, delta-v, flight log, controls, storage and lifetime tonnage. |
+| Mining & depletion | Deterministic per-body ore fingerprints; exponential depletion ledgers with slow multi-year recovery; per-vein reservations for concurrent runs; surface scraping vs core drilling (hold-capped yield, hull wear, incident risk). |
+| Earth market | Dynamic prices (seasonal sine + mean-reverting noise), per-resource absorption so big sales flood their own price, exponential flood recovery, trend arrows and treasury sparkline in the HUD. |
+| Fleet classes & hull | Data-driven scout/freighter/refinery/hauler (hold, delta-v budget, refuel rate, wear factor, price); per-burn hull wear; low-hull dispatch interlock; credit-billed auto-repair; seeded mining incidents. |
+| Save / load | F5/F9 quick-save of the full game state (ships in flight, missions, windows, ledgers, market RNG, colony state) as JSON via the upstream savegame slots. |
+| Rendering | Ursina sun/halo, line-mesh orbits, bodies, freighters (new commissions appear automatically), fading trails, camera presets/follow. |
+| HUD | Clock/warp, selected target, transfer plan with live assay, fleet status with hull, ETA, delta-v, flight log, Earth-market panel, fleet-ops panel, storage and lifetime tonnage. |
 | Assets | Procedural OBJ/PNG only; no external binary blobs. |
-| Tooling | Test suite, screenshot capture, porkchop plot script, run log. |
+| Tooling | Test suite (65 tests), screenshot capture, porkchop plot script, run log. |
 
 ---
 
@@ -79,10 +84,25 @@ The upstream `asteroid-colony` economic regions are modelled as real heliocentri
 * O: toggle orbits.
 * F: follow ships / cycle follow target.
 * C: overview camera.
+* S: sell all marketable ore in colony storage at current market prices.
+* X: toggle mining policy between surface scraping and core drilling.
+* M: toggle automatic hull maintenance for docked ships.
+* 1 / 2 / 3 / 4: commission a scout / freighter / refinery / hauler (costs credits).
+* F5 / F9: quick-save / quick-load the full game state.
 * Mouse wheel: zoom.
 * Esc: quit.
 
-The intended loop is to watch launch windows, dispatch solvent ships, receive ore/ice/metals through the upstream storage economy, and keep freighters fuelled. If a ship cannot afford a required burn, it is left drifting and the log reports the failure honestly.
+The intended loop: watch launch windows, dispatch solvent ships, mine each
+body's ore fingerprint (the HUD assay shows shares and how much vein is left),
+haul it home, sell it on the Earth market without flooding it, repair worn
+hulls, and reinvest profits in a bigger fleet. Refinery ships mine 30% more
+per run and wear slower; haulers lift 520 t but lack the reach for the
+derelict zone; scouts are cheap long-range probes of new fields.
+
+Failure modes are honest and data-driven: ships that cannot afford a burn are
+left drifting with a log entry; hulls below 20% refuse dispatch until
+repaired; a broke colony lets its fleet decay; mined-out veins yield thin
+holds until the fields slowly recover (tau about 2,400 days).
 
 ---
 
@@ -93,10 +113,11 @@ Full output is in `run-log.txt`.
 ### Project tests
 
 ```text
-===== Thu Aug 27 04:54:08 UTC 2026 pytest tests final =====
-...........................................                              [100%]
-43 passed in 8.05s
+.................................                                  [100%]
+65 passed in ~45 s
 ```
+
+43 pin the astrodynamics core (unchanged), 22 cover the colony-operations layer: fingerprints, depletion, drilling, flooding markets, hull wear, incidents, fleet classes, savegame round trips and the mine→ship→sell→buy vertical slice through the real `Game` loop.
 
 ### Upstream `asteroid-colony` tests
 
@@ -108,35 +129,65 @@ Full output is in `run-log.txt`.
 === Result: 25 passed, 0 failed ===
 ```
 
-### Headless 6000-day simulation
+### Astrodynamics invariance
+
+Three proofs, recorded in `run-log.txt`:
+
+1. `git diff e2543e3 HEAD -- src/maths src/simulation` is **empty** — the
+   orbital core is byte-identical to the verified delivery.
+2. The current tree's base `OrbitalSimulation`, driven with the pre-operations
+   main-loop policy (refuel rate pinned to the old 22 m/s/day, scan-on-idle
+   redispatch), reproduces the recorded baseline **bit-for-bit: 18 runs,
+   4,320 t, 112,790 m/s**.
+3. The e2543e3 tree itself, replayed in a scratch copy, produces the same
+   18 / 4,320 t / 112,790 m/s on this machine today.
+
+Mass delivered by the *economy* runs differs from the baseline (11,934 t over
+84 runs in the full-economy self-test) because ships now fly richer targets,
+depletion thins old veins, and incidents occasionally bite — that is the new
+layer working, not drift.
+
+### Headless 6000-day simulation (full economy)
+
+The self-test now plays the whole loop: it sells ore every 90 days and
+reinvests profits into new ship classes while the treasury stays cushioned.
 
 ```text
 [headless] 24000 frames over 6,000 sim-days
-  Kestrel pending  Inner Belt Field         6,974 m/s left
-  Petrel  pending  Inner Belt Field         6,986 m/s left
-  runs completed : 18
-  mass delivered : 4,320 t
-  delta-v spent  : 112,790 m/s
-  deliveries into colony economy: 18
-  colony storage : {'used': 615.0, 'capacity': 1500, 'delivered': 850.0}
-  research points: 212.5
+  Kestrel waiting  Inner Belt Field       11,832 m/s left   hull  92.9%
+  Petrel  parked   Colony Hub             23,059 m/s left   hull 100.0%
+  Harrier inbound  Deep Belt Outpost      11,614 m/s left   hull  74.2%
+  ...
+  runs completed : 84
+  mass delivered : 11,934 t
+  deliveries into colony economy: 84
+  colony storage : {'used': 364.3, 'capacity': 1500, 'delivered': 11,832.8}
+  research points: 2,958.2
+  ore mined      : 11,934 t   incidents: 0
+  treasury       : 393,585 cr
+destination mix: Aurelia 18, Metallic Belt Field 10, Deep Belt Outpost 6
+fleet: Kestrel/Petrel/Osprey (freighter), Harrier (scout), Falcon (refinery), Condor (hauler)
 ```
 
 ### Capture and porkchop artifacts
 
 ```text
-[capture] wrote /home/user/asteroid-colony-proto/logs/screenshot.png (91782 bytes)
-[capture] frames=700 shots=1 runs=34 delivered=8160t fallback=1
+[capture] wrote /home/user/asteroid-colony-proto/logs/screenshot.png (80941 bytes)
+[capture] frames=700 shots=1 runs=8 delivered=1434t fallback=1
 wrote logs/porkchop.png
 ```
+
+The windowed Ursina path (scene construction, HUD panels, buying a ship
+mid-game so its mesh appears, quick-save/quick-load with mesh pruning) is
+exercised with `Ursina(window_type='none')` headless boots.
 
 ### Prune / cap check
 
 ```text
-du excluding .venv: 6.1M
-file count excluding .venv: 314
+du excluding .venv and .git: 4.8M
+file count excluding .venv and .git: 334
 remaining project caches: 0
-src/game diff vs upstream excluding caches:
+src/game diff vs upstream excluding caches: (empty — vendored code untouched)
 ```
 
 ---
@@ -144,7 +195,10 @@ src/game diff vs upstream excluding caches:
 ## 7. Known limits
 
 * Lambert is single-revolution only; multi-revolution branches are future work.
-* Economy balancing is prototype-level; storage can fill quickly and overflow is shown rather than hidden.
+* Colony energy production is not ticked by the orbital loop, so refuelling bills energy that floors at 0; with a large fleet the energy ledger is decorative rather than binding.
+* Vein recovery is slow (e-folding time about 2,400 days); a fully mined-out field yields thin holds until then. The market eventually prices around it, but a mono-crop economy can stagnate.
+* Auto-dispatch waits for a near-full tank and prefers the most expensive affordable run, so the inner belt has become an early-game field; the idle scan may look "lazy" while a ship tops up.
+* The savegame stores full RNG state (market, incidents); replaying a save is deterministic, which is intended for testing but means saved "luck" repeats.
 * Windowed screenshot capture on headless Linux needs host GL/Xvfb packages. The Arena apt mirror was unreachable during final verification, so the fallback screenshot was used in this sandbox.
 * `AI-Vision-Lab` is included as code only; scanner gameplay hooks are not enabled yet.
 

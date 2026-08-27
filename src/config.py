@@ -55,7 +55,12 @@ SHIP_CARGO_CAPACITY = 240    # tonnes per run
 # Docked freighters regenerate propellant at this rate (m/s per sim-day),
 # drawn from colony energy. Without it a fleet grounds itself after two runs
 # and the supply chain stops.
-SHIP_REFUEL_RATE = 22.0
+SHIP_REFUEL_RATE = 120.0
+# Raised from 22 when the economy layer landed: at 22 m/s per day a docked
+# freighter could only afford the cheapest hop by the time the 30-day idle
+# scan re-dispatched it, so fleets were trapped flying inner-belt runs
+# forever. At 120 a ship tops up in about half a year of layover, which
+# matches the natural rhythm of window waits and lets deep fields open up.
 SHIP_REFUEL_ENERGY_PER_MS = 0.004  # colony energy units per m/s restored
 SHIP_ISP = 3200.0            # s, electric propulsion flavour
 
@@ -66,13 +71,13 @@ SHIP_ISP = 3200.0            # s, electric propulsion flavour
 # hold volume, never a physics discount on the conics themselves.
 SHIP_CLASSES = {
     "scout":     {"name": "Scout",     "capacity": 120.0, "delta_v": 30.0e3, "price": 2500.0,
-                  "refuel_rate": 26.0, "wear_factor": 0.85, "mine_bonus": 1.0},
+                  "refuel_rate": 130.0, "wear_factor": 0.85, "mine_bonus": 1.0},
     "freighter": {"name": "Freighter", "capacity": SHIP_CARGO_CAPACITY, "delta_v": SHIP_START_DELTA_V,
                   "price": 4500.0, "refuel_rate": SHIP_REFUEL_RATE, "wear_factor": 1.0, "mine_bonus": 1.0},
     "refinery":  {"name": "Refinery",  "capacity": 260.0, "delta_v": 24.0e3, "price": 7500.0,
-                  "refuel_rate": 24.0, "wear_factor": 0.70, "mine_bonus": 1.3},
+                  "refuel_rate": 120.0, "wear_factor": 0.70, "mine_bonus": 1.3},
     "hauler":    {"name": "Hauler",    "capacity": 520.0, "delta_v": 21.0e3, "price": 9000.0,
-                  "refuel_rate": 30.0, "wear_factor": 1.10, "mine_bonus": 1.0},
+                  "refuel_rate": 150.0, "wear_factor": 1.10, "mine_bonus": 1.0},
 }
 DEFAULT_SHIP_CLASS = "freighter"
 FLEET_NAME_POOL = ("Kestrel", "Petrel", "Harrier", "Osprey", "Falcon", "Condor",

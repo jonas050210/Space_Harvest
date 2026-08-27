@@ -361,6 +361,10 @@ class OpsSimulation(OrbitalSimulation):
         sim.pending_deliveries = []
         sim.ship_class = {}
         sim.hull = {}
+        # Per-instance knobs normally assigned in __init__; __new__ skips it.
+        sim.incident_chance_scrape = INCIDENT_CHANCE_SCRAPE
+        sim.incident_chance_drill = INCIDENT_CHANCE_DRILL
+        sim.hull_critical_pct = HULL_CRITICAL_PCT
         sim.mining_mode = data["mining_mode"]
         sim.ledger = YieldLedger.from_json(data["ledger"])
         sim.reserved = {body: {ore: float(t) for ore, t in slot.items()}

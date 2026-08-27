@@ -5,3 +5,4 @@ logs/*.png
 logs/*.jpg
 *.zip
 .env
+saves/

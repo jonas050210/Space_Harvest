@@ -408,3 +408,56 @@ project.md
 remaining project caches: 0
 du excluding .venv: 6.3M
 file count excluding .venv: 322
+
+# =============================================================
+# run-log.txt — economy-layer session (captured 2026-08-27 05:51 UTC)
+# Branch: arena/01a041a3-asteroid-colony-proto
+# Scope: mining fingerprints/depletion, Earth market, fleet classes,
+#        hull wear/maintenance, save/load, HUD market+ops panels.
+# =============================================================
+
+# 1) project tests (43 orbital-core + 22 colony-operations)
+$ python -m pytest tests/ -q
+65 passed in 46.55s
+
+# 2) upstream asteroid-colony tests
+$ python vendor/asteroid-colony-upstream/test_overall.py
+=== Result: 25 passed, 0 failed ===
+
+# 3) astrodynamics invariance: current tree, old policy, pinned to the
+#    pre-economy refuel rate; src/maths + src/simulation diff vs e2543e3
+#    is empty; the e2543e3 tree itself reproduces the recorded baseline.
+[parity] runs completed : 18 (baseline: 18)
+[parity] mass delivered : 4,320 t (baseline: 4,320 t)
+[parity] delta-v spent  : 112,790 m/s (baseline: 112,790 m/s)
+src/maths + src/simulation diff vs e2543e3 (must be empty):
+0
+
+# 4) full-economy self-test (sells every 90 d, reinvests in ship classes)
+$ python -m src.main --headless --sim-days 6000
+  Petrel  parked   Colony Hub              23,059 m/s left   hull 100.0%
+  Harrier inbound  Deep Belt Outpost       11,614 m/s left   hull  74.2%
+  Osprey  parked   Colony Hub              11,469 m/s left   hull 100.0%
+  Falcon  inbound  Metallic Belt Field     12,192 m/s left   hull  87.8%
+  Condor  inbound  Metallic Belt Field     11,128 m/s left   hull  80.8%
+  runs completed : 84
+  mass delivered : 11,934 t
+  delta-v spent  : 1,467,051 m/s
+  deliveries into colony economy: 84
+  colony storage : {'used': 364.320234177281, 'capacity': 1500, 'delivered': 11832.818005943145}
+  research points: 2,958.2
+  ore mined      : 11,934 t   incidents: 0
+  market day 6,000 (cr/t): ice 6.7, iron 18.0, silver 43.4, gold 80.4, platinum 214.7, components 54.0, electronics 135.5
+  treasury       : 393,585 cr
+
+# 5) capture + porkchop artifacts (fallback render: no X/GL in sandbox)
+$ python scripts/capture_frame.py
+[capture] wrote /home/user/asteroid-colony-proto/logs/screenshot.png (80941 bytes)
+[capture] frames=700 shots=1 runs=8 delivered=1434t fallback=1
+$ python scripts/plot_porkchop.py metallic_belt logs/porkchop.png
+wrote logs/porkchop.png
+
+# 6) workspace prune check
+du excluding .venv and .git: 4.8M
+file count excluding .venv and .git: 334
+remaining project caches: 0
