@@ -59,6 +59,72 @@ SHIP_REFUEL_RATE = 22.0
 SHIP_REFUEL_ENERGY_PER_MS = 0.004  # colony energy units per m/s restored
 SHIP_ISP = 3200.0            # s, electric propulsion flavour
 
+# --- fleet classes (colony operations layer) -------------------------------
+# Data-driven ship classes. The default class reproduces the verified baseline
+# freighter exactly, so the starting fleet flies identical missions to before.
+# Delta-v differences are honest: a class gets more/less propellant budget and
+# hold volume, never a physics discount on the conics themselves.
+SHIP_CLASSES = {
+    "scout":     {"name": "Scout",     "capacity": 120.0, "delta_v": 30.0e3, "price": 2500.0,
+                  "refuel_rate": 26.0, "wear_factor": 0.85, "mine_bonus": 1.0},
+    "freighter": {"name": "Freighter", "capacity": SHIP_CARGO_CAPACITY, "delta_v": SHIP_START_DELTA_V,
+                  "price": 4500.0, "refuel_rate": SHIP_REFUEL_RATE, "wear_factor": 1.0, "mine_bonus": 1.0},
+    "refinery":  {"name": "Refinery",  "capacity": 260.0, "delta_v": 24.0e3, "price": 7500.0,
+                  "refuel_rate": 24.0, "wear_factor": 0.70, "mine_bonus": 1.3},
+    "hauler":    {"name": "Hauler",    "capacity": 520.0, "delta_v": 21.0e3, "price": 9000.0,
+                  "refuel_rate": 30.0, "wear_factor": 1.10, "mine_bonus": 1.0},
+}
+DEFAULT_SHIP_CLASS = "freighter"
+FLEET_NAME_POOL = ("Kestrel", "Petrel", "Harrier", "Osprey", "Falcon", "Condor",
+                   "Raven", "Heron", "Skua", "Gannet", "Tern", "Egret")
+
+# --- credits (earned by selling ore on the Earth market) --------------------
+START_CREDITS = 600.0
+
+# --- hull wear & maintenance ------------------------------------------------
+HULL_MAX_PCT = 100.0
+HULL_MIN_PCT = 5.0             # ships never become unrecoverable wrecks
+HULL_CRITICAL_PCT = 20.0       # dispatch refused below this (safety interlock)
+HULL_WEAR_PCT_PER_MS = 0.0025  # a ~14 km/s round trip costs ~35% hull
+HULL_REPAIR_RATE_PCT_PER_DAY = 4.0
+HULL_REPAIR_COST_PER_PCT = 12.0  # credits per percentage point restored
+
+# --- mining: ore fingerprints, depletion, extraction modes -------------------
+MINING_SEED = 20260826         # combined with the body key, deterministic
+MINING_ORES = ("ice", "iron", "silver", "gold", "platinum", "components", "electronics")
+# Vein size per ore in tonnes: after extracting one vein-size the yield is at
+# 1/e, forcing expansion to fresh rocks while slow recovery keeps the game
+# from dead-ending.
+MINING_VEIN_SIZE_T = {"ice": 1200.0, "iron": 1600.0, "silver": 700.0,
+                      "gold": 450.0, "platinum": 300.0, "components": 500.0, "electronics": 250.0}
+MINING_DRILL_YIELD_BONUS = 1.6   # core drilling multiplier per run
+MINING_DRILL_WEAR_PCT = 6.0      # hull cost of drilling on every drilled run
+MINING_LOW_HULL_YIELD_PCT = 40.0  # below this hull %, yield scales with hull
+MINING_RECOVERY_TAU_DAYS = 2400.0  # e-folding time for depleted veins to recover
+INCIDENT_CHANCE_SCRAPE = 0.02      # per capture
+INCIDENT_CHANCE_DRILL = 0.09       # per capture while core drilling
+INCIDENT_LOW_HULL_FACTOR = 1.2     # extra chance = factor * max(0, 40-hull)/100
+INCIDENT_CARGO_LOSS = 0.35         # fraction of the delivery lost to an incident
+
+# --- Earth market: dynamic pricing ------------------------------------------
+MARKET_BASE_PRICES = {  # credits per tonne
+    "ice": 8.0, "iron": 12.0, "silver": 40.0, "gold": 90.0,
+    "platinum": 220.0, "components": 65.0, "electronics": 160.0,
+}
+# Tonnes the Earth market absorbs before the price visibly sags; rare ores
+# flood much faster, so dumping a hauler load of platinum crashes its price.
+MARKET_ABSORPTION_T = {"ice": 400.0, "iron": 320.0, "silver": 140.0, "gold": 60.0,
+                       "platinum": 30.0, "components": 80.0, "electronics": 40.0}
+MARKET_FLOOD_HALF_LIFE_DAYS = 30.0
+MARKET_SEASONAL_AMPLITUDE = 0.22
+MARKET_SEASONAL_PERIOD_DAYS = {"ice": 240.0, "iron": 300.0, "silver": 360.0,
+                               "gold": 420.0, "platinum": 480.0, "components": 390.0, "electronics": 450.0}
+MARKET_NOISE_SIGMA = 0.05           # random-walk strength, per sqrt(day)
+MARKET_NOISE_MEAN_REVERSION = 0.02  # per day toward demand 1.0
+MARKET_PRICE_FLOOR_FRACTION = 0.15  # price never drops below this share of base
+MARKET_HISTORY_SAMPLE_DAYS = 2.0
+MARKET_HISTORY_POINTS = 240
+
 # --- window search ---------------------------------------------------------
 WINDOW_GRID_DEPART = 72
 WINDOW_GRID_TOF = 30
