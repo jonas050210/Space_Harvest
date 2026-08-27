@@ -136,6 +136,8 @@ class Game:
         self._window_fired_day: dict[str, float] = {}
         self._window_dep_day: dict[str, float] = {}
         self._camera_goal = None
+        self._windows_board: list[tuple[str, float, bool]] = []
+        self._board_frame = 0
         # Jump-to-event: (label, absolute sim time) the warp is racing toward.
         self._jump_target: tuple[str, float] | None = None
         self._jump_warp_restore: float | None = None
@@ -285,8 +287,11 @@ class Game:
             else:
                 self.update_camera()
         if self.hud is not None:
+            self._update_windows_board()
             self.hud.update(self.sim, self.colony.summary(), self._current_message(),
                             extra=self._ops_hud_data())
+            if self.scene is not None:
+                self.scene.set_reticle(self.hud.selected_target(), self.sim)
             if self.sim.log:
                 self.hud.ticker.text = f"tail  {self.sim.log[-1].text[:120]}"[:130]
 
@@ -479,11 +484,33 @@ class Game:
             "life_line": self._life_hud_line(),
             "window_line": self.window_line_text,
             "window_open": self.window_is_open,
+            "windows_board": self._windows_board,
             "depot_line": self._depot_hud_line(),
             "depot_hint": self._depot_hint_line(),
             "tutorial": self.tutorial_text,
             "power_load": self.power_load,
         }
+
+    def _update_windows_board(self) -> None:
+        """Soonest-next launch windows across the whole network.
+
+        Throttled: a full-network solve is only expensive the first time
+        (the window cache holds afterwards).
+        """
+        self._board_frame += 1
+        if self._board_frame % 45 != 1 and self._windows_board:
+            return
+        rows: list[tuple[str, float, bool]] = []
+        for key in self.sim.trade_targets:
+            window = self.sim.launch_window("colony", key)
+            name = self.sim.bodies[key].name
+            if window is None:
+                rows.append((name, float("inf"), False))
+                continue
+            days = (window.departure_time - self.sim.time) / SIM_SECONDS_PER_DAY
+            rows.append((name, days, days <= 1.0))
+        rows.sort(key=lambda row: row[1])
+        self._windows_board = rows
 
     def _crew_hud_line(self) -> str:
         morale = self.sim.fleet_morale()

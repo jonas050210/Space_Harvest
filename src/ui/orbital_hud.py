@@ -90,6 +90,13 @@ class OrbitalHUD:
         self.tutorial = Text(text="", parent=camera.ui, position=(0.0, -0.42, -0.1),
                              scale=0.55, color=color.rgba(0.55, 0.9, 1.0, 0.95),
                              origin=(0.0, 0))
+        self.board_header = Text(text="NEXT WINDOWS", parent=camera.ui, position=(0.485, -0.165, -0.1),
+                                 scale=0.62, color=color.yellow, origin=(-0.5, 0))
+        self.board_lines = [
+            Text(text="", parent=camera.ui, position=(0.485, -0.195 - i * 0.024, -0.1),
+                 scale=0.58, origin=(-0.5, 0))
+            for i in range(6)
+        ]
         self.ticker = Text(text="", parent=camera.ui, position=(0.0, -0.51, -0.1),
                            scale=0.5, color=color.rgba(0.75, 0.85, 0.95, 0.9),
                            origin=(0.0, 0))
@@ -173,9 +180,13 @@ class OrbitalHUD:
         for line, report in zip(self.fleet_lines, sim.fleet_report()):
             eta = f"  ETA {report['eta_days']:,.0f}d" if report["status"] in ("outbound", "inbound", "pending") else ""
             hull = f"  H{report['hull']:3.0f}%" if "hull" in report else ""
+            bar = ""
+            if "dv_max" in report:
+                filled = int(round(5.0 * report["delta_v_left"] / max(1.0, report["dv_max"])))
+                bar = " " + "#" * filled + "." * (5 - filled)
             line.text = (
-                f"{report['name']:<8}{report['status']:<9}{report['at']:<20}"
-                f"{report['delta_v_left']:>6,.0f} m/s{eta}{hull}"
+                f"{report['name']:<8}{report['status']:<9}{report['at']:<18}"
+                f"{report['delta_v_left']:>6,.0f}{bar}{eta}{hull}"
             )
             line.color = (
                 color.orange if report["status"] in ("outbound", "inbound")
@@ -257,6 +268,20 @@ class OrbitalHUD:
         if pending_line:
             lines[5].text = f"{lines[5].text}  |  {pending_line}"
             lines[5].color = color.orange
+
+        board = extra.get("windows_board") or []
+        for line, (name, days, is_open) in zip(self.board_lines, board):
+            if is_open:
+                line.text = f"GO  {name}"
+                line.color = color.rgb(0.45, 1.0, 0.55)
+            elif days == days:  # finite
+                line.text = f"    {name:<20}{days:>6,.0f} d"
+                line.color = color.white
+            else:
+                line.text = f"    {name:<20}  no window"
+                line.color = color.rgba(0.6, 0.65, 0.75, 0.9)
+        for line in self.board_lines[len(board):]:
+            line.text = ""
 
         depot_line = extra.get("depot_line", "")
         lines[7].text = "  ".join(filter(None, (depot_line, extra.get("depot_hint", ""))))

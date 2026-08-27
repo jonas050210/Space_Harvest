@@ -192,6 +192,8 @@ class OpsSimulation(OrbitalSimulation):
         self.crew: dict[str, list[CrewMember]] = {}
         #: body key -> refuel depot (player-built)
         self.depots: dict[str, Depot] = {}
+        #: the network this campaign flies (extra bodies, e.g. a comet)
+        self.trade_targets: tuple[str, ...] = tuple(TRADE_TARGETS)
         #: colony-side botanists (they work the hydroponics racks, not ships)
         self.botanists = 0
         # Gravitational perturbation clock: this sim owns its own body table,
@@ -275,6 +277,18 @@ class OpsSimulation(OrbitalSimulation):
         factor = self.class_spec(ship.name)["wear_factor"]
         current = self.hull.get(ship.name, HULL_MAX_PCT)
         self.hull[ship.name] = max(HULL_MIN_PCT, current - dv_ms * HULL_WEAR_PCT_PER_MS * factor)
+
+    def affordable_targets(self, ship: Ship, margin: float = 1.15) -> list[tuple[str, float]]:
+        """Campaign-network override of the base affordability scan."""
+        affordable: list[tuple[str, float]] = []
+        for key in self.trade_targets:
+            if key == ship.origin:
+                continue
+            cost = self.round_trip_cost_ms(ship.origin, key)
+            if cost is not None and cost * margin <= ship.delta_v:
+                affordable.append((key, cost))
+        affordable.sort(key=lambda item: item[1])
+        return affordable
 
     def refuel_docked_fleet(self, dt_days: float) -> float:
         """Per-class refuel rates; otherwise identical to the base rule."""
@@ -897,6 +911,7 @@ class OpsSimulation(OrbitalSimulation):
         report["class"] = self.ship_class.get(ship.name, DEFAULT_SHIP_CLASS)
         report["hull"] = self.hull.get(ship.name, HULL_MAX_PCT)
         report["capacity"] = ship.capacity
+        report["dv_max"] = self.class_spec(ship.name)["delta_v"]
         return report
 
     # -- persistence ---------------------------------------------------------
@@ -1021,6 +1036,7 @@ class OpsSimulation(OrbitalSimulation):
         sim._multi_rev_min_saving = PLANNING_MULTI_REV_MIN_SAVING
         sim.crew = {}
         sim.last_active = {}
+        sim.trade_targets = tuple(TRADE_TARGETS)
         sim.depots = {d["body_key"]: Depot.from_json(d) for d in data.get("depots", [])}
         sim.botanists = int(data.get("botanists", 0))
         sim._perturb_timer = float(data.get("perturb_timer",

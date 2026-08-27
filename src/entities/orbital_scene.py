@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 import os
 import random
+import time
 
 from ursina import Entity, Mesh, Texture, Vec3, color
 
@@ -47,6 +48,11 @@ class OrbitalScene:
         self.labels: dict[str, Entity] = {}
         self.orbits_visible = True
         self._asteroid_scatter: list[Entity] = []
+        ring = _tex("select_ring.png")
+        self.reticle = Entity(parent=self.parent, model="quad", scale=3.0,
+                              texture=ring, billboard=True, unlit=True,
+                              color=color.rgba(0.45, 0.92, 1.0, 0.9),
+                              enabled=False)
         self.build()
 
     # -- construction --------------------------------------------------------
@@ -142,6 +148,17 @@ class OrbitalScene:
                 rock.texture = texture
             rock.position = Vec3(x, z, -y) * SCENE_UNITS_PER_AU
             self._asteroid_scatter.append(rock)
+
+    def set_reticle(self, key: str | None, sim) -> None:
+        """Park the selection ring on the targeted body (or hide it)."""
+        entity = self.body_entities.get(key) if key else None
+        if entity is None:
+            self.reticle.enabled = False
+            return
+        self.reticle.enabled = True
+        self.reticle.position = entity.position
+        pulse = 1.0 + 0.10 * math.sin(time.time() * 4.0)
+        self.reticle.scale = 2.6 * entity.scale_x * pulse
 
     def make_ship(self, name: str, class_key: str | None = None) -> Freighter:
         ship = Freighter(name, parent=self.parent)
