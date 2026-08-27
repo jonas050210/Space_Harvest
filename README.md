@@ -1,6 +1,6 @@
 # Asteroid-Colony Proto
 
-A compact 3-D colony-tycoon / orbital-logistics prototype. The upstream `asteroid-colony` regions are real heliocentric bodies, and freighters fly patched-conic supply chains with launch windows, delta-v budgets, capture/docking burns, layovers, and deliveries booked into the upstream colony economy.
+**Orbital Supply Chains** is a compact, stylised 3-D launch-window game: real planets on real heliocentric orbits, a glowing sun, a scattered asteroid belt and a starfield sky -- all generated procedurally, no binary assets. Wait for the window (the HUD announces it and chimes), click a planet to target it, dispatch, and keep the colony breathing. The astrodynamics underneath is real patched-conic mechanics: launch windows, delta-v budgets, capture burns, layovers, multi-revolution slow routes, and deliveries booked into the upstream colony economy.
 
 The orbital layer runs patched-conic transfers solved with Izzo's universal Lambert algorithm, including its multi-revolution branches (slow, propellant-cheap routes that the planner only picks when they genuinely pay).
 
@@ -32,7 +32,9 @@ python3 -m venv .venv
 - X: toggle surface scraping / core drilling (fuller holds, more wear and risk)
 - M: toggle automatic hull maintenance (bills the treasury)
 - 1–4: commission a scout / freighter / refinery / hauler
+- Click: select the planet under the cursor as transfer target
 - B / V: accept / decline the oldest Earth offer
+- R: build / upgrade a refuel depot at the selected body
 - G / H: hire a miner / dismiss the unhappiest crew member (Z: botanist)
 - J: jump the warp to the next interesting event (windows, ETAs, deadlines)
 - N: mute audio

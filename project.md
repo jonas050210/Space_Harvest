@@ -63,7 +63,9 @@ The upstream `asteroid-colony` economic regions are modelled as real heliocentri
 | Gravitational perturbations | Every 500-950 days a passing body shifts one belt orbit slightly; the campaign's own body table changes, window caches drop and the fleet re-plans; the verified module constants and tests are untouched. |
 | Jump-to-event | `J` cycles upcoming moments (window openings, ETAs, flare warnings, order deadlines) and races the warp to them, restoring the old warp on arrival; a bottom ticker streams the latest log entry. |
 | Save / load | F5/F9 quick-save of the full game state (ships in flight, missions, windows, ledgers, market RNG, colony state, crews, weather, contracts) as JSON via the upstream savegame slots. |
-| Rendering | Ursina sun/halo, line-mesh orbits, bodies, freighters (new commissions appear automatically), fading trails, camera presets/follow. |
+| Rendering | Ursina scene: inverted starfield-sprite skybox, layered sun corona billboards, unlit textured planets with billboard name tags, double ring on Aurelia, a 240-rock scattered belt, stylised multi-part freighters with per-class hull tints and textured engine flares, fading trails, smoothed chase camera, click-to-target picking. |
+| Game shell | Title screen with cinematic drift (ENTER launches), ESC pause card, toast stack, launch-window GO moment (blinking banner + chime when the selected window opens), launch-window countdown line. |
+| Refuel depots | Player-built ISRU stations at trade bodies (R): delta-v tank + per-level generation; depot-assisted dispatch lends the shortfall against depot stock and ships draw the ride home at docking, unlocking runs no single tank could afford. |
 | HUD | Clock/warp, selected target, transfer plan with live assay, fleet status with hull, ETA, delta-v, flight log, Earth-market panel, fleet-ops panel, storage and lifetime tonnage. |
 | Assets | Procedural OBJ/PNG only; no external binary blobs. |
 | Tooling | Test suite (65 tests), screenshot capture, porkchop plot script, run log. |
@@ -85,8 +87,9 @@ The upstream `asteroid-colony` economic regions are modelled as real heliocentri
 
 ## 5. Gameplay and controls
 
-* TAB: cycle target.
-* ENTER: dispatch an idle freighter to the selected target.
+* TAB: cycle target. Left-click: pick the planet under the cursor.
+* ENTER: dispatch an idle freighter to the selected target (the HUD banner
+  and chime announce when the window opens).
 * `[` / `]`: decrease/increase warp.
 * O: toggle orbits.
 * F: follow ships / cycle follow target.
@@ -95,6 +98,7 @@ The upstream `asteroid-colony` economic regions are modelled as real heliocentri
 * X: toggle mining policy between surface scraping and core drilling.
 * M: toggle automatic hull maintenance for docked ships.
 * 1 / 2 / 3 / 4: commission a scout / freighter / refinery / hauler (costs credits).
+* R: build / upgrade a refuel depot at the selected body.
 * B / V: accept / decline the oldest Earth offer; G hires a miner, H dismisses the unhappiest crew member, Z hires a colony botanist.
 * J: jump the warp to the next upcoming event; N: mute audio.
 * F5 / F9: quick-save / quick-load the full game state.
