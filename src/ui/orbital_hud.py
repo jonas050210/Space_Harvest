@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from ursina import Entity, Text, Vec3, camera, color
 
-from ..config import SHIP_CARGO_CAPACITY, SIM_SECONDS_PER_DAY
+from ..config import QUALITY_ORDER, SHIP_CARGO_CAPACITY, SIM_SECONDS_PER_DAY
 from ..simulation.bodies import BODIES
 
 
@@ -317,63 +317,247 @@ class OrbitalHUD:
 
 
 class MenuOverlay:
-    """Title and pause overlays for the windowed game.
+    """Keyboard-navigable title / pause / settings / how-to-play screens.
 
     Kept inside the HUD module on purpose: same Ursina primitives, same
-    styling, no second UI toolkit. The title screen shows over a slowly
-    drifting camera; ESC in play toggles the pause card.
+    styling, no second UI toolkit. ``handle(key)`` translates raw keys into
+    semantic action tokens the Game layer executes.
     """
 
-    def __init__(self):
-        # -- title card ------------------------------------------------------
-        self.title_panel = Entity(parent=camera.ui, model="quad",
-                                  color=color.rgba(0.02, 0.03, 0.06, 0.88),
-                                  scale=(1.2, 1.2), z=0.5)
+    MAIN_ITEMS = ("NEW GAME", "CONTINUE", "LOAD LAST SAVE", "SETTINGS", "HOW TO PLAY", "QUIT")
+    PAUSE_ITEMS = ("RESUME", "SAVE", "LOAD LAST SAVE", "SETTINGS", "QUIT TO TITLE")
+    HOWTO_PAGES = (
+        ("THE LOOP", (
+            "TAB or click a planet to target it.",
+            "Watch NEXT WINDOWS: every rock moves on a real orbit, so rides",
+            "are only cheap when the geometry lines up. The HUD chimes and",
+            "blinks LAUNCH WINDOW OPEN when it is time -- press ENTER.",
+            "",
+            "Warp with [ and ]. Sell ore with S. Watch the price flood:",
+            "dump one market and its price sags for a while.",
+        )),
+        ("FUEL AND THE FAR RING", (
+            "Every burn costs delta-v from a finite tank; refuelling at the",
+            "colony takes days. Press R to build a refuel depot at any planet:",
+            "its ISRU plant makes propellant from local ice, and ships dock",
+            "there to top up for the ride home.",
+            "",
+            "Deep runs (Deep Belt, the Derelict Zone, Comet Vigil) are depot",
+            "runs. A depot plus a scout opens the whole system.",
+        )),
+        ("PEOPLE AND PARTS", (
+            "Crews get tired and sullen: tired crews refuse to fly and crash",
+            "drills. They earn morale from captures and payday.",
+            "",
+            "T buys Drop Tanks, Y a Deep Drill, U Crew Quarters, and P a",
+            "depot drone bay -- prices swing with the seasons, so buy cheap.",
+            "Drone bays work a waiting ship's hold full automatically.",
+        )),
+    )
+
+    def __init__(self, continue_available: bool = False):
+        self.screen = "main"          # main | settings | howto | pause
+        self.cursor = 0
+        self.howto_page = 0
+        self.continue_available = continue_available
+        self.settings = {"quality": "medium", "muted": False, "glide": True}
+        self.on_settings_changed = None   # callable(dict) set by the game
+
+        self.panel = Entity(parent=camera.ui, model="quad",
+                            color=color.rgba(0.02, 0.03, 0.06, 0.90),
+                            scale=(0.9, 1.0), z=0.5)
         self.title = Text(text="ORBITAL SUPPLY CHAINS", parent=camera.ui,
-                          position=(0.0, 0.16, -0.4), scale=2.6, origin=(0.0, 0),
+                          position=(0.0, 0.30, -0.4), scale=2.4, origin=(0.0, 0),
                           color=color.rgb(0.5, 0.9, 1.0))
         self.subtitle = Text(text="wait for the window  --  mine the belt  --  keep the colony alive",
-                             parent=camera.ui, position=(0.0, 0.08, -0.4),
-                             scale=0.75, origin=(0.0, 0), color=color.rgba(0.8, 0.88, 1.0, 0.9))
-        self.title_prompt = Text(text="ENTER  launch         F9  load save         ESC  quit",
-                                 parent=camera.ui, position=(0.0, -0.06, -0.4),
-                                 scale=0.8, origin=(0.0, 0), color=color.yellow)
-        self.title_hint = Text(text="a stylised launch-window game: every rock is a real heliocentric orbit",
-                               parent=camera.ui, position=(0.0, -0.14, -0.4),
-                               scale=0.55, origin=(0.0, 0),
-                               color=color.rgba(0.6, 0.7, 0.85, 0.85))
-        # -- pause card --------------------------------------------------------
-        self.pause_panel = Entity(parent=camera.ui, model="quad",
-                                  color=color.rgba(0.02, 0.03, 0.06, 0.82),
-                                  scale=(0.7, 0.5), z=0.5, enabled=False)
-        self.pause_title = Text(text="PAUSED", parent=camera.ui, position=(0.0, 0.08, -0.4),
-                                scale=1.8, origin=(0.0, 0), color=color.rgb(1.0, 0.85, 0.4))
-        self.pause_hint = Text(text="ESC resume    F5 save    F9 load    Q quit",
-                               parent=camera.ui, position=(0.0, -0.02, -0.4),
-                               scale=0.75, origin=(0.0, 0), color=color.white)
-        self.show_title()
+                             parent=camera.ui, position=(0.0, 0.235, -0.4),
+                             scale=0.7, origin=(0.0, 0), color=color.rgba(0.8, 0.88, 1.0, 0.9))
+        self.items: list[Text] = [
+            Text(text="", parent=camera.ui, position=(0.0, 0.10 - i * 0.05, -0.4),
+                 scale=0.9, origin=(0.0, 0), color=color.white)
+            for i in range(max(len(self.MAIN_ITEMS), len(self.PAUSE_ITEMS)))
+        ]
+        self.settings_lines = [
+            Text(text="", parent=camera.ui, position=(0.0, 0.10 - i * 0.05, -0.4),
+                 scale=0.85, origin=(0.0, 0), color=color.white)
+            for i in range(4)
+        ]
+        self.howto_title = Text(text="", parent=camera.ui, position=(0.0, 0.24, -0.4),
+                                scale=1.2, origin=(0.0, 0), color=color.yellow)
+        self.howto_lines = [
+            Text(text="", parent=camera.ui, position=(0.0, 0.14 - i * 0.048, -0.4),
+                 scale=0.72, origin=(0.0, 0), color=color.rgba(0.9, 0.94, 1.0, 0.95))
+            for i in range(9)
+        ]
+        self.footer = Text(text="W/S move   ENTER select   ESC back", parent=camera.ui,
+                           position=(0.0, -0.40, -0.4), scale=0.6, origin=(0.0, 0),
+                           color=color.rgba(0.6, 0.7, 0.85, 0.9))
+        self.show_main()
 
-    def show_title(self) -> None:
-        self.title_panel.enabled = True
-        self.title.enabled = True
-        self.subtitle.enabled = True
-        self.title_prompt.enabled = True
-        self.title_hint.enabled = True
-        self.pause_panel.enabled = False
-        self.pause_title.enabled = False
-        self.pause_hint.enabled = False
+    # -- visibility ------------------------------------------------------------
+    def _hide_all(self) -> None:
+        self.panel.enabled = False
+        self.title.enabled = self.subtitle.enabled = False
+        for text in self.items + self.settings_lines + self.howto_lines:
+            text.enabled = False
+        self.howto_title.enabled = False
+        self.footer.enabled = False
+
+    def _show_shell(self) -> None:
+        self.panel.enabled = True
+        self.footer.enabled = True
+
+    def show_main(self, continue_available: bool | None = None) -> None:
+        self.screen = "main"
+        if continue_available is not None:
+            self.continue_available = continue_available
+        self.cursor = 0
+        self._show_shell()
+        self.title.enabled = self.subtitle.enabled = True
+        self._render_items(self.MAIN_ITEMS)
 
     def show_pause(self) -> None:
-        self.title_panel.enabled = False
-        for text in (self.title, self.subtitle, self.title_prompt, self.title_hint):
-            text.enabled = False
-        self.pause_panel.enabled = True
-        self.pause_title.enabled = True
-        self.pause_hint.enabled = True
+        self.screen = "pause"
+        self.cursor = 0
+        self._show_shell()
+        self.title.text = "PAUSED"
+        self.subtitle.text = "the belt waits for no one"
+        self.title.enabled = self.subtitle.enabled = True
+        self._render_items(self.PAUSE_ITEMS)
+
+    def show_settings(self, settings: dict) -> None:
+        self.back_target = self.screen if self.screen in ("main", "pause") else "main"
+        self.screen = "settings"
+        self.cursor = 0
+        self.settings = dict(settings)
+        self._show_shell()
+        self.title.text = "SETTINGS"
+        self.subtitle.text = "changes save instantly"
+        self.title.enabled = self.subtitle.enabled = True
+        self._render_settings()
+
+    def show_howto(self, page: int = 0) -> None:
+        self.back_target = self.screen if self.screen in ("main", "pause") else "main"
+        self.screen = "howto"
+        self.howto_page = page
+        self._show_shell()
+        heading, lines = self.HOWTO_PAGES[page]
+        self.howto_title.text = f"HOW TO PLAY  ({page + 1}/{len(self.HOWTO_PAGES)})  --  {heading}"
+        self.howto_title.enabled = True
+        for i, text_entity in enumerate(self.howto_lines):
+            text_entity.enabled = i < len(lines)
+            text_entity.text = lines[i] if i < len(lines) else ""
 
     def hide(self) -> None:
-        self.title_panel.enabled = False
-        for text in (self.title, self.subtitle, self.title_prompt, self.title_hint,
-                     self.pause_title, self.pause_hint):
-            text.enabled = False
-        self.pause_panel.enabled = False
+        self._hide_all()
+
+    # -- rendering ---------------------------------------------------------------
+    def _render_items(self, items: tuple) -> None:
+        for i, text_entity in enumerate(self.items):
+            enabled = i < len(items)
+            text_entity.enabled = enabled
+            if not enabled:
+                continue
+            label = items[i]
+            if self.screen == "main" and label == "CONTINUE" and not self.continue_available:
+                label += "   (no save)"
+                text_entity.color = color.rgba(0.45, 0.5, 0.58, 0.9)
+            else:
+                text_entity.color = color.white
+            if i == self.cursor:
+                text_entity.text = f">  {label}  <"
+                text_entity.color = color.rgb(0.5, 0.95, 1.0)
+            else:
+                text_entity.text = f"   {label}"
+
+    def _render_settings(self) -> None:
+        rows = (
+            f"Quality preset    < {self.settings['quality']} >",
+            f"Audio             < {'muted' if self.settings['muted'] else 'on'} >",
+            f"Camera glide      < {'on' if self.settings['glide'] else 'snappy'} >",
+            "",
+        )
+        for i, text_entity in enumerate(self.settings_lines):
+            text_entity.enabled = True
+            text_entity.text = rows[i]
+            text_entity.color = color.rgb(0.5, 0.95, 1.0) if i == self.cursor else color.white
+
+    # -- input --------------------------------------------------------------------
+    def handle(self, key: str) -> str | None:
+        """Translate a raw key into an action token; None if unhandled."""
+        if key in ("w", "up"):
+            self.cursor = (self.cursor - 1) % self._item_count()
+            self._refresh()
+            return None
+        if key in ("s", "down"):
+            self.cursor = (self.cursor + 1) % self._item_count()
+            self._refresh()
+            return None
+        if key == "enter":
+            return self._select()
+        if key == "escape":
+            if self.screen in ("settings", "howto"):
+                target = getattr(self, "back_target", "main")
+                self.cursor = 0
+                if target == "pause":
+                    self.show_pause()
+                else:
+                    self.show_main()
+                return "back"
+            if self.screen == "pause":
+                return "resume"
+            return "quit"
+        if self.screen == "howto" and key in ("a", "d", "left arrow", "right arrow"):
+            self.howto_page = (self.howto_page + (1 if key in ("d", "right arrow") else -1)) % len(self.HOWTO_PAGES)
+            self.show_howto(self.howto_page)
+            return None
+        return None
+
+    def _item_count(self) -> int:
+        if self.screen == "settings":
+            return 3
+        if self.screen == "pause":
+            return len(self.PAUSE_ITEMS)
+        return len(self.MAIN_ITEMS)
+
+    def _refresh(self) -> None:
+        if self.screen == "main":
+            self._render_items(self.MAIN_ITEMS)
+        elif self.screen == "pause":
+            self._render_items(self.PAUSE_ITEMS)
+        elif self.screen == "settings":
+            self._render_settings()
+
+    def _cycle_setting(self, key: str, forward: bool = True) -> None:
+        if key == "quality":
+            index = QUALITY_ORDER.index(self.settings["quality"])
+            self.settings["quality"] = QUALITY_ORDER[(index + (1 if forward else -1)) % len(QUALITY_ORDER)]
+        elif key in ("muted", "glide"):
+            self.settings[key] = not self.settings[key]
+        self._render_settings()
+        if self.on_settings_changed is not None:
+            self.on_settings_changed(dict(self.settings))
+
+    def _select(self) -> str | None:
+        if self.screen == "settings":
+            keys = ("quality", "muted", "glide")
+            self._cycle_setting(keys[self.cursor])
+            return None
+        if self.screen == "howto":
+            self.howto_page = (self.howto_page + 1) % len(self.HOWTO_PAGES)
+            self.show_howto(self.howto_page)
+            return None
+        if self.screen == "pause":
+            action = ("resume", "save", "load", "settings", "quit_to_title")[self.cursor]
+            if action == "settings":
+                self.show_settings(dict(self.settings))
+        else:
+            action = ("new_game", "continue", "load", "settings", "howto", "quit")[self.cursor]
+            if action == "continue" and not self.continue_available:
+                return None
+            if action == "settings":
+                self.show_settings(dict(self.settings))
+            elif action == "howto":
+                self.show_howto(0)
+        self.cursor = 0
+        return action

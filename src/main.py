@@ -133,6 +133,9 @@ class Game:
         # Screen state: title -> play; ESC toggles pause (windowed only).
         self.screen = "play" if headless else "title"
         self.paused = False
+        # Persistent player settings (quality preset, audio, camera feel).
+        self.settings = self._load_settings() if not headless else {
+            "quality": "medium", "muted": False, "glide": True}
         self.toasts: list[tuple[float, str]] = []
         self._window_fired_day: dict[str, float] = {}
         self._window_dep_day: dict[str, float] = {}
@@ -207,10 +210,11 @@ class Game:
     def update_camera(self) -> None:
         from ursina import camera
 
+        glide = 0.10 if self.settings.get("glide", True) else 1.0
         if self.follow_target is None or self.scene is None:
             # Glide back to the network anchor when no ship is followed.
             if self._camera_goal is not None:
-                camera.position = lerp(camera.position, self._camera_goal, 0.045)
+                camera.position = lerp(camera.position, self._camera_goal, 0.045 if self.settings.get("glide", True) else 1.0)
                 camera.look_at(Vec3(0, 0, 0))
             return
         ship = self.scene.ships.get(self.follow_target)
@@ -222,7 +226,7 @@ class Game:
             offset = offset.normalized() * 14.0 if distance > 1e-3 else (0, 6, -14)
         # Exponential smoothing: the chase settles instead of snapping.
         goal = ship.position + offset
-        camera.position = lerp(camera.position, goal, 0.10)
+        camera.position = lerp(camera.position, goal, glide)
         camera.look_at(ship.position)
 
     def pick_body(self, entity) -> None:
@@ -330,6 +334,63 @@ class Game:
                     seconds=8.0,
                 )
 
+
+    # -- settings & campaign lifecycle --------------------------------------------
+    SETTINGS_SLOT = "_settings"
+
+    def _load_settings(self) -> dict:
+        data = colony_savegame.load_slot(self.SETTINGS_SLOT)
+        settings = {"quality": "medium", "muted": False, "glide": True}
+        if isinstance(data, dict):
+            for key in settings:
+                if key in data:
+                    settings[key] = data[key]
+        return settings
+
+    def save_settings(self) -> None:
+        colony_savegame.save_slot(self.SETTINGS_SLOT, dict(self.settings))
+
+    def apply_settings(self) -> None:
+        """Push the settings into scene, mixer and camera; persist them."""
+        from src.config import QUALITY_PRESETS
+
+        if self.scene is not None:
+            self.scene.apply_quality(**QUALITY_PRESETS.get(self.settings["quality"],
+                                                           QUALITY_PRESETS["medium"]))
+        if self.audio is not None:
+            hum = self.audio.get("hum")
+            if hum is not None:
+                try:
+                    hum.volume = 0.0 if self.settings["muted"] else hum.volume or 0.3
+                except Exception:
+                    pass
+        self.muted = bool(self.settings["muted"])
+        self.save_settings()
+
+    def new_campaign(self) -> None:
+        """A fresh director, same solar system."""
+        self.sim = OpsSimulation(ship_names=("Kestrel", "Petrel"))
+        self.colony = Colony()
+        self.market = Market()
+        self.contracts = Contracts(self.market)
+        self.credits = START_CREDITS
+        self.credits_history = []
+        self.toasts = []
+        self.deliveries_booked = 0
+        self.screen = "play"
+        self.paused = False
+        if self.scene is not None:
+            for mesh in self.scene.ships.values():
+                mesh.enabled = False
+                mesh.clear_trail()
+            self.scene.ships.clear()
+            self.scene.ensure_bodies(self.sim)
+        self.say("New campaign. The belt is yours, director.", seconds=8.0)
+
+    def to_title(self) -> None:
+        self.screen = "title"
+        self.paused = False
+        self.save_game("quick")  # a courtesy autosave on the way out
 
     # -- title screen -----------------------------------------------------------
     def _tick_title(self) -> None:
@@ -1202,45 +1263,79 @@ def run_windowed() -> None:
     game = Game(headless=False)
     game.build_scene(ursina_scene)
     _setup_audio(game)
-    from src.ui.orbital_hud import MenuOverlay
+    from src.game import savegame as colony_savegame
 
-    menus = MenuOverlay()
+    menus = MenuOverlay(continue_available=bool(colony_savegame.list_saves()))
+    game.apply_settings()
+    menus.show_main(continue_available=bool(colony_savegame.list_saves()))
     camera.orthographic = False
     camera.fov = 55
 
-    import src.main as this_module
+    def _latest_slot() -> str | None:
+        files = colony_savegame.list_saves()
+        for name in files:
+            if name != "_settings.json":
+                return name[:-5]
+        return None
 
-    def update():  # Ursina calls this every frame
-        game.update(time.dt * game.sim.warp_days_per_second)
-
-    def input(key):
-        if key == "escape":
-            if game.screen == "title":
-                application.quit()
-            game.paused = not game.paused
+    def _menu_action(action: str) -> None:
+        if action == "new_game":
+            game.new_campaign()
+            menus.hide()
+        elif action == "continue":
+            game.load_game("quick")
+            game.screen = "play"
+            menus.hide()
+        elif action == "load":
+            slot = _latest_slot()
+            if slot:
+                game.load_game(slot)
+                game.screen = "play"
+                menus.hide()
+            else:
+                game.say("No saves yet.")
+        elif action == "settings":
+            menus.show_settings(game.settings)
+        elif action == "howto":
+            menus.show_howto(0)
+        elif action == "save":
+            game.save_game("quick")
+            menus.show_pause()
+        elif action == "resume":
+            game.paused = False
+            menus.hide()
+        elif action == "quit_to_title":
+            game.to_title()
+            menus.show_main(continue_available=True)
+        elif action == "back":
             if game.paused:
                 menus.show_pause()
             else:
-                menus.hide()
-            return
-        if key == "q" and game.screen != "title":
+                menus.show_main(continue_available=bool(colony_savegame.list_saves()))
+        elif action == "quit":
             application.quit()
-        if game.screen == "title":
-            if key == "enter":
-                game.start_game()
+
+    def input(key):
+        # --- menu states ----------------------------------------------------
+        if game.screen == "title" or game.paused:
+            if key == "escape" and game.screen == "title" and menus.screen == "main":
+                application.quit()
+                return
+            action = menus.handle(key)
+            if action:
+                _menu_action(action)
+            if game.screen == "play" and not game.paused and menus.screen in ("main", "pause"):
                 menus.hide()
-            elif key == "f9":
-                game.load_game()
-                if game.screen == "play":
-                    menus.hide()
             return
-        if game.paused:
-            if key == "f5":
-                game.save_game()
-            elif key == "f9":
-                game.load_game()
+        # --- live play --------------------------------------------------------
+        if key == "escape":
+            game.paused = True
+            menus.show_pause()
             return
-        if key == "left mouse down" and game.screen == "play" and not game.paused:
+        if key == "q":
+            application.quit()
+            return
+        if key == "left mouse down":
             game.pick_body(mouse.hovered_entity)
         elif key == "tab" and game.hud is not None:
             game.hud.cycle_target(1)
@@ -1265,10 +1360,6 @@ def run_windowed() -> None:
             game.toggle_repair()
         elif key in ("1", "2", "3", "4"):
             game.buy_ship_class(BUY_MENU[int(key) - 1])
-        elif key == "f5":
-            game.save_game()
-        elif key == "f9":
-            game.load_game()
         elif key == "j":
             game.cycle_jump()
         elif key == "b":
@@ -1291,12 +1382,18 @@ def run_windowed() -> None:
             game.buy_part("quarters")
         elif key == "p":
             game.buy_drone_bay()
+        elif key == "k":
+            game.settings["quality"] = {"low": "medium", "medium": "high", "high": "low"}[game.settings["quality"]]
+            game.apply_settings()
+            game.say(f"Quality: {game.settings['quality']}.")
         elif key == "n":
-            game.toggle_mute()
-        elif key == "scroll up":
-            camera.position *= 0.9
-        elif key == "scroll down":
-            camera.position *= 1.1
+            game.settings["muted"] = not game.settings.get("muted", False)
+            game.apply_settings()
+            game.say("Audio muted." if game.muted else "Audio on.")
+        elif key == "f5":
+            game.save_game()
+        elif key == "f9":
+            game.load_game()
 
     # Ursina discovers the loop and input handler through this module's globals.
     this_module.update = update

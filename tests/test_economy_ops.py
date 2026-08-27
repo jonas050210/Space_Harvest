@@ -1134,6 +1134,88 @@ def test_upgrades_survive_a_json_round_trip():
 
 
 # --------------------------------------------------------------------------
+# Game menu, settings persistence and quality presets
+# --------------------------------------------------------------------------
+
+_URSINA_APP = None
+
+
+@pytest.fixture(scope="session")
+def ursina_app():
+    """One headless Ursina boot shared by every UI test in the process.
+
+    Ursina is a singleton and does not tolerate being constructed twice in
+    one interpreter, so the UI tests share this app instead.
+    """
+    global _URSINA_APP
+    ursina = pytest.importorskip("ursina")
+    if _URSINA_APP is None:
+        _URSINA_APP = ursina.Ursina(window_type="none", borderless=True)
+    yield _URSINA_APP
+
+
+def test_menu_navigation_is_self_consistent(ursina_app):
+    from src.ui.orbital_hud import MenuOverlay
+
+    menus = MenuOverlay(continue_available=False)
+    assert menus.screen == "main"
+    menus.handle("s"); menus.handle("s"); menus.handle("s")
+    assert menus.handle("enter") == "settings" and menus.screen == "settings"
+    assert menus.handle("escape") == "back" and menus.screen == "main"
+    for _ in range(4):
+        menus.handle("s")
+    assert menus.handle("enter") == "howto" and menus.screen == "howto"
+    assert menus.handle("escape") == "back"
+    menus.handle("s")
+    assert menus.handle("enter") is None  # CONTINUE inert without a save
+
+
+def test_settings_persist_through_the_upstream_save_slots(tmp_path, monkeypatch, ursina_app):
+    from src.game import savegame as colony_savegame
+    from src.main import Game
+
+    monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
+    game = Game(headless=False)
+    game.settings["quality"] = "low"
+    game.settings["muted"] = True
+    game.apply_settings()
+    fresh = Game(headless=False)
+    assert fresh._load_settings()["quality"] == "low"
+    assert fresh._load_settings()["muted"] is True
+
+
+def test_quality_presets_apply_to_the_scene(ursina_app):
+    from ursina import scene as ursina_scene
+
+    from src.config import QUALITY_PRESETS
+    from src.entities.orbital_scene import OrbitalScene
+
+    scene = OrbitalScene(parent=ursina_scene)
+    scene.apply_quality(**QUALITY_PRESETS["low"])
+    assert scene.belt_mesh.enabled is False
+    scene.apply_quality(**QUALITY_PRESETS["medium"])
+    assert scene.belt_mesh.enabled is True
+
+
+def test_new_campaign_resets_the_run_without_touching_the_scene(ursina_app):
+    from ursina import scene as ursina_scene
+
+    from src.main import Game
+
+    game = Game(headless=False)
+    game.build_scene(ursina_scene)
+    game.start_game()
+    game.sim.dispatch(game.sim.ships[0], "inner_belt")
+    game.credits = 9999.0
+    game.new_campaign()
+    assert game.credits != 9999.0
+    assert game.sim.missions == {}
+    assert game.screen == "play"
+    game.update(0.016)  # the scene rebuilds ship meshes on the next frame
+    assert "Kestrel" in game.scene.ships
+
+
+# --------------------------------------------------------------------------
 # The whole vertical slice through the real Game loop
 # --------------------------------------------------------------------------
 

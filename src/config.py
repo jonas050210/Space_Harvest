@@ -318,6 +318,15 @@ ROUND_TRIP_CACHE_DAYS = 365.0
 # How often the idle-fleet dispatch scan may re-price the network.
 REDISPATCH_SCAN_DAYS = 30.0
 
+# --- quality presets -----------------------------------------------------------
+# Flags feed OrbitalScene.apply_quality; "high" is everything on.
+QUALITY_PRESETS = {
+    "low": {"belt": False, "trails": False, "sky": True, "labels": True},
+    "medium": {"belt": True, "trails": True, "sky": True, "labels": True},
+    "high": {"belt": True, "trails": True, "sky": True, "labels": True},
+}
+QUALITY_ORDER = ("low", "medium", "high")
+
 # --- window / UI ------------------------------------------------------------
 WINDOW_TITLE = "Asteroid Colony Proto - Orbital Supply Chains"
 WINDOW_SIZE = (1440, 900)
