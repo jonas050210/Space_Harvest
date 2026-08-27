@@ -278,9 +278,14 @@ PARTS_CATALOG = {
     "drill": {"name": "Deep Drill", "base_price": 2400.0, "mine_bonus": 0.25, "max_per_ship": 2},
     "quarters": {"name": "Crew Quarters", "base_price": 1500.0, "rest_bonus": 0.5, "max_per_ship": 1},
     "drones": {"name": "Depot Drone Bay", "base_price": 3200.0, "mine_per_day": 5.0, "max_per_depot": 2},
+    # The aurellium super-part: comet loot becomes campaign power. Op-layer
+    # trajectory-planning skill (like pilots), never a physics change.
+    "navsuite": {"name": "Navigation Suite", "base_price": 5200.0, "refund": 0.05,
+                 "max_per_ship": 1, "aurellium_t": 6},
 }
 PARTS_PRICE_ESCALATION = 1.25
-PARTS_SEASON_DAYS = {"tank": 300.0, "drill": 340.0, "quarters": 260.0, "drones": 400.0}
+PARTS_SEASON_DAYS = {"tank": 300.0, "drill": 340.0, "quarters": 260.0, "drones": 400.0,
+                     "navsuite": 600.0}
 
 # --- the comet ----------------------------------------------------------------
 # "Vigil" is a long-period comet: perihelion inside the inner belt, aphelion
@@ -366,6 +371,17 @@ FIRSTS = (
     ("rich_100k", "Treasury passes 100,000 cr", 0.0, 25.0),
     ("thorite_1", "First thorite shipment", 500.0, 6.0),
     ("aurellium_1", "First aurellium shipment -- Earth is stunned", 2000.0, 30.0),
+)
+
+# --- science unlocks -------------------------------------------------------------
+# Research points (from deliveries, Firsts, observatories) buy one-shot colony
+# technologies. Effects are plain multipliers/discounts the game layer applies
+# to existing systems -- the sim only ever sees generic numbers.
+TECHS = (
+    ("standard_contracts", "Standardised Contracts", 40, {"parts_discount": 0.15}),
+    ("crew_rotation", "Crew Rotation Programme", 50, {"fatigue": 0.75}),
+    ("isru_catalysts", "ISRU Catalysts", 55, {"depot_generation": 1.5}),
+    ("plasma_lances", "Plasma Smelting Lances", 70, {"refinery": 1.5}),
 )
 
 # --- quality presets -----------------------------------------------------------

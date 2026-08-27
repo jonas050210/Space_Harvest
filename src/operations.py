@@ -227,6 +227,9 @@ class OpsSimulation(OrbitalSimulation):
         self.crew: dict[str, list[CrewMember]] = {}
         #: ship name -> installed parts {"tank": n, "drill": n, "quarters": n}
         self.upgrades: dict[str, dict[str, int]] = {}
+        #: generic tech multipliers set by the game layer (depot_generation,
+        #: refinery, fatigue) -- the sim never knows tech names.
+        self.tech_mults: dict[str, float] = {}
         #: body key -> refuel depot (player-built)
         self.depots: dict[str, Depot] = {}
         #: body key -> refinery station (player-built)
@@ -599,7 +602,7 @@ class OpsSimulation(OrbitalSimulation):
             refinery = self.refineries.get(mission.target)
             if refinery is None:
                 continue
-            refinery.progress += REFINERY_BATCHES_PER_DAY * dt_days
+            refinery.progress += REFINERY_BATCHES_PER_DAY * self.tech_mults.get("refinery", 1.0) * dt_days
             while refinery.progress >= 1.0:
                 recipe = self._first_craftable_recipe(ship)
                 if recipe is None:
@@ -624,8 +627,10 @@ class OpsSimulation(OrbitalSimulation):
         """ISRU plants crack local ice into propellant."""
         if dt_days <= 0.0:
             return
+        gen_mult = self.tech_mults.get("depot_generation", 1.0)
         for depot in self.depots.values():
-            depot.fuel_ms = min(depot.capacity, depot.fuel_ms + depot.generation_per_day * dt_days)
+            depot.fuel_ms = min(depot.capacity,
+                                depot.fuel_ms + depot.generation_per_day * gen_mult * dt_days)
 
     def _depot_refuel_waiting(self, dt_days: float) -> float:
         """Top up ships holding at a depot body; returns m/s transferred."""
@@ -733,12 +738,13 @@ class OpsSimulation(OrbitalSimulation):
                     else:
                         member.morale = min(CREW_MORALE_MAX, member.morale + CREW_MORALE_REST_PER_DAY * dt_days)
             else:
+                fatigue_mult = self.tech_mults.get("fatigue", 1.0)
                 if mission.leg is Leg.WAITING:
-                    rate = CREW_FATIGUE_PER_DAY_LAYOVER
+                    rate = CREW_FATIGUE_PER_DAY_LAYOVER * fatigue_mult
                 elif mission.leg is Leg.PENDING:
-                    rate = CREW_FATIGUE_PER_DAY_PENDING
+                    rate = CREW_FATIGUE_PER_DAY_PENDING * fatigue_mult
                 else:
-                    rate = CREW_FATIGUE_PER_DAY_FLYING
+                    rate = CREW_FATIGUE_PER_DAY_FLYING * fatigue_mult
                 for member in roster:
                     member.fatigue = min(100.0, member.fatigue + rate * dt_days)
                     if member.fatigue > 70.0:
@@ -763,9 +769,13 @@ class OpsSimulation(OrbitalSimulation):
 
     # -- crew specialisations -----------------------------------------------
     def pilots_discount(self, ship_name: str) -> float:
-        """Fraction of every burn refunded by skilled piloting (ops-layer)."""
+        """Fraction of every burn refunded by planning skill (ops-layer):
+        pilots fly tighter courses, Navigation Suites plan them better."""
         count = sum(1 for member in self.crew.get(ship_name, []) if member.role == "pilot")
-        return min(CREW_PILOT_DISCOUNT_CAP, count * CREW_PILOT_BURN_DISCOUNT)
+        suites = self.upgrades.get(ship_name, {}).get("navsuite", 0)
+        suite_refund = suites * PARTS_CATALOG["navsuite"]["refund"]
+        return min(CREW_PILOT_DISCOUNT_CAP + suite_refund,
+                   count * CREW_PILOT_BURN_DISCOUNT + suite_refund)
 
     def has_engineer(self, ship_name: str) -> bool:
         return any(member.role == "engineer" for member in self.crew.get(ship_name, []))
@@ -1210,6 +1220,7 @@ class OpsSimulation(OrbitalSimulation):
             "crew": {name: [member.to_json() for member in roster]
                      for name, roster in self.crew.items()},
             "depots": [depot.to_json() for depot in self.depots.values()],
+            "tech_mults": dict(self.tech_mults),
             "refineries": [r.to_json() for r in self.refineries.values()],
             "botanists": self.botanists,
             "perturb_timer": self._perturb_timer,
@@ -1263,11 +1274,13 @@ class OpsSimulation(OrbitalSimulation):
         sim._multi_rev_min_saving = PLANNING_MULTI_REV_MIN_SAVING
         sim.crew = {}
         sim.upgrades = {}
+        sim.tech_mults = {}
         sim.last_active = {}
         sim.trade_targets = tuple(TRADE_TARGETS)
         sim.bodies = dict(sim.bodies)
         sim._install_comet()
         sim.depots = {d["body_key"]: Depot.from_json(d) for d in data.get("depots", [])}
+        sim.tech_mults = {k: float(v) for k, v in data.get("tech_mults", {}).items()}
         sim.refineries = {r["body_key"]: Refinery.from_json(r) for r in data.get("refineries", [])}
         sim.botanists = int(data.get("botanists", 0))
         sim._perturb_timer = float(data.get("perturb_timer",

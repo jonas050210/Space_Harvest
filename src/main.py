@@ -50,6 +50,7 @@ from src.config import (  # noqa: E402
     FIRSTS,
     HULL_CRITICAL_PCT,
     PARTS_CATALOG,
+    TECHS,
     MARKET_BASE_PRICES,
     REDISPATCH_SCAN_DAYS,
     SHIP_CLASSES,
@@ -140,6 +141,9 @@ class Game:
         self.toasts: list[tuple[float, str]] = []
         # KSP-style one-shot milestones (see config.FIRSTS).
         self.firsts: dict[str, bool] = {}
+        # Science unlocks (see config.TECHS).
+        self.techs: set = set()
+        self._parts_discount = 0.0
         self._firsts_frame = 0
         self._window_fired_day: dict[str, float] = {}
         self._window_dep_day: dict[str, float] = {}
@@ -382,6 +386,8 @@ class Game:
         self.credits_history = []
         self.toasts = []
         self.firsts = {}
+        self.techs = set()
+        self._apply_techs()
         self.deliveries_booked = 0
         self.screen = "play"
         self.paused = False
@@ -501,6 +507,7 @@ class Game:
             "market": self.market.to_json(),
             "contracts": self.contracts.to_json(),
             "firsts": dict(self.firsts),
+            "techs": sorted(self.techs),
             "colony": self.colony.state,
             "sim": self.sim.to_json(),
         }
@@ -518,6 +525,8 @@ class Game:
         self.market = Market.from_json(data["market"])
         self.contracts = Contracts.from_json(data.get("contracts", {}), self.market)
         self.firsts = {k: bool(v) for k, v in data.get("firsts", {}).items()}
+        self.techs = set(data.get("techs", []))
+        self._apply_techs()
         self.colony.state = data["colony"]
         self.sim = OpsSimulation.from_json(data["sim"])
         self.credits_history = []
@@ -556,6 +565,7 @@ class Game:
             "window_open": self.window_is_open,
             "windows_board": self._windows_board,
             "firsts_count": (sum(1 for v in self.firsts.values() if v), len(FIRSTS)),
+            "quests": self._quest_goals(),
             "depot_line": self._depot_hud_line(),
             "parts_hint": self._parts_hint_line(),
             "station_hint": self._station_hint_line(),
@@ -608,6 +618,16 @@ class Game:
                 self._play_alert("contract")
                 self.say(f"MILESTONE: {label}  (+{credits:,.0f} cr, +{research:.0f} RP)",
                          seconds=9.0)
+
+    def _quest_goals(self) -> list[str]:
+        """Labels of the next few un-earned milestones: the active quest log."""
+        goals = []
+        for key, label, _credits, _research in FIRSTS:
+            if not self.firsts.get(key):
+                goals.append(label)
+                if len(goals) == 3:
+                    break
+        return goals
 
     def _update_windows_board(self) -> None:
         """Soonest-next launch windows across the whole network.
@@ -666,7 +686,12 @@ class Game:
         ship = self._best_part_ship()
         if ship is None:
             return ""
-        return "Parts [T]ank [Y]drill [U]arters [P]drones"
+        research = self.colony.state.get("research_points", 0.0)
+        for key, name, cost, _effects in TECHS:
+            if key not in self.techs:
+                return (f"Parts [T]ank [Y]drill [U]arters [I]nav [P]drones   "
+                        f"Lab [L]: {name} ({cost:.0f} RP, have {research:,.0f})")
+        return "Parts [T]ank [Y]drill [U]arters [I]nav [P]drones   Lab: all techs unlocked"
 
     def _depot_hud_line(self) -> str:
         if not self.sim.depots:
@@ -869,17 +894,61 @@ class Game:
             return
         owned = sum(self.sim.upgrades.get(s.name, {}).get(part_key, 0)
                     for s in self.sim.ships)
-        price = self.market.part_price(part_key, owned)
+        price = self.market.part_price(part_key, owned) * (1.0 - self._parts_discount)
         if self.credits < price:
             self.say(f"{info['name']} costs {price:,.0f} cr; treasury {self.credits:,.0f} cr.")
             return
+        aurellium_t = float(info.get("aurellium_t", 0.0))
+        if aurellium_t > 0.0:
+            resources = self.colony.state.get("resources", {})
+            if resources.get("aurellium", 0.0) < aurellium_t:
+                self.say(f"The {info['name']} needs {aurellium_t:.0f} t aurellium -- "
+                         "only Comet Vigil carries it.")
+                return
         ok, message = self.sim.install_part(ship.name, part_key)
         if not ok:
             self.say(message)
             return
         self.credits -= price
+        if aurellium_t > 0.0:
+            colony_state.add_resources(self.colony.state, {"aurellium": -aurellium_t})
         self._play_alert("build")
-        self.say(f"{message} Bill {price:,.0f} cr.", seconds=7.0)
+        note = f" and {aurellium_t:.0f} t aurellium" if aurellium_t else ""
+        self.say(f"{message} Bill {price:,.0f} cr{note}.", seconds=7.0)
+
+    # -- science -------------------------------------------------------------------
+    def _apply_techs(self) -> None:
+        """Translate owned techs into generic sim multipliers + a price break."""
+        mults: dict[str, float] = {}
+        discount = 0.0
+        for key in self.techs:
+            for effect in TECHS:
+                if effect[0] != key:
+                    continue
+                for name, value in effect[3].items():
+                    if name == "parts_discount":
+                        discount = max(discount, value)
+                    else:
+                        mults[name] = mults.get(name, 1.0) * value
+        self.sim.tech_mults = mults
+        self._parts_discount = discount
+
+    def buy_tech(self) -> None:
+        """Commission the cheapest affordable unowned technology."""
+        research = self.colony.state.get("research_points", 0.0)
+        for key, name, cost, _effects in TECHS:
+            if key in self.techs:
+                continue
+            if research < cost:
+                self.say(f"{name} needs {cost:.0f} RP; the colony holds {research:,.0f} RP.")
+                return
+            self.techs.add(key)
+            self.colony.state["research_points"] = research - cost
+            self._apply_techs()
+            self._play_alert("contract")
+            self.say(f"RESEARCH COMPLETE: {name}.", seconds=8.0)
+            return
+        self.say("Every technology is already unlocked.")
 
     def buy_drone_bay(self) -> None:
         """Install a drone bay at the selected target's depot."""
@@ -1470,6 +1539,10 @@ def run_windowed() -> None:
             game.buy_part("quarters")
         elif key == "p":
             game.buy_drone_bay()
+        elif key == "i":
+            game.buy_part("navsuite")
+        elif key == "l":
+            game.buy_tech()
         elif key == "k":
             game.settings["quality"] = {"low": "medium", "medium": "high", "high": "low"}[game.settings["quality"]]
             game.apply_settings()

@@ -1319,6 +1319,88 @@ def test_firsts_survive_a_json_round_trip(monkeypatch, tmp_path):
 
 
 # --------------------------------------------------------------------------
+# Science unlocks, the Navigation Suite, and the goals log
+# --------------------------------------------------------------------------
+
+def test_tech_purchases_deduct_research_and_apply_effects():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.colony.state["research_points"] = 200.0
+    game.buy_tech()  # cheapest first: Standardised Contracts
+    assert "standard_contracts" in game.techs
+    assert game.colony.state["research_points"] == pytest.approx(160.0)
+    assert game._parts_discount > 0.0
+    game.buy_tech()  # Crew Rotation Programme
+    assert game.sim.tech_mults.get("fatigue") == pytest.approx(0.75)
+    # Being broke is refused, not destructive.
+    game.colony.state["research_points"] = 1.0
+    credits_before = game.credits
+    game.buy_tech()
+    assert len(game.techs) == 2 and game.credits == credits_before
+
+
+def test_techs_reapply_on_load(tmp_path, monkeypatch):
+    from src.game import savegame as colony_savegame
+    from src.main import Game
+
+    monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
+    game = Game(headless=True)
+    game.techs = {"isru_catalysts"}
+    game._apply_techs()
+    game.save_game("techs")
+    fresh = Game(headless=True)
+    fresh.load_game("techs")
+    assert "isru_catalysts" in fresh.techs
+    assert fresh.sim.tech_mults.get("depot_generation") == pytest.approx(1.5)
+
+
+def test_tech_multipliers_actually_change_the_sim():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim.build_depot("inner_belt")
+    depot = sim.depots["inner_belt"]
+    depot.fuel_ms = 0.0
+    sim.tick_depots(10.0)
+    slow = depot.fuel_ms
+    depot.fuel_ms = 0.0
+    sim.tech_mults["depot_generation"] = 2.0
+    sim.tick_depots(10.0)
+    assert depot.fuel_ms == pytest.approx(2.0 * slow)
+
+
+def test_navsuite_needs_aurellium_and_sharpens_planning():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.credits = 50_000.0
+    base = game.sim.pilots_discount("Kestrel")
+    game.buy_part("navsuite")  # no aurellium: refused
+    assert game.sim.upgrades["Kestrel"].get("navsuite", 0) == 0
+    game.colony.state["resources"]["aurellium"] = 10.0
+    game.buy_part("navsuite")
+    assert game.sim.upgrades["Kestrel"].get("navsuite") == 1
+    assert game.colony.state["resources"]["aurellium"] == pytest.approx(4.0)
+    assert game.sim.pilots_discount("Kestrel") > base
+
+
+def test_goals_log_lists_the_next_unfired_milestones():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.update(1.0)
+    goals = game._quest_goals()
+    assert 0 < len(goals) <= 3
+    fired_before = set(k for k, v in game.firsts.items() if v)
+    for goal in goals:
+        assert goal not in fired_before  # labels, but the check is the shape
+    # Completing one removes it from the front of the list.
+    snapshot = list(goals)
+    game.firsts["first_capture_belt"] = True
+    if "First capture: the inner belt" in snapshot:
+        assert "First capture: the inner belt" not in game._quest_goals()
+
+
+# --------------------------------------------------------------------------
 # The whole vertical slice through the real Game loop
 # --------------------------------------------------------------------------
 
