@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a Steam-ready Windows / Linux package for Orbital Supply Chains.
+"""Build a Steam-ready Windows / Linux package for Space Harvest.
 
 Usage (from repo root, inside the venv):
 
@@ -7,14 +7,14 @@ Usage (from repo root, inside the venv):
     python scripts/build_steam.py --onefile    # single executable (slower start)
 
 Produces:
-    dist/OrbitalSupplyChains/                 # ship this folder as the depot
-        OrbitalSupplyChains[.exe]
+    dist/SpaceHarvest/                 # ship this folder as the depot
+        SpaceHarvest[.exe]
         steam_appid.txt
         steam_install.json
         assets/
         ...
 
-Target hardware reference (from project.md):
+Target hardware:
     i7-12700F / 32 GB DDR4 / RTX 4060 Ti 8 GB -- Ultra preset
     Minimum: any DX11 / GL 3.3 box -- Low preset
 """
@@ -30,7 +30,6 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST = os.path.join(ROOT, "dist")
-NAME = "OrbitalSupplyChains"
 
 
 def _run(cmd: list[str]) -> None:
@@ -39,6 +38,10 @@ def _run(cmd: list[str]) -> None:
 
 
 def build(onefile: bool = False) -> str:
+    sys.path.insert(0, ROOT)
+    from src.config import EXECUTABLE_NAME, GAME_NAME, GAME_VERSION, STEAM_APP_ID
+
+    name = EXECUTABLE_NAME
     try:
         import PyInstaller  # noqa: F401
     except ImportError:
@@ -58,7 +61,7 @@ def build(onefile: bool = False) -> str:
         sys.executable, "-m", "PyInstaller",
         "--noconfirm",
         "--clean",
-        f"--name={NAME}",
+        f"--name={name}",
         f"--distpath={spec_dist}",
         f"--workpath={work}",
         "--paths", ROOT,
@@ -71,15 +74,15 @@ def build(onefile: bool = False) -> str:
     ]
     for item in add_data:
         cmd += ["--add-data", item]
-    if onefile:
-        cmd.append("--onefile")
-    else:
-        cmd.append("--onedir")
+    cmd.append("--onefile" if onefile else "--onedir")
     cmd.append(entry)
     _run(cmd)
 
-    built = os.path.join(spec_dist, NAME if not onefile else f"{NAME}.exe" if sys.platform.startswith("win") else NAME)
-    out_dir = os.path.join(DIST, NAME)
+    built = os.path.join(
+        spec_dist,
+        name if not onefile else (f"{name}.exe" if sys.platform.startswith("win") else name),
+    )
+    out_dir = os.path.join(DIST, name)
     if os.path.isdir(out_dir):
         shutil.rmtree(out_dir)
     if onefile:
@@ -88,9 +91,6 @@ def build(onefile: bool = False) -> str:
     else:
         shutil.copytree(built, out_dir)
 
-    # Steam sidecar files.
-    sys.path.insert(0, ROOT)
-    from src.config import GAME_VERSION, STEAM_APP_ID
     from src.steam_bridge import write_steam_manifest
 
     app_id_path = os.path.join(out_dir, "steam_appid.txt")
@@ -98,7 +98,6 @@ def build(onefile: bool = False) -> str:
         fh.write(str(STEAM_APP_ID or 480))  # 480 = Spacewar test app if unset
     write_steam_manifest(out_dir)
 
-    # Copy committed textures so the frozen build never regenerates on first boot.
     assets_src = os.path.join(ROOT, "assets")
     assets_dst = os.path.join(out_dir, "assets")
     if os.path.isdir(assets_src) and not os.path.isdir(assets_dst):
@@ -107,14 +106,16 @@ def build(onefile: bool = False) -> str:
     readme = os.path.join(out_dir, "README_STEAM.txt")
     with open(readme, "w", encoding="utf-8") as fh:
         fh.write(
-            f"Orbital Supply Chains  v{GAME_VERSION}\n"
-            "=====================================\n\n"
-            "Launch OrbitalSupplyChains.exe (Windows) or ./OrbitalSupplyChains (Linux).\n"
-            "Graphics presets: Low / Medium / High / Ultra (Settings menu or K in-game).\n"
-            "Saves live in Documents/My Games/OrbitalSupplyChains (Windows) or\n"
-            "~/.local/share/OrbitalSupplyChains (Linux) when shipped; dev builds use ./saves.\n\n"
-            "Recommended: i7-12700F / 16+ GB / RTX 3060 or better, High or Ultra preset.\n"
-            "Minimum: dual-core / 8 GB / GTX 1050 or Intel UHD, Low preset.\n"
+            f"{GAME_NAME}  v{GAME_VERSION}\n"
+            f"{'=' * (len(GAME_NAME) + len(GAME_VERSION) + 3)}\n\n"
+            f"Launch {name}.exe (Windows) or ./{name} (Linux).\n"
+            "Orbital farming on real launch windows: wait for GO, harvest the belt,\n"
+            "sell without flooding Earth, keep the colony iced and crewed.\n\n"
+            "Graphics: Low / Medium / High / Ultra (Settings or K in-game).\n"
+            "Saves: Documents/My Games/SpaceHarvest (Windows) or\n"
+            "~/.local/share/SpaceHarvest (Linux) when shipped; dev uses ./saves.\n\n"
+            "Recommended: i7-12700F / 16+ GB / RTX 3060+, High or Ultra.\n"
+            "Minimum: dual-core / 8 GB / GTX 1050 or Intel UHD, Low.\n"
         )
     print(f"[build] Steam package ready: {out_dir}")
     return out_dir

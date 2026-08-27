@@ -1,13 +1,14 @@
-# Asteroid-Colony Proto — Project
+# Space Harvest — Project
 
-Master document for **Asteroid-Colony Proto: Orbital Supply Chains** — a stylised 3-D
-launch-window game with real astrodynamics underneath. This file intentionally contains
-the architecture, setup, units, every system, controls, QA evidence, known limits and
-owner hand-off notes, so the repo only needs this document plus `README.md`.
+Master document for **Space Harvest** — orbital farming on real launch windows,
+with patched-conic astrodynamics underneath. Architecture, setup, units, systems,
+controls, QA, known limits and hand-off notes live here alongside `README.md`
+and `STEAM.md`.
 
 Repository: https://github.com/jonas050210/asteroid-colony-proto
-Arena branch: `arena/01a041a3-asteroid-colony-proto` (all sessions pushed here)
+Arena branch: `arena/01a0449e-asteroid-colony-proto`
 Target PC: i7-12700F / 32 GB / RTX 4060 Ti 8 GB. Python 3.11–3.13, Ursina 8.3.
+Product name: **Space Harvest** (v1.0.0). Executable: `SpaceHarvest`.
 
 ---
 

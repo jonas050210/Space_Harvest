@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Asteroid Colony Proto -- orbital supply chains.
+"""Space Harvest -- orbital farming on real launch windows.
 
 Entry point. Runs the patched-conic simulation from ``src.simulation`` inside a
-Ursina window and hands every completed delivery to the existing
-``asteroid-colony`` economy (``src/game/logistics.py``), so colony storage,
-research points and score all respond to what the freighters bring back.
+Ursina window and books every freighter delivery into the colony economy
+(``src/game/logistics.py``), so storage, research and life support respond to
+what the harvest brings home.
 
     python -m src.main                    # play
     python -m src.main --headless         # same loop, no window (self-test / CI)
@@ -52,6 +52,8 @@ from src.config import (  # noqa: E402
     DEPOT_BUILD_COST,
     DIFFICULTY_MODES,
     FIRSTS,
+    GAME_NAME,
+    GAME_TAGLINE,
     GAME_VERSION,
     HULL_CRITICAL_PCT,
     PARTS_CATALOG,
@@ -519,7 +521,7 @@ class Game:
         diff_label = DIFFICULTY_MODES.get(self.difficulty, {}).get("label", self.difficulty)
         vic_label = VICTORY_MODES.get(self.victory_mode, {}).get("label", self.victory_mode)
         self.say(
-            f"New campaign -- {diff_label} / {vic_label}. The belt is yours, director.",
+            f"New harvest -- {diff_label} / {vic_label}. The belt is yours, director.",
             seconds=8.0,
         )
 
@@ -553,7 +555,7 @@ class Game:
         if self.screen != "title":
             return
         self.screen = "play"
-        self.say("Director online. TAB to pick a target -- wait for the window, then go.",
+        self.say("Space Harvest online. TAB a field, wait for the window, harvest the belt.",
                  seconds=9.0)
 
     # -- market & fleet actions ----------------------------------------------
@@ -1144,7 +1146,8 @@ class Game:
             self._play_alert("contract")
             self.say(f"RESEARCH COMPLETE: {name}.", seconds=8.0)
             return
-        self.say("Every technology is already unlocked.")
+        if not self.headless:
+            self.say("Every technology is already unlocked.")
 
     def buy_drone_bay(self) -> None:
         """Install a drone bay at the selected target's depot."""
@@ -1341,11 +1344,16 @@ class Game:
 
     # -- flight-orientation checklist -------------------------------------------
     TUTORIAL_STEPS = (
-        ("dispatched", "Welcome, director. Pick a target with TAB, then press ENTER to dispatch a freighter."),
-        ("sold", "A run is on its way. Press S to sell stored ore on the Earth market -- watch the price flood."),
-        ("drilled", "Nice. Press X to switch mining policy to core drilling: fuller holds, more wear and risk."),
-        ("bought", "Press 1-4 to commission a scout, freighter, refinery or hauler once the treasury allows."),
-        ("saved", "Press F5 to quick-save. F9 loads. Keep the crews fed, paid and rested -- good luck, director."),
+        ("dispatched",
+         "Welcome to Space Harvest. TAB picks a field (asteroid). Wait for GO, then ENTER to send a freighter."),
+        ("sold",
+         "Harvest is flying home. Press S to sell ore on Earth -- dump one market and its price floods."),
+        ("drilled",
+         "Press X for core drilling: richer holds, more wear and risk. Surface scrape stays safer."),
+        ("bought",
+         "Press 1-4 to commission a scout, freighter, refinery-ship or hauler when the treasury allows."),
+        ("saved",
+         "F5 quick-saves, F9 loads (blocked on Ironman). Keep crews fed and the pantry iced -- good luck."),
     )
 
     def _tick_tutorial(self) -> None:
@@ -1559,7 +1567,8 @@ def run_headless(sim_days: float, frames_per_day: int = 4, verbose: bool = True,
                 game.sim.build_refinery("inner_belt")
         # Science: spend research as it accumulates so the self-test
         # exercises the tech path end to end (multipliers, discounts).
-        if game.colony.state.get("research_points", 0.0) > 80.0:
+        if (game.colony.state.get("research_points", 0.0) > 80.0
+                and len(game.techs) < len(TECHS)):
             game.buy_tech()
 
     if verbose:
@@ -1825,7 +1834,7 @@ def run_windowed() -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Asteroid Colony Proto - orbital supply chains")
+    parser = argparse.ArgumentParser(description="Space Harvest — orbital farming on real launch windows")
     parser.add_argument("--headless", action="store_true", help="run the loop with no window")
     parser.add_argument("--sim-days", type=float, default=900.0, help="sim days for --headless")
     parser.add_argument("--quiet", action="store_true", help="suppress the headless report")

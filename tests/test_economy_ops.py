@@ -1396,8 +1396,8 @@ def test_goals_log_lists_the_next_unfired_milestones():
     # Completing one removes it from the front of the list.
     snapshot = list(goals)
     game.firsts["first_capture_belt"] = True
-    if "First capture: the inner belt" in snapshot:
-        assert "First capture: the inner belt" not in game._quest_goals()
+    if "First harvest: the inner belt" in snapshot:
+        assert "First harvest: the inner belt" not in game._quest_goals()
 
 
 # --------------------------------------------------------------------------

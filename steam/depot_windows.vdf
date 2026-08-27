@@ -1,7 +1,7 @@
 "DepotBuildConfig"
 {
     "DepotID" "1"
-    "ContentRoot" "..\\dist\\OrbitalSupplyChains\\"
+    "ContentRoot" "..\\dist\\SpaceHarvest\\"
     "FileMapping"
     {
         "LocalPath" "*"

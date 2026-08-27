@@ -1,12 +1,14 @@
-# Orbital Supply Chains
+# Space Harvest
 
-**Orbital Supply Chains** (v0.9.0-steam) is a stylised 3-D launch-window game: real planets on real heliocentric orbits, a glowing sun, a scattered asteroid belt and a starfield sky. Wait for the window (a NEXT WINDOWS board counts down every route; a banner and chime announce GO), click a planet to target it, dispatch, and keep the colony breathing.
+**Space Harvest** is orbital farming on real launch windows.
 
-Deep runs need player-built refuel depots; refineries smelt ore into components and electronics; Comet Vigil pays an aurellium jackpot; Earth sells parts at seasonal prices. Nineteen Firsts milestones, research techs, **Director / Tight / Ironman** difficulties, and **Endless / Charter / Legacy** victory modes give the campaign a spine. Achievements mirror Firsts for Steam.
+Asteroids are your fields. Geometry is the season. Wait for the window (NEXT WINDOWS counts every route; a banner and chime shout GO), dispatch a freighter, mine the rock’s ore fingerprint, and bring the harvest home without starving the colony or flooding Earth prices.
 
-The astrodynamics core is real patched-conic mechanics (Izzo Lambert, multi-rev branches). Graphics presets **Low / Medium / High / Ultra** target everything from Steam Deck to an RTX 4060 Ti ship PC.
+Deep runs need **refuel depots** (barns). **Refineries** smelt ore into components and electronics. **Comet Vigil** is the aurellium jackpot. Nineteen **Firsts**, research techs, **Director / Tight / Ironman** difficulties, and **Endless / Charter / Legacy** victory modes give the campaign a spine. Achievements mirror Firsts for Steam.
 
-Read `project.md` for architecture and `STEAM.md` for depot packaging.
+Under the hood: real patched-conic astrodynamics (Izzo Lambert, multi-rev). Graphics presets **Low / Medium / High / Ultra** run from Steam Deck to an RTX 4060 Ti ship PC.
+
+See `STEAM.md` for packaging and `project.md` for architecture.
 
 ## Quick start
 
@@ -24,7 +26,7 @@ python3 -m venv .venv
 
 ```bash
 .venv/bin/python scripts/build_steam.py
-# ships dist/OrbitalSupplyChains/  (see STEAM.md)
+# → dist/SpaceHarvest/
 ```
 
 ### Graphics
@@ -36,44 +38,44 @@ python3 -m venv .venv
 | High | Modern discrete GPUs |
 | Ultra | i7-12700F + RTX 4060 Ti class |
 
-Open **Settings** from the title menu (quality, resolution, fullscreen, VSync, FOV, volume, difficulty, victory). **K** cycles quality in-play.
+**Settings** on the title menu: quality, resolution, fullscreen, VSync, FOV, volume, difficulty, victory. **K** cycles quality in-play.
 
 ## Controls
 
-- TAB: cycle transfer target
-- ENTER: dispatch idle freighter
+- TAB: cycle transfer target (field)
+- ENTER: dispatch idle freighter (confirm sheet when enabled)
 - `[` / `]`: change warp
 - O: toggle orbits
 - F: follow freighter
 - C: overview camera
 - S: sell stored ore on the Earth market (prices flood when you dump)
-- X: toggle surface scraping / core drilling (fuller holds, more wear and risk)
-- M: toggle automatic hull maintenance (bills the treasury)
-- 1–4: commission a scout / freighter / refinery / hauler
-- Click: select the planet under the cursor as transfer target
+- X: toggle surface scraping / core drilling
+- M: toggle automatic hull maintenance
+- 1–4: commission scout / freighter / refinery / hauler
+- Click: select the planet under the cursor
 - B / V: accept / decline the oldest Earth offer
-- R: build / upgrade a refuel depot at the selected body
-- E: build a refinery at the selected body (waiting runs arrive refined)
-- T / Y / U: buy Drop Tanks / a Deep Drill / Crew Quarters for a docked ship
-- I: install a Navigation Suite (needs aurellium from Comet Vigil; sharper planning refunds burns)
-- P: install a drone bay at the selected depot (fills waiting ships)
-- L: commission the next colony technology with research points (cheaper parts, faster depots, easier crewing, quicker smelting)
-- K: cycle quality preset (low/medium/high/ultra) -- N mutes, both persist
-- G / H: hire a miner / dismiss the unhappiest crew member (Z: botanist)
-- J: jump the warp to the next interesting event (windows, ETAs, deadlines)
-- N: mute audio
-- F1: year report (pauses)
-- F5 / F9: quick-save / quick-load (`saves/` JSON; F9 blocked on Ironman mid-run)
-- ENTER: dispatch (second ENTER confirms when confirm-dispatch is on)
-- Title menu: NEW GAME / CONTINUE / LOAD / SETTINGS / HOW TO PLAY / QUIT
-- Settings: graphics, display, difficulty (Director/Tight/Ironman), victory mode
+- R: build / upgrade a refuel depot (barn)
+- E: build a refinery (processing plant)
+- T / Y / U: Drop Tanks / Deep Drill / Crew Quarters
+- I: Navigation Suite (needs aurellium)
+- P: depot drone bay
+- L: commission the next colony technology
+- K: cycle quality (low/medium/high/ultra) — N mutes
+- G / H / Z: hire miner / dismiss unhappiest / hire botanist
+- J: jump warp to next event
+- F1: year report (farm books)
+- F5 / F9: quick-save / quick-load (F9 blocked on Ironman mid-run)
+- Title: NEW HARVEST / CONTINUE / LOAD / SETTINGS / HOW TO PLAY / QUIT
+- ESC: pause or cancel dispatch confirm
 - Mouse wheel: zoom
-- ESC: pause (Resume / Save / Year Report / Settings / Quit to title) or cancel confirm
+
+## The loop
+
+Wait for geometry → GO → dispatch → mine the field → depot/refinery on deep runs → home → sell without flooding → pay crews → reinvest → chase thorite → comet aurellium → clear Charter/Legacy or play Endless.
 
 ## Artifacts
 
-- `run-log.txt`: final verification output
-- `logs/screenshot.png`: render/capture artifact
-- `logs/porkchop.png`: transfer-window porkchop plot
+- `logs/screenshot.png` — render / key art
+- `logs/porkchop.png` — transfer-window plot
 
-Credits: Ursina Engine; Izzo (2015) Lambert reference from poliastro/lamberthub under MIT; original `asteroid-colony` and `AI-Vision-Lab` by jonas050210.
+Credits: Ursina Engine; Izzo (2015) Lambert (poliastro/lamberthub, MIT); original asteroid-colony lineage by jonas050210.

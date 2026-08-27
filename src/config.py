@@ -352,25 +352,25 @@ REFINERY_RECIPES = (
 # (key, toast label, credit bonus, research bonus). Checked by the game layer
 # every few frames against read-only campaign state; each fires exactly once.
 FIRSTS = (
-    ("first_dispatch", "First dispatch -- the fleet is alive", 250.0, 2.0),
-    ("first_capture_belt", "First capture: the inner belt", 200.0, 2.0),
-    ("first_capture_metallic", "First capture: the metallic belt", 350.0, 4.0),
-    ("first_capture_deep", "First capture: the deep belt", 700.0, 8.0),
-    ("first_capture_derelict", "First capture: the Derelict Zone", 900.0, 10.0),
-    ("first_capture_aurelia", "First capture: Aurelia orbit", 800.0, 8.0),
-    ("first_capture_comet", "FIRST COMET ENCOUNTER -- history made", 2500.0, 40.0),
-    ("first_depot", "First refuel depot online", 500.0, 5.0),
-    ("first_refinery", "First refinery smelting", 600.0, 6.0),
-    ("first_drones", "Drone bay operational", 400.0, 4.0),
-    ("full_return_1", "First full-hold return", 300.0, 3.0),
-    ("full_return_10", "Ten full-hold returns -- a professional outfit", 1200.0, 12.0),
-    ("mass_2500", "2,500 t delivered to the colony", 800.0, 8.0),
-    ("mass_10000", "10,000 t delivered -- the belt industry", 3000.0, 30.0),
-    ("fleet_5", "Five ships under command", 600.0, 6.0),
+    ("first_dispatch", "First sowing -- a freighter leaves the barn", 250.0, 2.0),
+    ("first_capture_belt", "First harvest: the inner belt", 200.0, 2.0),
+    ("first_capture_metallic", "First harvest: the metallic belt", 350.0, 4.0),
+    ("first_capture_deep", "First harvest: the deep belt", 700.0, 8.0),
+    ("first_capture_derelict", "First harvest: the Derelict Zone", 900.0, 10.0),
+    ("first_capture_aurelia", "First harvest: Aurelia orbit", 800.0, 8.0),
+    ("first_capture_comet", "COMET HARVEST -- aurellium fields open", 2500.0, 40.0),
+    ("first_depot", "First barn online -- depot refuelling", 500.0, 5.0),
+    ("first_refinery", "First mill smelting", 600.0, 6.0),
+    ("first_drones", "Field drones operational", 400.0, 4.0),
+    ("full_return_1", "First full-hold harvest home", 300.0, 3.0),
+    ("full_return_10", "Ten full holds -- a proper outfit", 1200.0, 12.0),
+    ("mass_2500", "2,500 t hauled to the colony", 800.0, 8.0),
+    ("mass_10000", "10,000 t -- the belt is a farm", 3000.0, 30.0),
+    ("fleet_5", "Five ships under charter", 600.0, 6.0),
     ("rich_25k", "Treasury passes 25,000 cr", 0.0, 10.0),
     ("rich_100k", "Treasury passes 100,000 cr", 0.0, 25.0),
-    ("thorite_1", "First thorite shipment", 500.0, 6.0),
-    ("aurellium_1", "First aurellium shipment -- Earth is stunned", 2000.0, 30.0),
+    ("thorite_1", "First thorite harvest", 500.0, 6.0),
+    ("aurellium_1", "First aurellium sale -- Earth is stunned", 2000.0, 30.0),
 )
 
 # --- science unlocks -------------------------------------------------------------
@@ -429,7 +429,7 @@ DIFFICULTY_MODES = {
 DEFAULT_DIFFICULTY = "director"
 
 # --- victory / campaign goals --------------------------------------------------
-# Player picks one at NEW GAME. Endless never ends; charter is the Steam clear.
+# Player picks one at NEW HARVEST. Endless never ends; charter is the Steam clear.
 VICTORY_ORDER = ("endless", "charter", "legacy")
 VICTORY_MODES = {
     "endless": {
@@ -532,9 +532,13 @@ DEFAULT_SETTINGS = {
 SAVE_SLOTS = ("quick", "slot1", "slot2", "slot3")
 
 # --- window / UI ------------------------------------------------------------
-WINDOW_TITLE = "Orbital Supply Chains"
+# Product name: Space Harvest — orbital farming on real launch windows.
+GAME_NAME = "Space Harvest"
+GAME_TAGLINE = "wait for the window  --  harvest the belt  --  keep the colony alive"
+WINDOW_TITLE = "Space Harvest"
 WINDOW_SIZE = (1440, 900)
 # Steamworks app id placeholder (replace before store launch). Zero means
 # "no Steam"; steam_appid.txt is written beside the executable by the packager.
 STEAM_APP_ID = 0
-GAME_VERSION = "0.9.0-steam"
+GAME_VERSION = "1.0.0"
+EXECUTABLE_NAME = "SpaceHarvest"

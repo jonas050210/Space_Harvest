@@ -38,7 +38,7 @@ class OrbitalHUD:
                        scale=(0.31, 0.94), position=(-0.615, 0.0, 0.0))
         self.panel = panel
 
-        self.title = Text(text="ORBITAL LOGISTICS", parent=camera.ui, position=(-0.755, 0.42, -0.1),
+        self.title = Text(text="SPACE HARVEST", parent=camera.ui, position=(-0.755, 0.42, -0.1),
                           scale=0.9, color=color.cyan, origin=(-0.5, 0))
         self.clock = Text(text="", parent=camera.ui, position=(-0.755, 0.375, -0.1),
                           scale=0.75, origin=(-0.5, 0))
@@ -357,43 +357,42 @@ class MenuOverlay:
     semantic action tokens the Game layer executes.
     """
 
-    MAIN_ITEMS = ("NEW GAME", "CONTINUE", "LOAD LAST SAVE", "SETTINGS", "HOW TO PLAY", "QUIT")
+    MAIN_ITEMS = ("NEW HARVEST", "CONTINUE", "LOAD LAST SAVE", "SETTINGS", "HOW TO PLAY", "QUIT")
     PAUSE_ITEMS = ("RESUME", "SAVE", "YEAR REPORT", "SETTINGS", "QUIT TO TITLE")
     HOWTO_PAGES = (
-        ("THE LOOP", (
-            "TAB or click a planet to target it.",
-            "Watch NEXT WINDOWS: every rock moves on a real orbit, so rides",
-            "are only cheap when the geometry lines up. The HUD chimes and",
-            "blinks LAUNCH WINDOW OPEN when it is time -- press ENTER.",
+        ("THE HARVEST", (
+            "Space Harvest is orbital farming: asteroids are your fields,",
+            "launch windows are the seasons. TAB or click a rock to target it.",
+            "Watch NEXT WINDOWS -- rides are cheap only when geometry lines up.",
+            "The HUD chimes LAUNCH WINDOW OPEN -- press ENTER (twice to confirm).",
             "",
-            "Warp with [ and ]. Sell ore with S. Watch the price flood:",
-            "dump one market and its price sags for a while.",
+            "Warp with [ and ]. Sell the harvest with S. Dump one market and",
+            "its price floods for a while -- stagger sales like a good farmer.",
         )),
-        ("FUEL AND THE FAR RING", (
-            "Every burn costs delta-v from a finite tank; refuelling at the",
-            "colony takes days. Press R to build a refuel depot at any planet:",
-            "its ISRU plant makes propellant from local ice, and ships dock",
-            "there to top up for the ride home.",
+        ("BARNS AND THE FAR RING", (
+            "Every burn costs delta-v from a finite tank. Press R to build a",
+            "refuel depot (your barn) at any body: ISRU cooks propellant from",
+            "local ice so deep freighters can top up for the ride home.",
             "",
-            "Deep runs (Deep Belt, the Derelict Zone, Comet Vigil) are depot",
-            "runs. A depot plus a scout opens the whole system.",
+            "E builds a refinery (processing plant). Deep Belt, Derelict Zone",
+            "and Comet Vigil are depot runs -- a depot plus a scout opens all.",
         )),
-        ("PEOPLE AND PARTS", (
+        ("CREWS AND TOOLS", (
             "Crews get tired and sullen: tired crews refuse to fly and crash",
             "drills. They earn morale from captures and payday.",
             "",
-            "T buys Drop Tanks, Y a Deep Drill, U Crew Quarters, and P a",
-            "depot drone bay -- prices swing with the seasons, so buy cheap.",
-            "Drone bays work a waiting ship's hold full automatically.",
+            "T Drop Tanks, Y Deep Drill, U Crew Quarters, P depot drone bay --",
+            "prices swing with the seasons, so buy cheap. Drone bays fill a",
+            "waiting ship's hold automatically. L spends research in the lab.",
         )),
         ("CAMPAIGN AND GRAPHICS", (
             "SETTINGS picks difficulty (Director / Tight / Ironman) and a",
-            "victory mode (Endless / Charter / Legacy) before NEW GAME.",
+            "victory mode (Endless / Charter / Legacy) before NEW HARVEST.",
             "Ironman disables mid-run loads; critical hulls can wreck.",
             "",
             "Graphics: Low / Medium / High / Ultra. K cycles them live.",
-            "Ultra is tuned for RTX 4060 Ti class cards. Low keeps Steam Deck",
-            "and integrated GPUs playable. F1 opens the year report.",
+            "Ultra is tuned for RTX 4060 Ti. Low keeps Deck/iGPU playable.",
+            "F1 opens the year report -- your farm books.",
         )),
     )
 
@@ -427,10 +426,10 @@ class MenuOverlay:
         self.panel = Entity(parent=camera.ui, model="quad",
                             color=color.rgba(0.02, 0.03, 0.06, 0.90),
                             scale=(0.9, 1.0), z=0.5)
-        self.title = Text(text="ORBITAL SUPPLY CHAINS", parent=camera.ui,
+        self.title = Text(text="SPACE HARVEST", parent=camera.ui,
                           position=(0.0, 0.30, -0.4), scale=2.4, origin=(0.0, 0),
                           color=color.rgb(0.5, 0.9, 1.0))
-        self.subtitle = Text(text="wait for the window  --  mine the belt  --  keep the colony alive",
+        self.subtitle = Text(text="wait for the window  --  harvest the belt  --  keep the colony alive",
                              parent=camera.ui, position=(0.0, 0.235, -0.4),
                              scale=0.7, origin=(0.0, 0), color=color.rgba(0.8, 0.88, 1.0, 0.9))
         self.items: list[Text] = [
@@ -477,8 +476,8 @@ class MenuOverlay:
             self.continue_available = continue_available
         self.cursor = 0
         self._show_shell()
-        self.title.text = "ORBITAL SUPPLY CHAINS"
-        self.subtitle.text = "wait for the window  --  mine the belt  --  keep the colony alive"
+        self.title.text = "SPACE HARVEST"
+        self.subtitle.text = "wait for the window  --  harvest the belt  --  keep the colony alive"
         self.title.enabled = self.subtitle.enabled = True
         self._render_items(self.MAIN_ITEMS)
 
@@ -487,7 +486,7 @@ class MenuOverlay:
         self.cursor = 0
         self._show_shell()
         self.title.text = "PAUSED"
-        self.subtitle.text = "the belt waits for no one"
+        self.subtitle.text = "the fields keep moving"
         self.title.enabled = self.subtitle.enabled = True
         self._render_items(self.PAUSE_ITEMS)
 
@@ -523,7 +522,7 @@ class MenuOverlay:
         self.cursor = 0
         self._show_shell()
         self.title.text = "YEAR REPORT"
-        self.subtitle.text = "the colony's books"
+        self.subtitle.text = "the farm books"
         self.title.enabled = self.subtitle.enabled = True
         self.howto_title.enabled = False
         for i, text_entity in enumerate(self.howto_lines):
@@ -701,6 +700,7 @@ class MenuOverlay:
                 self.show_settings(dict(self.settings))
             self.cursor = 0
             return action
+        # Main menu. Token stays new_game so the shell action map does not break.
         action = ("new_game", "continue", "load", "settings", "howto", "quit")[self.cursor]
         if action == "continue" and not self.continue_available:
             return None

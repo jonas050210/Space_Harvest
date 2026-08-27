@@ -19,7 +19,7 @@ import sys
 import time
 from typing import Any
 
-from src.config import GAME_VERSION, STEAM_APP_ID
+from src.config import EXECUTABLE_NAME, GAME_NAME, GAME_VERSION, STEAM_APP_ID
 
 
 def _app_root() -> str:
@@ -32,23 +32,24 @@ def _app_root() -> str:
 def cloud_root() -> str:
     """Steam Cloud-friendly save root.
 
-    Prefer ``%USERPROFILE%/Documents/My Games/OrbitalSupplyChains`` on Windows
-    so cloud sync and multi-user installs stay out of Program Files. Fall back
-    to the local ``saves/`` folder in development.
+    Prefer ``Documents/My Games/SpaceHarvest`` on Windows so cloud sync and
+    multi-user installs stay out of Program Files. Fall back to local
+    ``saves/`` in development.
     """
-    override = os.environ.get("OSC_SAVE_ROOT")
+    override = os.environ.get("SPACE_HARVEST_SAVE_ROOT") or os.environ.get("OSC_SAVE_ROOT")
     if override:
         os.makedirs(override, exist_ok=True)
         return override
     if sys.platform.startswith("win"):
         home = os.environ.get("USERPROFILE") or os.path.expanduser("~")
-        path = os.path.join(home, "Documents", "My Games", "OrbitalSupplyChains")
+        path = os.path.join(home, "Documents", "My Games", "SpaceHarvest")
     else:
         home = os.path.expanduser("~")
-        path = os.path.join(home, ".local", "share", "OrbitalSupplyChains")
+        path = os.path.join(home, ".local", "share", "SpaceHarvest")
     # In the repo / CI we keep saves next to the project so tests stay hermetic
-    # unless OSC_USE_USER_SAVES=1 is set.
-    if not os.environ.get("OSC_USE_USER_SAVES") and not getattr(sys, "frozen", False):
+    # unless SPACE_HARVEST_USER_SAVES=1 is set.
+    if not os.environ.get("SPACE_HARVEST_USER_SAVES") and not os.environ.get("OSC_USE_USER_SAVES") \
+            and not getattr(sys, "frozen", False):
         path = os.path.join(_app_root(), "saves")
     os.makedirs(path, exist_ok=True)
     return path
@@ -143,21 +144,22 @@ def write_steam_manifest(dest_dir: str) -> str:
     """Emit a depot-friendly install manifest the packager copies into the build."""
     os.makedirs(dest_dir, exist_ok=True)
     path = os.path.join(dest_dir, "steam_install.json")
+    exe = EXECUTABLE_NAME
     payload = {
-        "name": "Orbital Supply Chains",
+        "name": GAME_NAME,
         "version": GAME_VERSION,
         "app_id": STEAM_APP_ID,
-        "executable_windows": "OrbitalSupplyChains.exe",
-        "executable_linux": "OrbitalSupplyChains",
+        "executable_windows": f"{exe}.exe",
+        "executable_linux": exe,
         "cloud": {
             "root": "saves",
             "patterns": ["*.json"],
             "note": "Mount saves/ via Steam Cloud; achievements_progress.json is included.",
         },
         "launch": [
-            {"description": "Play Orbital Supply Chains", "executable": "OrbitalSupplyChains.exe",
+            {"description": f"Play {GAME_NAME}", "executable": f"{exe}.exe",
              "type": "default", "config": {"oslist": "windows"}},
-            {"description": "Play Orbital Supply Chains", "executable": "OrbitalSupplyChains",
+            {"description": f"Play {GAME_NAME}", "executable": exe,
              "type": "default", "config": {"oslist": "linux"}},
         ],
         "target_hardware": {

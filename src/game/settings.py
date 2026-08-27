@@ -1,29 +1,27 @@
-# JSON settings with OneDrive-friendly project-local storage.
-import json, os
-from . import config, i18n
+"""Minimal settings stub kept for the colony-state bridge.
 
-SETFILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "settings.json")
+The orbital shell owns real settings in ``saves/_settings.json`` via
+``src.main.Game``. This module only supplies defaults that
+``state.initial_state`` still reads.
+"""
+
+from __future__ import annotations
+
+from . import config
+
 DEFAULTS = {
     "language": "en",
-    "difficulty": config.DEFAULT_DIFFICULTY,
+    "difficulty": getattr(config, "DEFAULT_DIFFICULTY", "medium"),
     "music_on": True,
     "volume": 0.8,
     "last_save": None,
-    "window_size": [1280, 720],
+    "window_size": [1440, 900],
 }
 
+
 def load():
-    if os.path.isfile(SETFILE):
-        try:
-            with open(SETFILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                for k, v in DEFAULTS.items():
-                    data.setdefault(k, v)
-                return data
-        except Exception:
-            pass
     return DEFAULTS.copy()
 
-def save(data):
-    with open(SETFILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+
+def save(_data):
+    return None
