@@ -64,6 +64,11 @@ from src.market import Contracts, Market  # noqa: E402
 from src.operations import OpsSimulation  # noqa: E402
 from src.simulation.orbital_sim import OrbitalSimulation  # noqa: E402
 
+try:  # windowed-only import; headless keeps working without Ursina
+    from ursina import Vec3  # noqa: E402
+except Exception:  # pragma: no cover
+    Vec3 = None  # type: ignore[assignment]
+
 # The vendored upstream game provides the colony economy -- and its JSON
 # savegame slots are reused verbatim for the orbital layer's saves.
 from src.game import logistics as colony_logistics  # noqa: E402
@@ -123,6 +128,12 @@ class Game:
         self.tutorial_text = ""
         self._tut = {"dispatched": False, "sold": False, "drilled": False,
                      "bought": False, "saved": False, "done": False}
+        # Screen state: title -> play; ESC toggles pause (windowed only).
+        self.screen = "play" if headless else "title"
+        self.paused = False
+        self.toasts: list[tuple[float, str]] = []
+        self._window_fired_day: dict[str, float] = {}
+        self._window_dep_day: dict[str, float] = {}
         # Jump-to-event: (label, absolute sim time) the warp is racing toward.
         self._jump_target: tuple[str, float] | None = None
         self._jump_warp_restore: float | None = None
@@ -144,6 +155,9 @@ class Game:
     def say(self, text: str, seconds: float = 6.0) -> None:
         self._message = text
         self._message_until = time.time() + seconds
+        self.toasts.append((time.time() + seconds, text))
+        if len(self.toasts) > 4:
+            del self.toasts[: len(self.toasts) - 4]
         print(f"[game] {text}")
 
     def _current_message(self) -> str:
@@ -216,8 +230,17 @@ class Game:
         """Advance one frame by ``dt_days`` of simulation time.
 
         Callers pass seconds times the warp rate, so windowed and headless
-        modes run the identical code path.
+        modes run the identical code path. Title and pause states skip the
+        simulation but keep the scene alive.
         """
+        if self.screen == "title":
+            self._tick_title()
+            return
+        if self.paused:
+            if self.hud is not None:
+                self.hud.update(self.sim, self.colony.summary(), "PAUSED - ESC to resume",
+                                extra=self._ops_hud_data())
+            return
         self.frames += 1
         self.sim.step(dt_days)
         self.sim.recover_mines(dt_days)
@@ -230,10 +253,14 @@ class Game:
         self._tick_tutorial()
         self._tick_audio()
         self._tick_jump()
+        self._tick_window_moments()
 
         if self.scene is not None:
             self.scene.update(self.sim)
-            self.update_camera()
+            if self.screen == "title":
+                self._drift_camera()
+            else:
+                self.update_camera()
         if self.hud is not None:
             self.hud.update(self.sim, self.colony.summary(), self._current_message(),
                             extra=self._ops_hud_data())
@@ -274,6 +301,34 @@ class Game:
                     seconds=8.0,
                 )
 
+
+    # -- title screen -----------------------------------------------------------
+    def _tick_title(self) -> None:
+        self.frames += 1
+        if self.scene is not None:
+            self.scene.update(self.sim)
+            self._drift_camera()
+        if self.hud is not None:
+            self.hud.update(self.sim, self.colony.summary(),
+                            "press ENTER to launch", extra=None)
+
+    def _drift_camera(self) -> None:
+        """Slow cinematic orbit on the title screen."""
+        import math as _math
+
+        from ursina import camera
+
+        angle = self.frames * 0.0025
+        radius = 58.0
+        camera.position = Vec3(radius * _math.cos(angle), 26.0, radius * _math.sin(angle))
+        camera.look_at(Vec3(0, 0, 0))
+
+    def start_game(self) -> None:
+        if self.screen != "title":
+            return
+        self.screen = "play"
+        self.say("Director online. TAB to pick a target -- wait for the window, then go.",
+                 seconds=9.0)
 
     # -- market & fleet actions ----------------------------------------------
     def sell_all(self) -> None:
@@ -399,6 +454,8 @@ class Game:
             "pending_line": self._pending_hud_line(),
             "rep_line": self._reputation_hud_line(),
             "life_line": self._life_hud_line(),
+            "window_line": self.window_line_text,
+            "window_open": self.window_is_open,
             "depot_line": self._depot_hud_line(),
             "depot_hint": self._depot_hint_line(),
             "tutorial": self.tutorial_text,
@@ -715,6 +772,42 @@ class Game:
         self.say(f"Jumping to {label} in {(when - self.sim.time) / SIM_SECONDS_PER_DAY:,.0f} days.",
                  seconds=6.0)
 
+    window_line_text = ""
+    window_is_open = False
+
+    def _tick_window_moments(self) -> None:
+        """Announce the launch-window GO moment for the selected target.
+
+        The window cache holds a departure opportunity while it is still in
+        the future and transparently re-solves once it passes, so the only
+        way to see the instant a window *arrives* is to watch for sim time
+        crossing the departure we recorded on an earlier tick.
+        """
+        self.window_is_open = False
+        if self.hud is None:
+            return
+        target = self.hud.selected_target()
+        window = self.sim.launch_window("colony", target)
+        if window is None:
+            self.window_line_text = ""
+            return
+        wait_days = max(0.0, (window.departure_time - self.sim.time) / SIM_SECONDS_PER_DAY)
+        crossed = self._window_dep_day.get(target)
+        if crossed is not None and self.sim.time >= crossed > self.sim.time - 6.0 * SIM_SECONDS_PER_DAY:
+            # The recorded opportunity is departing right about now: GO.
+            self.window_is_open = True
+            last = self._window_fired_day.get(target, -1.0e9)
+            if self.sim.time - last > 40.0 * SIM_SECONDS_PER_DAY:
+                self._window_fired_day[target] = self.sim.time
+                self._play_alert("window")
+                self.say(f"LAUNCH WINDOW OPEN -- {self.sim.bodies[target].name} -- press ENTER",
+                         seconds=8.0)
+        self._window_dep_day[target] = window.departure_time
+        if self.window_is_open:
+            self.window_line_text = "LAUNCH WINDOW OPEN  --  ENTER to dispatch"
+        else:
+            self.window_line_text = f"Window to {self.sim.bodies[target].name} in {wait_days:,.0f} d"
+
     def _tick_jump(self) -> None:
         if self._jump_target is None:
             return
@@ -974,7 +1067,7 @@ def _setup_audio(game: "Game") -> None:
         os.makedirs(directory, exist_ok=True)
         audio = {"hum": Audio(make_hum_wav(os.path.join(directory, "hum.wav")),
                               loop=True, autoplay=True)}
-        for kind in ("flare", "hull", "shortage", "contract", "build"):
+        for kind in ("flare", "hull", "shortage", "contract", "build", "window"):
             audio[kind] = Audio(make_alert_wav(kind, os.path.join(directory, f"{kind}.wav")),
                                 autoplay=False)
         game.audio = audio
@@ -997,6 +1090,9 @@ def run_windowed() -> None:
     game = Game(headless=False)
     game.build_scene(ursina_scene)
     _setup_audio(game)
+    from src.ui.orbital_hud import MenuOverlay
+
+    menus = MenuOverlay()
     camera.orthographic = False
     camera.fov = 55
 
@@ -1007,8 +1103,32 @@ def run_windowed() -> None:
 
     def input(key):
         if key == "escape":
+            if game.screen == "title":
+                application.quit()
+            game.paused = not game.paused
+            if game.paused:
+                menus.show_pause()
+            else:
+                menus.hide()
+            return
+        if key == "q" and game.screen != "title":
             application.quit()
-        elif key == "tab" and game.hud is not None:
+        if game.screen == "title":
+            if key == "enter":
+                game.start_game()
+                menus.hide()
+            elif key == "f9":
+                game.load_game()
+                if game.screen == "play":
+                    menus.hide()
+            return
+        if game.paused:
+            if key == "f5":
+                game.save_game()
+            elif key == "f9":
+                game.load_game()
+            return
+        if key == "tab" and game.hud is not None:
             game.hud.cycle_target(1)
             game.say(f"Target: {game.hud.selected_target()}")
         elif key == "enter":

@@ -93,6 +93,17 @@ class OrbitalHUD:
         self.ticker = Text(text="", parent=camera.ui, position=(0.0, -0.51, -0.1),
                            scale=0.5, color=color.rgba(0.75, 0.85, 0.95, 0.9),
                            origin=(0.0, 0))
+        # Toast stack: the newest few messages, top-centre.
+        self.toast_lines = [
+            Text(text="", parent=camera.ui, position=(0.0, 0.46 - i * 0.035, -0.1),
+                 scale=0.62, origin=(0.0, 0),
+                 color=color.rgba(0.95, 0.97, 1.0, 0.95))
+            for i in range(3)
+        ]
+        # Launch-window banner: big, blinking, unmissable.
+        self.launch_banner = Text(text="", parent=camera.ui, position=(0.0, 0.30, -0.2),
+                                  scale=1.35, origin=(0.0, 0), color=color.rgb(0.45, 1.0, 0.55))
+        self._blink = 0
 
     # -- helpers -------------------------------------------------------------
     def selected_target(self) -> str:
@@ -111,6 +122,8 @@ class OrbitalHUD:
 
         if extra is not None:
             self._update_ops_panel(extra)
+            self._update_toasts(extra.get("toasts", []))
+            self._update_banner(extra.get("window_line", ""), extra.get("window_open", False))
         else:
             self._clear_ops_panel()
 
@@ -180,6 +193,23 @@ class OrbitalHUD:
             )
         self.status.text = message
 
+    # -- toasts and the launch banner -----------------------------------------
+    def _update_toasts(self, toasts: list[str]) -> None:
+        for line, text in zip(self.toast_lines, toasts[-3:]):
+            line.text = text
+        for line in self.toast_lines[len(toasts[-3:]):]:
+            line.text = ""
+
+    def _update_banner(self, window_line: str, is_open: bool) -> None:
+        self._blink += 1
+        if is_open:
+            # Blink roughly twice a second so the eye catches it.
+            self.launch_banner.text = window_line if self._blink % 30 < 20 else ""
+            self.launch_banner.color = color.rgb(0.45, 1.0, 0.55)
+        else:
+            self.launch_banner.text = window_line if window_line.startswith("Window in") else ""
+            self.launch_banner.color = color.rgba(0.85, 0.9, 1.0, 0.8)
+
     # -- market / ops panel ---------------------------------------------------
     def _update_ops_panel(self, extra: dict) -> None:
         self.credits.text = f"Treasury  {extra.get('credits', 0.0):,.0f} cr"
@@ -243,3 +273,69 @@ class OrbitalHUD:
             line.text = ""
         self.tutorial.text = ""
         self.ticker.text = ""
+        self.launch_banner.text = ""
+        for line in self.toast_lines:
+            line.text = ""
+
+
+class MenuOverlay:
+    """Title and pause overlays for the windowed game.
+
+    Kept inside the HUD module on purpose: same Ursina primitives, same
+    styling, no second UI toolkit. The title screen shows over a slowly
+    drifting camera; ESC in play toggles the pause card.
+    """
+
+    def __init__(self):
+        # -- title card ------------------------------------------------------
+        self.title_panel = Entity(parent=camera.ui, model="quad",
+                                  color=color.rgba(0.02, 0.03, 0.06, 0.88),
+                                  scale=(1.2, 1.2), z=0.5)
+        self.title = Text(text="ORBITAL SUPPLY CHAINS", parent=camera.ui,
+                          position=(0.0, 0.16, -0.4), scale=2.6, origin=(0.0, 0),
+                          color=color.rgb(0.5, 0.9, 1.0))
+        self.subtitle = Text(text="wait for the window  --  mine the belt  --  keep the colony alive",
+                             parent=camera.ui, position=(0.0, 0.08, -0.4),
+                             scale=0.75, origin=(0.0, 0), color=color.rgba(0.8, 0.88, 1.0, 0.9))
+        self.title_prompt = Text(text="ENTER  launch         F9  load save         ESC  quit",
+                                 parent=camera.ui, position=(0.0, -0.06, -0.4),
+                                 scale=0.8, origin=(0.0, 0), color=color.yellow)
+        self.title_hint = Text(text="a stylised launch-window game: every rock is a real heliocentric orbit",
+                               parent=camera.ui, position=(0.0, -0.14, -0.4),
+                               scale=0.55, origin=(0.0, 0),
+                               color=color.rgba(0.6, 0.7, 0.85, 0.85))
+        # -- pause card --------------------------------------------------------
+        self.pause_panel = Entity(parent=camera.ui, model="quad",
+                                  color=color.rgba(0.02, 0.03, 0.06, 0.82),
+                                  scale=(0.7, 0.5), z=0.5, enabled=False)
+        self.pause_title = Text(text="PAUSED", parent=camera.ui, position=(0.0, 0.08, -0.4),
+                                scale=1.8, origin=(0.0, 0), color=color.rgb(1.0, 0.85, 0.4))
+        self.pause_hint = Text(text="ESC resume    F5 save    F9 load    Q quit",
+                               parent=camera.ui, position=(0.0, -0.02, -0.4),
+                               scale=0.75, origin=(0.0, 0), color=color.white)
+        self.show_title()
+
+    def show_title(self) -> None:
+        self.title_panel.enabled = True
+        self.title.enabled = True
+        self.subtitle.enabled = True
+        self.title_prompt.enabled = True
+        self.title_hint.enabled = True
+        self.pause_panel.enabled = False
+        self.pause_title.enabled = False
+        self.pause_hint.enabled = False
+
+    def show_pause(self) -> None:
+        self.title_panel.enabled = False
+        for text in (self.title, self.subtitle, self.title_prompt, self.title_hint):
+            text.enabled = False
+        self.pause_panel.enabled = True
+        self.pause_title.enabled = True
+        self.pause_hint.enabled = True
+
+    def hide(self) -> None:
+        self.title_panel.enabled = False
+        for text in (self.title, self.subtitle, self.title_prompt, self.title_hint,
+                     self.pause_title, self.pause_hint):
+            text.enabled = False
+        self.pause_panel.enabled = False
