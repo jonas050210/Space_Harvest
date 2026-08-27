@@ -642,3 +642,50 @@ $ python -m src.main --headless --sim-days 6000
 # 6) astrodynamics invariance
 src/simulation diff vs e2543e3 (must be 0):
 0
+
+# =============================================================
+# run-log.txt — full-featured build session (2026-08-27 13:09 UTC)
+# Branch: arena/01a041a3-asteroid-colony-proto
+# Scope: windows board + reticle + dv bars, merged belt mesh + quality
+#        presets, Comet Vigil, parts market + upgrades + drone bays,
+#        full game menu + settings persistence + how-to-play.
+# =============================================================
+
+# 1) project tests
+$ python -m pytest tests/ -q
+123 passed in 187.65s (0:03:07)
+
+# 2) upstream asteroid-colony tests
+=== Result: 25 passed, 0 failed ===
+
+# 3) menu + comet + parts windowed smoke (Ursina headless boot)
+[93mwarning: No monitors found [0m
+package_folder: /home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/ursina
+asset_folder: .
+[game] Director online. TAB to pick a target -- wait for the window, then go.
+[game] Depot online at Inner Belt Field. Bill: 3,500 cr.
+[game] Drone bay online at the Inner Belt Field depot. Bill 3,436 cr.
+[game] Drop Tanks installed on Kestrel. Bill 2,055 cr.
+[game] Deep Drill installed on Petrel. Bill 2,920 cr.
+[game] OFFER from Luna Water Authority: 100 t of iron by day 501 for 1,855 cr. B to accept, V to decline.
+[smoke] comet in board: True
+[smoke] depot {'inner_belt': {'drones': 1}} | ship parts {'tank': 1}
+[smoke] reticle on: True | tail: True
+[smoke] FULL FEATURE PASS OK
+
+# 4) headless self-test
+$ python -m src.main --headless --sim-days 6000
+  deliveries into colony economy: 63
+  colony storage : {'used': 41.40800000000047, 'capacity': 1500, 'delivered': 9023.979545262748}
+  research points: 2,256.0
+  ore mined      : 10,335 t   incidents: 2
+  market day 6,000 (cr/t): ice 12.8, iron 16.0, silver 36.6, gold 82.7, platinum 273.1, components 45.1, electronics 144.1
+  treasury       : 189,420 cr
+
+# 5) capture artifact
+[capture] frames=700 shots=1 runs=5 delivered=1128t fallback=1
+
+# 6) astrodynamics invariance
+src/simulation diff vs e2543e3 (must be 0):
+0
+workspace: 6.3M / 356 files

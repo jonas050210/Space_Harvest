@@ -111,11 +111,15 @@ def _fallback_capture(reason: BaseException) -> int:
     # A lively mid-game moment: ~1,000 days in, fleet busy, colony funded.
     dt_days = 2.0
     next_sale = 90.0 * SIM_SECONDS_PER_DAY
+    depot_built = False
     for _ in range(FRAMES):
         game.update(dt_days)
         if game.sim.time >= next_sale:
             next_sale += 90.0 * SIM_SECONDS_PER_DAY
             game.sell_all()
+        if not depot_built and game.credits > 8000.0:
+            game.build_depot_selected()   # headless default: the deep belt
+            depot_built = True
         for ship in game.sim.ships:
             r, _ = ship.state_at(game.sim.time)
             trails[ship.name].append((float(r[0]), float(r[1])))
@@ -187,12 +191,21 @@ def _fallback_capture(reason: BaseException) -> int:
         if len(pts) > 1:
             draw.line(pts, fill=tuple(int(c * 0.40) for c in rgb), width=2)
 
-    for key, body in BODIES.items():
+    for key, body in list(game.sim.bodies.items()):
         if key == "nix":
             continue
         r_body, _ = body_state(body.elements, 4 * math.pi * math.pi, now)
         bx, by = p(float(r_body[0]), float(r_body[1]))
         diameter = int(30 + 44 * body.render_scale)
+        if key == "comet_vigil":
+            # Anti-sunward tail, brightness by distance.
+            dist = math.hypot(r_body[0], r_body[1])
+            strength = max(0.0, min(1.0, 1.6 / max(0.9, dist) ** 1.6))
+            if strength > 0.02:
+                ux, uy = -r_body[0] / dist, -r_body[1] / dist  # toward the sun
+                tx, ty = p(float(r_body[0]) - ux * 0.9, float(r_body[1]) - uy * 0.9)
+                draw.line((bx, by, tx, ty), fill=(120, 190, 235), width=max(2, int(9 * strength)))
+                draw.line((bx, by, tx, ty), fill=(190, 225, 250), width=max(1, int(3 * strength)))
         tex_path = os.path.join("assets", "textures", "game", f"{key}.png")
         if os.path.isfile(tex_path):
             tex = Image.open(tex_path).convert("RGB").resize((diameter, diameter))
@@ -252,10 +265,15 @@ def _fallback_capture(reason: BaseException) -> int:
         fleet_lines.append(
             f"{report['name']:<8} {report['status']:<9} {report['delta_v_left']:>6,.0f} m/s  H{hull:.0f}%"
         )
-    panel((24, 24, 660, 320), "ORBITAL LOGISTICS", [
+    game._update_windows_board()
+    board_lines = ["NEXT WINDOWS"]
+    for name, wait, is_open in game._windows_board[:6]:
+        board_lines.append(f"GO  {name}" if is_open else f"    {name:<20}{wait:>5,.0f} d")
+    panel((24, 24, 660, 400), "ORBITAL LOGISTICS", [
         f"Mission day {days:,.0f}   (year {days / 365.25:.2f})",
         f"runs {game.sim.stats['runs_completed']}   delivered {game.sim.stats['mass_delivered']:,.0f} t",
         *fleet_lines,
+        *([""] + board_lines),
     ])
     resources = game.colony.state["resources"]
     prices = ", ".join(f"{res} {game.market.price(res):.1f}" for res in ("iron", "silver", "gold"))

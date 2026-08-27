@@ -1,6 +1,6 @@
 # Asteroid-Colony Proto
 
-**Orbital Supply Chains** is a compact, stylised 3-D launch-window game: real planets on real heliocentric orbits, a glowing sun, a scattered asteroid belt and a starfield sky -- all generated procedurally, no binary assets. Wait for the window (the HUD announces it and chimes), click a planet to target it, dispatch, and keep the colony breathing. The astrodynamics underneath is real patched-conic mechanics: launch windows, delta-v budgets, capture burns, layovers, multi-revolution slow routes, and deliveries booked into the upstream colony economy.
+**Orbital Supply Chains** is a compact, stylised 3-D launch-window game: real planets on real heliocentric orbits, a glowing sun, a scattered asteroid belt and a starfield sky -- all generated procedurally, no binary assets. Wait for the window (a NEXT WINDOWS board counts down every route; a banner and chime announce GO), click a planet to target it, dispatch, and keep the colony breathing. Deep runs need player-built refuel depots, the long-period Comet Vigil pays a platinum jackpot if you catch it, and the Earth parts market sells drop tanks, deep drills, crew quarters and depot drone bays at seasonal prices. The astrodynamics underneath is real patched-conic mechanics: launch windows, delta-v budgets, capture burns, layovers, multi-revolution slow routes, and deliveries booked into the upstream colony economy.
 
 The orbital layer runs patched-conic transfers solved with Izzo's universal Lambert algorithm, including its multi-revolution branches (slow, propellant-cheap routes that the planner only picks when they genuinely pay).
 
@@ -35,12 +35,16 @@ python3 -m venv .venv
 - Click: select the planet under the cursor as transfer target
 - B / V: accept / decline the oldest Earth offer
 - R: build / upgrade a refuel depot at the selected body
+- T / Y / U: buy Drop Tanks / a Deep Drill / Crew Quarters for a docked ship
+- P: install a drone bay at the selected depot (fills waiting ships)
+- K: cycle quality preset (belt, trails, sky) -- N mutes, both persist
 - G / H: hire a miner / dismiss the unhappiest crew member (Z: botanist)
 - J: jump the warp to the next interesting event (windows, ETAs, deadlines)
 - N: mute audio
 - F5 / F9: quick-save / quick-load (`saves/` JSON)
+- Title menu: NEW GAME / CONTINUE / LOAD / SETTINGS / HOW TO PLAY / QUIT
 - Mouse wheel: zoom
-- Esc: quit
+- ESC: pause (Resume / Save / Load / Settings / Quit to title)
 
 ## Artifacts
 
