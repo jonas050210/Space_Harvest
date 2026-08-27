@@ -34,6 +34,7 @@ from src.mining import (  # noqa: E402
     vein_size,
 )
 from src.operations import OpsSimulation  # noqa: E402
+from src.simulation.orbital_sim import Leg  # noqa: E402
 from src.simulation.bodies import BODIES  # noqa: E402
 
 
@@ -317,6 +318,159 @@ def test_ops_json_round_trip_and_continued_determinism():
     for live, loaded in zip(sim.ships, restored.ships):
         assert live.r == pytest.approx(loaded.r, abs=1e-12)
         assert live.v == pytest.approx(loaded.v, abs=1e-12)
+
+
+# --------------------------------------------------------------------------
+# Crew: rosters, morale, fatigue
+# --------------------------------------------------------------------------
+
+def test_every_ship_has_a_named_roster_with_roles():
+    sim = OpsSimulation(ship_names=("Kestrel", "Petrel"))
+    for ship in sim.ships:
+        roster = sim.crew[ship.name]
+        assert len(roster) == 4
+        roles = sorted(member.role for member in roster)
+        assert roles == ["engineer", "miner", "miner", "pilot"]
+        assert all(member.name and " " in member.name for member in roster)
+    assert sim.crew["Kestrel"] is not sim.crew["Petrel"]
+
+
+def test_fatigue_accumulates_away_and_recovers_at_the_colony():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim.dispatch(sim.ships[0], "inner_belt")
+    for _ in range(40):
+        sim.step(3.0)
+        if sim.missions and sim.missions["Kestrel"].leg is not Leg.PENDING:
+            break
+    _, fatigue = sim.crew_stats("Kestrel")
+    assert fatigue > 5.0  # flying accrues fatigue
+
+    while sim.missions:
+        sim.step(3.0)
+    for _ in range(60):
+        sim.step(3.0)
+    _, fatigue = sim.crew_stats("Kestrel")
+    assert fatigue == pytest.approx(0.0, abs=5.0)
+
+
+def test_a_long_run_leaves_the_crew_tired_but_recoverable():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim.dispatch(sim.ships[0], "inner_belt")
+    while sim.missions:
+        sim.step(3.0)
+    morale, fatigue = sim.crew_stats("Kestrel")
+    assert 20.0 < morale < 75.0      # drained, not destroyed
+    assert fatigue > 60.0            # genuinely tired
+    for _ in range(50):              # a season docked
+        sim.step(3.0)
+    morale, fatigue = sim.crew_stats("Kestrel")
+    assert morale > 45.0 and fatigue < 10.0
+
+
+def test_exhausted_crew_refuses_dispatch_until_rest():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    for member in sim.crew["Kestrel"]:
+        member.fatigue = 95.0
+    ok, message = sim.dispatch(sim.ships[0], "inner_belt")
+    assert not ok and "exhausted" in message
+    for _ in range(40):  # ~120 dock days
+        sim.step(3.0)
+    _, fatigue = sim.crew_stats("Kestrel")
+    assert fatigue < 90.0
+    ok, _ = sim.dispatch(sim.ships[0], "inner_belt")
+    assert ok
+
+
+def test_unhappy_crew_mines_less_and_crashes_more():
+    sim_low = OpsSimulation(ship_names=("Kestrel",))
+    for member in sim_low.crew["Kestrel"]:
+        member.morale = 0.0
+        member.fatigue = 100.0
+    sim_high = OpsSimulation(ship_names=("Kestrel",))
+    for member in sim_high.crew["Kestrel"]:
+        member.morale = 100.0
+        member.fatigue = 0.0
+    assert sim_low.crew_yield_factor("Kestrel") < sim_high.crew_yield_factor("Kestrel")
+    assert sim_low.crew_incident_factor("Kestrel") > sim_high.crew_incident_factor("Kestrel")
+    assert sim_high.crew_yield_factor("Kestrel") <= 1.0
+
+    ledger_low = YieldLedger()
+    ledger_high = YieldLedger()
+    payload_low = plan_extraction("inner_belt", ledger_low, None, 240.0,
+                                  mine_bonus=sim_low.crew_yield_factor("Kestrel"))
+    payload_high = plan_extraction("inner_belt", ledger_high, None, 240.0,
+                                   mine_bonus=sim_high.crew_yield_factor("Kestrel"))
+    assert sum(payload_low.values()) < sum(payload_high.values())
+
+
+def test_capture_pays_morale_and_payday_pays_the_fleet():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    for member in sim.crew["Kestrel"]:
+        member.morale = 40.0
+    sim.dispatch(sim.ships[0], "inner_belt")
+    while sim.missions:
+        sim.step(3.0)
+    morale_after_run = sim.crew_stats("Kestrel")[0]
+    assert morale_after_run > 41.0  # the capture bonus is in there
+    sim.crew_payday(2.0)
+    assert sim.fleet_morale() > morale_after_run
+
+
+def test_hardship_applies_and_boredom_has_a_floor():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim.apply_hardship(30.0)
+    assert sim.crew_stats("Kestrel")[0] == pytest.approx(50.0)
+    for _ in range(800):  # over two years parked
+        sim.step(3.0)
+    assert sim.crew_stats("Kestrel")[0] >= 25.0 - 1e-6
+
+
+# --------------------------------------------------------------------------
+# Space weather: flares and debris seasons
+# --------------------------------------------------------------------------
+
+def test_flare_lifecycle_progresses_and_returns_to_quiet():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim._flare_timer = 1e-6  # imminent (timers are in sim-seconds: 1 s ~ 58 days)
+    seen = set()
+    for _ in range(200):
+        sim.step(0.5)
+        seen.add(sim.flare_state)
+        if sim.flare_state == "quiet" and sim.time > 20.0 * SIM_SECONDS_PER_DAY:
+            break
+    assert {"warning", "flare"} <= seen
+    assert sim.flare_state == "quiet"
+
+
+def test_flare_and_debris_only_wear_ships_in_flight():
+    sim = OpsSimulation(ship_names=("Kestrel", "Petrel"))
+    sim.dispatch(sim.ships[0], "inner_belt")
+    while sim.missions["Kestrel"].leg is Leg.PENDING:  # wait for the burn
+        sim.step(1.0)
+    sim.flare_state = "flare"
+    sim._flare_duration = 1e9  # hold the flare open for the test
+    sim.debris_active = True
+    sim._debris_timer = 1e9
+    hull_parked = sim.hull["Petrel"]
+    for _ in range(20):
+        sim.step(1.0)
+    assert sim.hull["Kestrel"] < 100.0 - 20.0  # flying: ~1.55%/day for 20 days
+    assert sim.hull["Petrel"] == pytest.approx(hull_parked)  # docked: shielded
+    assert sim.weather_alert()
+
+
+def test_weather_state_survives_a_json_round_trip():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim.flare_state = "warning"
+    sim._flare_timer = 42.0
+    sim.debris_active = True
+    sim._debris_timer = 77.0
+    restored = OpsSimulation.from_json(json.loads(json.dumps(sim.to_json())))
+    assert restored.flare_state == "warning"
+    assert restored._flare_timer == pytest.approx(42.0)
+    assert restored.debris_active is True
+    assert restored._debris_timer == pytest.approx(77.0)
+    assert [m.to_json() for m in restored.crew["Kestrel"]] == [m.to_json() for m in sim.crew["Kestrel"]]
 
 
 # --------------------------------------------------------------------------

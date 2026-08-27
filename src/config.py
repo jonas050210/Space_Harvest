@@ -61,7 +61,11 @@ SHIP_REFUEL_RATE = 120.0
 # scan re-dispatched it, so fleets were trapped flying inner-belt runs
 # forever. At 120 a ship tops up in about half a year of layover, which
 # matches the natural rhythm of window waits and lets deep fields open up.
-SHIP_REFUEL_ENERGY_PER_MS = 0.004  # colony energy units per m/s restored
+SHIP_REFUEL_ENERGY_PER_MS = 0.0006  # colony energy units per m/s restored
+# Lowered from 0.004 when life support gave the colony a real energy budget
+# (solar +1.5/day): at 0.004 a single full refill cost ~104 energy, roughly a
+# season of sunlight, so the cell sat permanently at zero. At 0.0006 a full
+# refill costs ~16, a sensible share of production.
 SHIP_ISP = 3200.0            # s, electric propulsion flavour
 
 # --- fleet classes (colony operations layer) -------------------------------
@@ -129,6 +133,88 @@ MARKET_NOISE_MEAN_REVERSION = 0.02  # per day toward demand 1.0
 MARKET_PRICE_FLOOR_FRACTION = 0.15  # price never drops below this share of base
 MARKET_HISTORY_SAMPLE_DAYS = 2.0
 MARKET_HISTORY_POINTS = 240
+
+# --- crew: roster, morale, fatigue ------------------------------------------
+# Every ship carries a small crew drawn from the colony pool. Tired crews
+# cause mining incidents; unpaid or deprived crews work slower; crews that
+# rest too long get bored. Effects are multiplicative factors on systems that
+# already exist (incident rolls, extraction planning), never new physics.
+# Rates are budgeted against a typical ~150 away-day round trip: fatigue
+# should come home around 80, and a season docked plus payday should restore
+# morale fully, so crews are "tired but eager", not destroyed, by one run.
+CREW_MORALE_START = 80.0
+CREW_MORALE_MAX = 100.0
+CREW_FATIGUE_PER_DAY_FLYING = 0.45   # OUTBOUND / INBOUND legs
+# Layovers are long (return windows can open months after arrival) but they
+# are NOT hard work: station-keeping on a captured body is light duty, so
+# fatigue accrues slowly and morale only suffers mild cabin fever.
+CREW_FATIGUE_PER_DAY_LAYOVER = 0.15  # WAITING: light station-keeping duty
+CREW_FATIGUE_PER_DAY_PENDING = 0.05  # pre-launch prep while still docked home
+CREW_MORALE_CABIN_FEVER_PER_DAY = 0.05  # WAITING: cooped up far from home
+CREW_FATIGUE_RECOVERY_PER_DAY = 1.8  # docked at the colony
+CREW_FATIGUE_EXHAUSTED = 90.0        # dispatch refused above this
+CREW_MORALE_CAPTURE_BONUS = 3.0      # a clean capture pays in pride
+CREW_MORALE_PAYDAY_BONUS = 2.0       # granted when ore is sold
+CREW_MORALE_REST_PER_DAY = 0.8       # parked, fed, paid
+CREW_MORALE_OVERWORK_DRAIN_PER_DAY = 0.3  # per member while own fatigue > 70
+CREW_MORALE_BOREDOM_DRAIN_PER_DAY = 0.3   # parked longer than this...
+CREW_IDLE_BOREDOM_DAYS = 45.0             # ...while fully rested
+CREW_MORALE_BOREDOM_FLOOR = 25.0  # boredom alone never breaks a crew; shortages can
+CREW_MORALE_OVERWORK_FLOOR = 45.0  # overwork sours morale but never breaks it
+CREW_MORALE_LOW_YIELD = 35.0         # below this morale, mining yield suffers
+CREW_NAMES_FIRST = ("Yuki", "Mateo", "Aria", "Dmitri", "Zaneh", "Okafor", "Lena",
+                    "Tariq", "Ines", "Kofi", "Mira", "Anders", "Priya", "Hugo",
+                    "Farida", "Jonas", "Nova", "Rafael", "Sanaa", "Emil")
+CREW_NAMES_LAST = ("Voss", "Okoye", "Lindqvist", "Marsh", "Petrov", "Duarte",
+                   "Haile", "Kowalski", "Nakamura", "Silva", "Adeyemi", "Ferro")
+
+# --- space weather: solar flares and debris seasons --------------------------
+# Global, deterministic, ticked by the operations step. Only ships in flight
+# are exposed; docked ships sit inside the colony's shielding.
+FLARE_QUIET_DAYS_RANGE = (120.0, 420.0)  # quiet-time draw before the next cycle
+FLARE_WARNING_DAYS = 6.0                 # HUD-visible warning before it hits
+FLARE_DURATION_DAYS_RANGE = (2.0, 5.0)
+FLARE_WEAR_PCT_PER_DAY = 1.2             # extra hull wear for ships in flight
+FLARE_MORALE_DRAIN_PER_DAY = 0.8         # crews hate riding out a storm
+DEBRIS_SEASON_PERIOD_DAYS = 300.0        # roughly periodic debris seasons
+DEBRIS_SEASON_DURATION_DAYS = 40.0
+DEBRIS_WEAR_PCT_PER_DAY = 0.35           # micrometeorite sandblasting in flight
+
+# --- Earth faction contracts --------------------------------------------------
+CONTRACT_FACTIONS = ("Terran Metals Guild", "Luna Water Authority", "Ceres Prospecting Co.")
+CONTRACT_OFFER_PERIOD_DAYS = 40.0
+CONTRACT_MAX_ACTIVE = 2
+CONTRACT_TONNES_RANGE = (60.0, 260.0)
+CONTRACT_DEADLINE_DAYS = (60.0, 180.0)
+CONTRACT_REWARD_MULTIPLIER_RANGE = (1.15, 1.45)  # x market price at offering
+CONTRACT_REP_ON_COMPLETE = 12.0
+CONTRACT_REP_ON_FAIL = 18.0
+REPUTATION_PRICE_BONUS = 0.06  # max sell-price swing at +/-100 average standing
+
+# --- colony life support (ticked by the game layer) ---------------------------
+# Crew consume oxygen, food and water. Electrolysis and hydroponics regenerate
+# them from water and energy; an ice refinery melts stored ice into water. The
+# loop creates the core tension: ice sold to Earth is ice the colonists do not
+# eat. All units are abstract life-support units per crew member per day.
+LIFE_OXYGEN_PER_CREW_DAY = 0.05
+LIFE_FOOD_PER_CREW_DAY = 0.04
+LIFE_WATER_PER_CREW_DAY = 0.03
+LIFE_ELECTROLYSIS_WATER_PER_O2 = 1.2
+LIFE_ELECTROLYSIS_ENERGY_PER_O2 = 0.4
+LIFE_HYDROPONICS_WATER_PER_FOOD = 1.1
+LIFE_HYDROPONICS_ENERGY_PER_FOOD = 0.5
+LIFE_ICE_TO_WATER_YIELD = 0.8
+LIFE_ICE_MELT_RATE_PER_DAY = 8.0
+LIFE_ICE_RESERVE_T = 80.0        # S never sells the colonists' ice below this
+LIFE_START_OXYGEN = 40.0
+LIFE_START_FOOD = 35.0
+LIFE_START_WATER = 30.0
+LIFE_LOW_STOCK_FRACTION = 0.25   # HUD alert + audio warning below this
+LIFE_SHORTAGE_MORALE_DRAIN_PER_DAY = 3.0
+# The colony's solar array: without a positive energy source the refuel and
+# life-support energy bills would drain the cell to zero and stall everything.
+LIFE_SOLAR_ENERGY_PER_DAY = 1.5
+
 
 # --- window search ---------------------------------------------------------
 WINDOW_GRID_DEPART = 72
