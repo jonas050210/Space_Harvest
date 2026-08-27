@@ -113,6 +113,13 @@ class OrbitalHUD:
         self.target_index = (self.target_index + direction) % len(self.targets)
         return self.selected_target()
 
+    def set_target(self, key: str) -> bool:
+        """Select ``key`` directly (click-picking); False if unknown."""
+        if key in self.targets:
+            self.target_index = self.targets.index(key)
+            return True
+        return False
+
     # -- refresh -------------------------------------------------------------
     def update(self, sim, colony_state: dict | None = None, message: str = "",
                extra: dict | None = None) -> None:

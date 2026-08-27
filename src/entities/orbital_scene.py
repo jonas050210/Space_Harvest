@@ -95,6 +95,7 @@ class OrbitalScene:
             color=color.rgb(*rgb),
             unlit=True,
         )
+        entity.body_key = key  # click-picking looks this up
         texture = _tex(f"{key}.png")
         if texture is not None:
             entity.texture = texture

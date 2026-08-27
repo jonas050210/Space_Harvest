@@ -65,9 +65,10 @@ from src.operations import OpsSimulation  # noqa: E402
 from src.simulation.orbital_sim import OrbitalSimulation  # noqa: E402
 
 try:  # windowed-only import; headless keeps working without Ursina
-    from ursina import Vec3  # noqa: E402
+    from ursina import Vec3, lerp  # noqa: E402
 except Exception:  # pragma: no cover
     Vec3 = None  # type: ignore[assignment]
+    lerp = None  # type: ignore[assignment]
 
 # The vendored upstream game provides the colony economy -- and its JSON
 # savegame slots are reused verbatim for the orbital layer's saves.
@@ -134,6 +135,7 @@ class Game:
         self.toasts: list[tuple[float, str]] = []
         self._window_fired_day: dict[str, float] = {}
         self._window_dep_day: dict[str, float] = {}
+        self._camera_goal = None
         # Jump-to-event: (label, absolute sim time) the warp is racing toward.
         self._jump_target: tuple[str, float] | None = None
         self._jump_warp_restore: float | None = None
@@ -178,6 +180,7 @@ class Game:
 
         presets = {"network": Vec3(0, 46, -52), "close": Vec3(0, 12, -18), "top": Vec3(0, 78, -1)}
         if preset in presets:
+            self._camera_goal = presets[preset]
             camera.position = presets[preset]
             camera.look_at(Vec3(0, 0, 0))
             self.follow_target = None
@@ -199,10 +202,14 @@ class Game:
             self.say(f"Camera following {self.follow_target}.")
 
     def update_camera(self) -> None:
-        if self.follow_target is None or self.scene is None:
-            return
         from ursina import camera
 
+        if self.follow_target is None or self.scene is None:
+            # Glide back to the network anchor when no ship is followed.
+            if self._camera_goal is not None:
+                camera.position = lerp(camera.position, self._camera_goal, 0.045)
+                camera.look_at(Vec3(0, 0, 0))
+            return
         ship = self.scene.ships.get(self.follow_target)
         if ship is None:
             return
@@ -210,8 +217,24 @@ class Game:
         distance = offset.length()
         if distance > 26.0 or distance < 6.0:
             offset = offset.normalized() * 14.0 if distance > 1e-3 else (0, 6, -14)
-        camera.position = ship.position + offset
+        # Exponential smoothing: the chase settles instead of snapping.
+        goal = ship.position + offset
+        camera.position = lerp(camera.position, goal, 0.10)
         camera.look_at(ship.position)
+
+    def pick_body(self, entity) -> None:
+        """Select the clicked body as transfer target (windowed)."""
+        if self.hud is None:
+            return
+        node = entity
+        while node is not None:
+            key = getattr(node, "body_key", None)
+            if key is not None:
+                if self.hud.set_target(key):
+                    self._play_alert("click")
+                    self.say(f"Target: {self.sim.bodies[key].name}.")
+                return
+            node = getattr(node, "parent", None)
 
     # -- actions -------------------------------------------------------------
     def dispatch_selected(self) -> None:
@@ -1078,7 +1101,7 @@ def _setup_audio(game: "Game") -> None:
 
 
 def run_windowed() -> None:
-    from ursina import Ursina, camera, color, window
+    from ursina import Ursina, camera, color, mouse, window
     from ursina import scene as ursina_scene
     from ursina import application
 
@@ -1128,7 +1151,9 @@ def run_windowed() -> None:
             elif key == "f9":
                 game.load_game()
             return
-        if key == "tab" and game.hud is not None:
+        if key == "left mouse down" and game.screen == "play" and not game.paused:
+            game.pick_body(mouse.hovered_entity)
+        elif key == "tab" and game.hud is not None:
             game.hud.cycle_target(1)
             game.say(f"Target: {game.hud.selected_target()}")
         elif key == "enter":
