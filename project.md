@@ -62,8 +62,8 @@ asteroid-colony-proto/
 ├─ AGENT-2.md / AGENT-3.md  hand-off prompts for the remaining agents
 ├─ README.md             short pointer + quick start
 ├─ requirements.txt
-├─ run-log.txt           evidence: headless + windowed + test output
-├─ asteroid-colony-proto-phase1.zip   transfer artifact (regenerate before hand-off)
+├─ run-log.txt           evidence: tests, headless sim, capture and plot output
+├─ FINAL-REPORT.md       final QA matrix, excerpts, known limits, owner commands
 ├─ src/
 │  ├─ maths/             numpy-only astrodynamics (agent 1, done, 20 tests)
 │  │   kepler.py         universal-variable Kepler propagation
@@ -114,10 +114,12 @@ Sim: mission legs PENDING→OUTBOUND→capture/unload→WAITING (rides target un
 return window opens)→INBOUND→dock; burns charged departure / arrival-match /
 return-departure / docking-match; dispatch funds the full planned round trip;
 refuel 22 m/s/day at colony billed to energy; cost-aware idle dispatch.
-Render: sun+halo, line-mesh orbits (206 entities), trails, HUD; verified under
-Xvfb (700 frames, ~37 runs) with screenshots.
+Render: sun+halo, line-mesh orbits (206 entities), trails, HUD; `capture_frame.py`
+uses the real Ursina/Xvfb path when GL is available and a clearly labelled
+Pillow fallback when a locked-down sandbox has no Xvfb/libGL.
 Checks: `pytest tests/ -q` → **43 passed**; upstream `test_overall.py` →
-**25 passed**; headless 6000 d → 18 round trips, 4 320 t.
+**25 passed**; headless 6000 d → 18 round trips, 4 320 t; capture fallback →
+700 frames, 34 runs, `logs/screenshot.png`; porkchop → `logs/porkchop.png`. 
 
 ---
 
@@ -153,9 +155,9 @@ TAB cycle target · ENTER dispatch · [ ] warp · O orbits · F follow · C over
 ETA/delta-v, flight log, storage 615/1500 + lifetime tonnage. Run a ship dry
 and it strands — intended failure mode, covered by tests.
 
-## 7. Remaining work
+## 7. Optional future work
 
-Agent 2 → `AGENT-2.md` (gameplay depth: transfer-arc rendering, porkchop
-overlay, save/load, demand pricing, AI-Vision-Lab scan bonus, M>0 Lambert).
-Agent 3 → `AGENT-3.md` (finish: balance pass, exe packaging, final QA, docs,
-GitHub upload + release archive).
+The full phase-1 build is delivered. `AGENT-2.md` and `AGENT-3.md` remain as
+optional expansion prompts: transfer-arc overlays, porkchop UI, save/load,
+demand pricing, AI-Vision-Lab scan bonuses, M>0 Lambert, balance polish and
+executable packaging.

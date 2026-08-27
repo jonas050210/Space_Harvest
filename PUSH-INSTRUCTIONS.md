@@ -1,16 +1,34 @@
-# Push this repo to your GitHub (owner's PC)
+# Push / restore instructions
 
-The sandbox has no GitHub credentials, so the final push happens where you are
-logged in. The local repo here already has one clean commit on `main`
-(`phase 1 (agent 1): ...`, 277 files; `.venv/`, `*.zip`, `logs/*.png` ignored).
+This Arena session worked on the fixed branch:
 
-## One-time on github.com
-Create an empty repository named `asteroid-colony-proto` (no README/license).
-
-## Then, in this folder
-```bash
-git remote add origin https://github.com/jonas050210/asteroid-colony-proto.git
-git push -u origin main
+```text
+arena/01a0418d-asteroid-colony-proto
 ```
 
-Agents 2/3 add commits; they push the same way (`git push`).
+If GitHub credentials are connected in the sandbox, the agent pushes directly:
+
+```bash
+git push origin arena/01a0418d-asteroid-colony-proto
+```
+
+If you are doing it locally instead:
+
+```bash
+git clone https://github.com/jonas050210/asteroid-colony-proto.git
+cd asteroid-colony-proto
+git checkout arena/01a0418d-asteroid-colony-proto  # if the branch exists remotely
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m pytest tests/ -q
+.venv/bin/python -m src.main --headless --sim-days 6000
+.venv/bin/python -m src.main
+```
+
+If you need a zip archive from this workspace, create it without the virtualenv:
+
+```bash
+zip -r asteroid-colony-proto-delivery.zip . -x ".venv/*" ".git/*" "__pycache__/*" "*/__pycache__/*" ".pytest_cache/*" "*/.pytest_cache/*"
+```
+
+No tokens or credentials are stored in this repository.
