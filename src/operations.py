@@ -30,13 +30,21 @@ every extension here is additive.
 
 from __future__ import annotations
 
+import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
 from .config import (
+    CREW_BOTANIST_SAVING_CAP,
+    CREW_BOTANIST_WATER_SAVING,
+    CREW_ENGINEER_REPAIR_BONUS,
     CREW_FATIGUE_EXHAUSTED,
+    CREW_FIRE_MORALE_HIT,
+    CREW_MAX_ROSTER,
+    CREW_PILOT_BURN_DISCOUNT,
+    CREW_PILOT_DISCOUNT_CAP,
     CREW_FATIGUE_PER_DAY_FLYING,
     CREW_FATIGUE_PER_DAY_LAYOVER,
     CREW_FATIGUE_PER_DAY_PENDING,
@@ -77,13 +85,19 @@ from .config import (
     MINING_DRILL_WEAR_PCT,
     MINING_LOW_HULL_YIELD_PCT,
     MINING_RECOVERY_TAU_DAYS,
+    PERTURB_DA_FRACTION,
+    PERTURB_DE_MAX,
+    PERTURB_MAX_INTERVAL_DAYS,
+    PERTURB_MIN_INTERVAL_DAYS,
     SHIP_CLASSES,
     SIM_SECONDS_PER_DAY,
 )
 from .market import rng_from_json, rng_to_json
+from .maths.elements import OrbitalElements
 from .maths import windows as window_solver
 from .mining import YieldLedger, plan_extraction
 from .simulation.bodies import BODIES
+from .simulation.bodies import BODIES, TRADE_TARGETS
 from .simulation.orbital_sim import Delivery, Leg, LogEntry, Mission, OrbitalSimulation, Ship
 
 
@@ -133,6 +147,13 @@ class OpsSimulation(OrbitalSimulation):
         self.rng = random.Random(seed ^ 0x5EED)
         #: ship name -> roster of CrewMember
         self.crew: dict[str, list[CrewMember]] = {}
+        #: colony-side botanists (they work the hydroponics racks, not ships)
+        self.botanists = 0
+        # Gravitational perturbation clock: this sim owns its own body table,
+        # so a passing body nudges *this* campaign's orbits and nothing else.
+        self._perturb_timer = self.rng.uniform(
+            PERTURB_MIN_INTERVAL_DAYS, PERTURB_MAX_INTERVAL_DAYS
+        ) * SIM_SECONDS_PER_DAY
         #: ship name -> sim time of the last departure or docking
         self.last_active: dict[str, float] = {}
         # Space weather state (deterministic, ticked in step()).
@@ -147,6 +168,9 @@ class OpsSimulation(OrbitalSimulation):
         self.incident_chance_drill = INCIDENT_CHANCE_DRILL
         self.hull_critical_pct = HULL_CRITICAL_PCT
         super().__init__(seed=seed, ship_names=ship_names)
+        # Own the body table: perturbations replace entries here instead of
+        # mutating the shared module-level BODIES the verified tests read.
+        self.bodies = dict(self.bodies)
         self.stats.setdefault("incidents", 0)
         self.stats.setdefault("ore_mined_t", 0.0)
 
@@ -233,7 +257,10 @@ class OpsSimulation(OrbitalSimulation):
             deficit = HULL_MAX_PCT - self.hull.get(ship.name, HULL_MAX_PCT)
             if deficit <= 1e-6:
                 continue
-            amount = min(deficit, HULL_REPAIR_RATE_PCT_PER_DAY * dt_days)
+            rate = HULL_REPAIR_RATE_PCT_PER_DAY
+            if self.has_engineer(ship.name):
+                rate *= 1.0 + CREW_ENGINEER_REPAIR_BONUS
+            amount = min(deficit, rate * dt_days)
             cost = amount * HULL_REPAIR_COST_PER_PCT
             if cost > budget:
                 amount *= budget / cost if cost > 0.0 else 0.0
@@ -374,6 +401,46 @@ class OpsSimulation(OrbitalSimulation):
             for member in roster:
                 member.morale = min(CREW_MORALE_MAX, member.morale + bonus)
 
+    # -- crew specialisations -----------------------------------------------
+    def pilots_discount(self, ship_name: str) -> float:
+        """Fraction of every burn refunded by skilled piloting (ops-layer)."""
+        count = sum(1 for member in self.crew.get(ship_name, []) if member.role == "pilot")
+        return min(CREW_PILOT_DISCOUNT_CAP, count * CREW_PILOT_BURN_DISCOUNT)
+
+    def has_engineer(self, ship_name: str) -> bool:
+        return any(member.role == "engineer" for member in self.crew.get(ship_name, []))
+
+    def botanist_water_factor(self) -> float:
+        """Hydroponics water multiplier from the colony's botanists."""
+        return 1.0 - min(CREW_BOTANIST_SAVING_CAP, self.botanists * CREW_BOTANIST_WATER_SAVING)
+
+    def hire(self, role: str, ship_name: str | None = None) -> tuple[bool, str]:
+        """Hire a specialist. Botanists join the colony, others a ship."""
+        if role == "botanist":
+            self.botanists += 1
+            self.note(f"A botanist joins the colony hydroponics roster.")
+            return True, "Botanist hired for the colony."
+        if ship_name is None or ship_name not in self.crew:
+            return False, "Pick a ship for the new hire."
+        roster = self.crew[ship_name]
+        if len(roster) >= CREW_MAX_ROSTER:
+            return False, f"{ship_name}'s roster is full ({CREW_MAX_ROSTER} bunks)."
+        name = f"{self.rng.choice(CREW_NAMES_FIRST)} {self.rng.choice(CREW_NAMES_LAST)}"
+        roster.append(CrewMember(name=name, role=role))
+        self.note(f"{name} signs on aboard {ship_name} as {role}.")
+        return True, f"{name} joins {ship_name} as {role}."
+
+    def fire(self, ship_name: str, member: CrewMember) -> tuple[bool, str]:
+        """Dismiss a crew member; the survivors resent it."""
+        roster = self.crew.get(ship_name, [])
+        if member not in roster or len(roster) <= 1:
+            return False, "Cannot dismiss the last crew member."
+        roster.remove(member)
+        for other in roster:
+            other.morale = max(0.0, other.morale - CREW_FIRE_MORALE_HIT)
+        self.note(f"{member.name} is dismissed from {ship_name}; morale suffers.")
+        return True, f"{member.name} dismissed; {ship_name}'s crew morale drops."
+
     def apply_hardship(self, amount: float) -> None:
         """Colony-wide morale damage (life-support shortages, disasters)."""
         for roster in self.crew.values():
@@ -433,6 +500,47 @@ class OpsSimulation(OrbitalSimulation):
             current = self.hull.get(ship.name, HULL_MAX_PCT)
             self.hull[ship.name] = max(HULL_MIN_PCT, current - wear * dt_days)
 
+    # -- gravitational perturbations ------------------------------------------
+    def tick_perturbations(self, dt_days: float) -> None:
+        """Occasionally shift a belt body's orbit as a passer-by flies by.
+
+        Only this sim's copy of the body table changes; window caches are
+        dropped so every new plan is solved against the new geometry. Ships
+        already in flight keep their conics -- the capture burn bills whatever
+        the miss actually costs, which is exactly how a perturbation should
+        bite.
+        """
+        if dt_days <= 0.0:
+            return
+        self._perturb_timer -= dt_days * SIM_SECONDS_PER_DAY
+        if self._perturb_timer > 0.0:
+            return
+        self._perturb_timer = self.rng.uniform(
+            PERTURB_MIN_INTERVAL_DAYS, PERTURB_MAX_INTERVAL_DAYS
+        ) * SIM_SECONDS_PER_DAY
+
+        candidates = [key for key in TRADE_TARGETS if key in self.bodies]
+        if not candidates:
+            return
+        key = self.rng.choice(candidates)
+        body = self.bodies[key]
+        el = body.elements
+        da = self.rng.uniform(*PERTURB_DA_FRACTION) * self.rng.choice((-1.0, 1.0))
+        de = self.rng.uniform(-PERTURB_DE_MAX, PERTURB_DE_MAX)
+        new_el = OrbitalElements(
+            a=el.a * (1.0 + da),
+            e=min(0.35, max(0.002, el.e + de)),
+            i=el.i, raan=el.raan, argp=el.argp, nu=el.nu,
+        )
+        self.bodies[key] = replace(body, elements=new_el)
+        self._window_cache.clear()
+        self._round_trip_cache.clear()
+        sign = "outward" if da > 0 else "inward"
+        self.note(
+            f"Gravitational perturbation: {body.name} drifts {sign} "
+            f"({da * 100:+.1f}% semi-major axis). Re-plan transfers."
+        )
+
     def weather_alert(self) -> str:
         """One-line status for the HUD; empty when all is quiet."""
         if self.flare_state == "warning":
@@ -454,20 +562,31 @@ class OpsSimulation(OrbitalSimulation):
         entries = super().step(dt_days)
         self.tick_weather(dt_days)
         self.tick_crew(dt_days)
+        self.tick_perturbations(dt_days)
         return entries
 
     # -- mission hooks (wear, depletion, incidents) --------------------------
+    def _pilot_refund(self, ship: Ship, spent_ms: float) -> None:
+        """Hand back the pilot discount on a burn the core just billed."""
+        if spent_ms <= 0.0:
+            return
+        ship.delta_v += spent_ms * self.pilots_discount(ship.name)
+
     def _depart(self, ship: Ship, mission: Mission) -> None:
         before = ship.delta_v
         super()._depart(ship, mission)
-        self._apply_wear(ship, before - ship.delta_v)
+        spent = before - ship.delta_v
+        self._pilot_refund(ship, spent)
+        self._apply_wear(ship, spent * (1.0 - self.pilots_discount(ship.name)))
         self.last_active[ship.name] = self.time
 
     def _capture(self, ship: Ship, mission: Mission, target) -> None:
         inflight = self._inflight.pop(ship.name, None)
         before = ship.delta_v
         super()._capture(ship, mission, target)
-        self._apply_wear(ship, before - ship.delta_v)
+        spent = before - ship.delta_v
+        self._pilot_refund(ship, spent)
+        self._apply_wear(ship, spent * (1.0 - self.pilots_discount(ship.name)))
 
         delivered_now = (
             len(self.pending_deliveries) > 0
@@ -517,7 +636,9 @@ class OpsSimulation(OrbitalSimulation):
     def _complete_run(self, ship: Ship, mission: Mission) -> None:
         before = ship.delta_v
         super()._complete_run(ship, mission)
-        self._apply_wear(ship, before - ship.delta_v)
+        spent = before - ship.delta_v
+        self._pilot_refund(ship, spent)
+        self._apply_wear(ship, spent * (1.0 - self.pilots_discount(ship.name)))
         self.last_active[ship.name] = self.time
 
     # -- reporting -----------------------------------------------------------
@@ -598,6 +719,13 @@ class OpsSimulation(OrbitalSimulation):
             "inflight": {name: [body, payload] for name, (body, payload) in self._inflight.items()},
             "crew": {name: [member.to_json() for member in roster]
                      for name, roster in self.crew.items()},
+            "botanists": self.botanists,
+            "perturb_timer": self._perturb_timer,
+            "body_overrides": {
+                key: {"a": body.elements.a, "e": body.elements.e}
+                for key, body in self.bodies.items()
+                if body is not BODIES.get(key)
+            },
             "last_active": dict(self.last_active),
             "weather": {
                 "flare_state": self.flare_state,
@@ -615,7 +743,14 @@ class OpsSimulation(OrbitalSimulation):
         sim = cls.__new__(cls)
         sim.time = float(data["time"])
         sim.warp_days_per_second = float(data["warp_days_per_second"])
-        sim.bodies = BODIES
+        sim.bodies = dict(BODIES)
+        for key, override in data.get("body_overrides", {}).items():
+            body = sim.bodies.get(key)
+            if body is not None:
+                el = body.elements
+                sim.bodies[key] = replace(body, elements=OrbitalElements(
+                    a=float(override["a"]), e=float(override["e"]),
+                    i=el.i, raan=el.raan, argp=el.argp, nu=el.nu))
         sim.ships = []
         sim.missions = {}
         sim.log = []
@@ -632,6 +767,9 @@ class OpsSimulation(OrbitalSimulation):
         sim.hull_critical_pct = HULL_CRITICAL_PCT
         sim.crew = {}
         sim.last_active = {}
+        sim.botanists = int(data.get("botanists", 0))
+        sim._perturb_timer = float(data.get("perturb_timer",
+                                            PERTURB_MIN_INTERVAL_DAYS * SIM_SECONDS_PER_DAY))
         sim.mining_mode = data["mining_mode"]
         sim.ledger = YieldLedger.from_json(data["ledger"])
         sim.reserved = {body: {ore: float(t) for ore, t in slot.items()}

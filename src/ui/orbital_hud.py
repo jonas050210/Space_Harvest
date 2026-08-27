@@ -90,6 +90,9 @@ class OrbitalHUD:
         self.tutorial = Text(text="", parent=camera.ui, position=(0.0, -0.42, -0.1),
                              scale=0.55, color=color.rgba(0.55, 0.9, 1.0, 0.95),
                              origin=(0.0, 0))
+        self.ticker = Text(text="", parent=camera.ui, position=(0.0, -0.51, -0.1),
+                           scale=0.5, color=color.rgba(0.75, 0.85, 0.95, 0.9),
+                           origin=(0.0, 0))
 
     # -- helpers -------------------------------------------------------------
     def selected_target(self) -> str:
@@ -213,6 +216,10 @@ class OrbitalHUD:
 
         lines[5].text = extra.get("contract_line", "")
         lines[5].color = color.yellow
+        pending_line = extra.get("pending_line", "")
+        if pending_line:
+            lines[5].text = f"{lines[5].text}  |  {pending_line}"
+            lines[5].color = color.orange
 
         summary = "  ".join(filter(None, (extra.get("rep_line", ""), extra.get("life_line", ""))))
         lines[6].text = summary
@@ -232,3 +239,4 @@ class OrbitalHUD:
         for line in self.ops_lines:
             line.text = ""
         self.tutorial.text = ""
+        self.ticker.text = ""

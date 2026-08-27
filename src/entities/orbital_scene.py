@@ -77,7 +77,7 @@ class OrbitalScene:
         from ..config import MU_SUN
 
         for key, entity in self.body_entities.items():
-            body = BODIES[key]
+            body = sim.bodies.get(key, BODIES[key])
             r, _ = window_solver.body_state(body.elements, MU_SUN, sim.time)
             entity.position = au_to_scene(r)
             entity.rotation_y += 0.2

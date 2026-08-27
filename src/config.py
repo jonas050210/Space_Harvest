@@ -165,6 +165,28 @@ CREW_IDLE_BOREDOM_DAYS = 45.0             # ...while fully rested
 CREW_MORALE_BOREDOM_FLOOR = 25.0  # boredom alone never breaks a crew; shortages can
 CREW_MORALE_OVERWORK_FLOOR = 45.0  # overwork sours morale but never breaks it
 CREW_MORALE_LOW_YIELD = 35.0         # below this morale, mining yield suffers
+# Specialisations: signing bonuses in credits, and what each role does.
+# Pilots shave burns (skill, not physics: the ops layer refunds the saved
+# propellant after the core bills the real manoeuvre), engineers speed hull
+# repairs docked, botanists cut the water cost of hydroponics colony-wide.
+CREW_HIRE_COST = {"pilot": 900.0, "miner": 600.0, "engineer": 1100.0, "botanist": 800.0}
+CREW_MAX_ROSTER = 6
+CREW_PILOT_BURN_DISCOUNT = 0.03     # per pilot aboard, capped at 0.05
+CREW_PILOT_DISCOUNT_CAP = 0.05
+CREW_ENGINEER_REPAIR_BONUS = 0.5    # +50% repair rate with an engineer aboard
+CREW_BOTANIST_WATER_SAVING = 0.08   # per botanist, capped at 0.32
+CREW_BOTANIST_SAVING_CAP = 0.32
+CREW_FIRE_MORALE_HIT = 6.0          # survivors resent a dismissal
+
+# --- gravitational perturbations ----------------------------------------------
+# A passing body occasionally shifts a belt body's orbit slightly. The
+# operations layer owns copies of the body table, so the verified core and
+# its module-level constants stay untouched; caches are invalidated and the
+# fleet re-plans from the new geometry.
+PERTURB_MIN_INTERVAL_DAYS = 500.0
+PERTURB_MAX_INTERVAL_DAYS = 950.0
+PERTURB_DA_FRACTION = (0.005, 0.02)  # semi-major-axis shift as a fraction
+PERTURB_DE_MAX = 0.012
 CREW_NAMES_FIRST = ("Yuki", "Mateo", "Aria", "Dmitri", "Zaneh", "Okafor", "Lena",
                     "Tariq", "Ines", "Kofi", "Mira", "Anders", "Priya", "Hugo",
                     "Farida", "Jonas", "Nova", "Rafael", "Sanaa", "Emil")

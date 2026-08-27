@@ -489,6 +489,10 @@ def test_contract_lifecycle_through_the_game():
     assert offer is not None
     assert offer.resource in MARKET_BASE_PRICES
     assert offer.reward_credits > 0.0
+    # Offers wait for the director: pending, not active.
+    assert game.contracts.active == []
+    assert game.contracts.accept(offer.id) is offer
+    assert [c.id for c in game.contracts.active] == [offer.id]
 
     credits_before = game.credits
     # Half the order is not enough to complete it.
@@ -512,6 +516,7 @@ def test_overdue_orders_cost_reputation():
     game.contracts._next_offer_day = 50.0
     offer = game.contracts.maybe_offer()
     assert offer is not None
+    assert game.contracts.accept(offer.id) is offer
     game.market.day = offer.deadline_day + 1.0
     overdue = game.contracts.expire_overdue()
     assert [c.id for c in overdue] == [offer.id]
@@ -658,6 +663,189 @@ def test_audio_tick_is_a_noop_without_audio_objects():
     game.audio = None
     game.update(1.0)  # must not raise
     assert game.power_load >= 0.05
+
+
+# --------------------------------------------------------------------------
+# Crew specialisations
+# --------------------------------------------------------------------------
+
+def test_hire_fire_and_role_effects():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    # The template roster already flies with one pilot: 3% discount.
+    assert sim.pilots_discount("Kestrel") > 0.0
+    ok, _ = sim.hire("pilot", "Kestrel")
+    assert ok and sim.pilots_discount("Kestrel") > 0.03
+    # Botanists work the colony, not a ship.
+    base = sim.botanist_water_factor()
+    sim.hire("botanist")
+    sim.hire("botanist")
+    assert sim.botanist_water_factor() < base
+    # Firing hurts the survivors; the last seat is protected.
+    eng = next(m for m in sim.crew["Kestrel"] if m.role == "engineer")
+    before = sim.crew_stats("Kestrel")[0]
+    ok, _ = sim.fire("Kestrel", eng)
+    assert ok and not sim.has_engineer("Kestrel")
+    assert sim.crew_stats("Kestrel")[0] < before
+    last = sim.crew["Kestrel"][0]
+    sim.crew["Kestrel"] = [last]
+    ok, _ = sim.fire("Kestrel", last)
+    assert not ok and last in sim.crew["Kestrel"]
+
+
+def test_pilots_refund_propellant_the_core_billed():
+    plain, staffed = OpsSimulation(ship_names=("Kestrel",)), OpsSimulation(ship_names=("Kestrel",))
+    plain.dispatch(plain.ships[0], "inner_belt")
+    staffed.dispatch(staffed.ships[0], "inner_belt")
+    staffed.hire("pilot", "Kestrel")
+    staffed.hire("pilot", "Kestrel")
+    # Fly both to the departure burn and compare the billed propellant.
+    for _ in range(80):
+        plain.step(3.0)
+        staffed.step(3.0)
+    assert plain.ships[0].delta_v < staffed.ships[0].delta_v  # pilots saved fuel
+
+
+def test_engineers_speed_repairs():
+    fast, slow = OpsSimulation(ship_names=("Kestrel",)), OpsSimulation(ship_names=("Kestrel",))
+    # The template carries an engineer; strip the slow ship's so the compare
+    # is engineer vs no engineer.
+    slow.crew["Kestrel"] = [m for m in slow.crew["Kestrel"] if m.role != "engineer"]
+    for sim in (fast, slow):
+        sim.hull["Kestrel"] = 50.0
+    fast.repair_docked_fleet(5.0, max_credits=1e9)
+    slow.repair_docked_fleet(5.0, max_credits=1e9)
+    assert fast.hull["Kestrel"] > slow.hull["Kestrel"]
+
+
+# --------------------------------------------------------------------------
+# Gravitational perturbations
+# --------------------------------------------------------------------------
+
+def test_perturbation_shifts_only_this_sims_bodies_and_drops_caches():
+    from src.simulation.bodies import BODIES as MODULE_BODIES
+
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim._perturb_timer = 1e-6
+    sim.step(0.5)
+    changed = [key for key in TRADE_TARGETS
+               if sim.bodies[key].elements.a != MODULE_BODIES[key].elements.a]
+    assert changed, "the perturbation should have moved one body"
+    assert not sim._window_cache and not sim._round_trip_cache
+    assert any("perturbation" in entry.text for entry in sim.log)
+    # The module-level table the verified tests read is untouched.
+    for key in TRADE_TARGETS:
+        assert MODULE_BODIES[key].elements.a == BODIES[key].elements.a
+
+
+def test_perturbed_elements_survive_a_save():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim._perturb_timer = 1e-6
+    sim.step(0.5)
+    moved = next(key for key in TRADE_TARGETS
+                 if sim.bodies[key].elements.a != BODIES[key].elements.a)
+    restored = OpsSimulation.from_json(json.loads(json.dumps(sim.to_json())))
+    assert restored.bodies[moved].elements.a == pytest.approx(sim.bodies[moved].elements.a)
+    assert restored.bodies[moved].elements.a != pytest.approx(BODIES[moved].elements.a)
+
+
+# --------------------------------------------------------------------------
+# Contract negotiation
+# --------------------------------------------------------------------------
+
+def test_offers_wait_for_accept_decline_and_expiry():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.market.day = 100.0
+    game.contracts._next_offer_day = 50.0
+    offer = game.contracts.maybe_offer()
+    assert offer is not None and game.contracts.active == []
+    # Declining clears the desk with no reputation change.
+    assert game.contracts.decline(offer.id) is offer
+    assert game.contracts.pending == [] and sum(game.contracts.reputation.values()) == 0.0
+
+    # A second offer can be accepted, and stale ones are withdrawn.
+    game.contracts._next_offer_day = 50.0  # reopen the offer window for the test
+    offer2 = game.contracts.maybe_offer()
+    assert offer2 is not None
+    game.market.day = offer2.deadline_day - 29.0
+    stale = game.contracts.expire_pending()
+    assert [c.id for c in stale] == [offer2.id]
+
+
+def test_headless_autopilot_accepts_fillable_offers():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.market.day = 100.0
+    game.contracts._next_offer_day = 50.0
+    # Earth offers only what the fleet trades; seed a recent iron delivery.
+    # The autopilot drains pending offers in the same tick, so watch the
+    # active book.
+    game._recent_deliveries["iron"] = 90.0
+    accepted_iron = False
+    while game.market.day < 400.0:
+        game.market.update(1.0)
+        game._tick_contracts()
+        if any(c.resource == "iron" for c in game.contracts.active):
+            accepted_iron = True
+            break
+    assert accepted_iron, "the autopilot should accept an order it can fill"
+    assert not any(c.resource == "iron" for c in game.contracts.pending)
+
+
+# --------------------------------------------------------------------------
+# Jump-to-event and audio polish
+# --------------------------------------------------------------------------
+
+def test_jump_to_event_races_warp_and_restores_it():
+    from src.config import TIME_WARP_STEPS
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.sim.dispatch(game.sim.ships[0], "inner_belt")
+    game.update(1.0)
+    assert game.upcoming_events()
+    slow_warp = game.sim.warp_days_per_second
+    game.cycle_jump()
+    assert game._jump_target is not None
+    assert game.sim.warp_days_per_second == max(TIME_WARP_STEPS)
+    # Race ahead: warp restores once the moment passes.
+    for _ in range(4000):
+        game.update(3.0)
+        if game._jump_target is None:
+            break
+    assert game._jump_target is None
+    assert game.sim.warp_days_per_second == slow_warp
+
+
+def test_audio_mute_and_ducking_with_a_stub_mixer():
+    from src.main import Game
+
+    class StubSound:
+        def __init__(self):
+            self.volume, self.pitch, self.played = 0.0, 1.0, 0
+
+        def play(self):
+            self.played += 1
+
+    game = Game(headless=True)
+    game.audio = {"hum": StubSound(), "flare": StubSound(), "hull": StubSound(),
+                  "shortage": StubSound(), "contract": StubSound()}
+    game.power_load = 0.8
+    game.toggle_mute()
+    game._tick_audio()
+    assert game.audio["hum"].volume == 0.0          # muted hum is silent
+    game.toggle_mute()
+    game.sim.flare_state = "warning"                 # rising edge plays once
+    game._tick_audio()
+    assert game.audio["flare"].played == 1
+    # The next tick ducks the hum under the alert that just fired; the alert
+    # re-fires because the edge flag was cleared externally.
+    game._alert_edges["flare"] = False
+    game._tick_audio()
+    assert game.audio["flare"].played == 2
+    assert game.audio["hum"].volume < 0.15 + 0.55 * 0.8  # ducked
 
 
 # --------------------------------------------------------------------------

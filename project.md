@@ -55,11 +55,13 @@ The upstream `asteroid-colony` economic regions are modelled as real heliocentri
 | Mining & depletion | Deterministic per-body ore fingerprints; exponential depletion ledgers with slow multi-year recovery; per-vein reservations for concurrent runs; surface scraping vs core drilling (hold-capped yield, hull wear, incident risk). |
 | Earth market | Dynamic prices (seasonal sine + mean-reverting noise), per-resource absorption so big sales flood their own price, exponential flood recovery, trend arrows and treasury sparkline in the HUD. |
 | Fleet classes & hull | Data-driven scout/freighter/refinery/hauler (hold, delta-v budget, refuel rate, wear factor, price); per-burn hull wear; low-hull dispatch interlock; credit-billed auto-repair; seeded mining incidents. |
-| Crew & morale | Named 4-seat rosters per ship; fatigue accrues in flight and layovers, recovers docked; morale reacts to captures, payday, overwork, cabin fever, boredom (floored) and shortages; tired crews refuse dispatch, cause incidents and mine less. |
+| Crew & morale | Named 4-seat rosters per ship (hire/fire with `G`/`H`/`Z`); fatigue accrues in flight and layovers, recovers docked; morale reacts to captures, payday, overwork, cabin fever, boredom (floored) and shortages; tired crews refuse dispatch, cause incidents and mine less. Pilots refund part of every burn, engineers speed repairs, botanists cut hydroponics water use. |
 | Space weather | Deterministic solar-flare cycles (quiet -> warning -> flare) and periodic debris seasons; per-day hull wear only for ships in flight; HUD + audio alerts. |
-| Earth contracts | Faction orders against recent trade patterns; completion pays credits + reputation, expiry costs it; standing swings sale prices by up to 6%. |
+| Earth contracts | Faction orders posted as offers (`B` accept / `V` decline, or the autopilot accepts fillable ones); completion pays credits + reputation, expiry costs it; standing swings sale prices by up to 6%. |
 | Life support | Oxygen/food/water loop over the whole crew: ice refinery, electrolysis, hydroponics and ISS-style water recycling on a solar-fed energy budget; shortages drain morale; the dispatcher outbids the market for ice when the pantry runs low. |
-| Procedural audio | Ambient hum pitched by colony power load and four alert tones (flare, hull, shortage, payday chime), synthesised to WAV at startup - no binary assets. |
+| Procedural audio | Ambient hum pitched by colony power load and four alert tones (flare, hull, shortage, payday chime), synthesised to WAV at startup - no binary assets. `N` mutes; the hum ducks under alerts. |
+| Gravitational perturbations | Every 500-950 days a passing body shifts one belt orbit slightly; the campaign's own body table changes, window caches drop and the fleet re-plans; the verified module constants and tests are untouched. |
+| Jump-to-event | `J` cycles upcoming moments (window openings, ETAs, flare warnings, order deadlines) and races the warp to them, restoring the old warp on arrival; a bottom ticker streams the latest log entry. |
 | Save / load | F5/F9 quick-save of the full game state (ships in flight, missions, windows, ledgers, market RNG, colony state, crews, weather, contracts) as JSON via the upstream savegame slots. |
 | Rendering | Ursina sun/halo, line-mesh orbits, bodies, freighters (new commissions appear automatically), fading trails, camera presets/follow. |
 | HUD | Clock/warp, selected target, transfer plan with live assay, fleet status with hull, ETA, delta-v, flight log, Earth-market panel, fleet-ops panel, storage and lifetime tonnage. |
@@ -93,6 +95,8 @@ The upstream `asteroid-colony` economic regions are modelled as real heliocentri
 * X: toggle mining policy between surface scraping and core drilling.
 * M: toggle automatic hull maintenance for docked ships.
 * 1 / 2 / 3 / 4: commission a scout / freighter / refinery / hauler (costs credits).
+* B / V: accept / decline the oldest Earth offer; G hires a miner, H dismisses the unhappiest crew member, Z hires a colony botanist.
+* J: jump the warp to the next upcoming event; N: mute audio.
 * F5 / F9: quick-save / quick-load the full game state.
 * Mouse wheel: zoom.
 * Esc: quit.

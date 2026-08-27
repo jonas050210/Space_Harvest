@@ -225,6 +225,8 @@ class Contracts:
     def __init__(self, market: "Market"):
         self.market = market
         self.active: list[Contract] = []
+        #: posted offers awaiting the director's decision
+        self.pending: list[Contract] = []
         self.completed_count = 0
         self.failed_count = 0
         self.reputation: dict[str, float] = {name: 0.0 for name in CONTRACT_FACTIONS}
@@ -256,8 +258,34 @@ class Contracts:
             reward_credits=reward,
         )
         self._next_id += 1
-        self.active.append(contract)
+        self.pending.append(contract)
         return contract
+
+    def accept(self, contract_id: int) -> Contract | None:
+        """Move a posted offer into the active book (if there is room)."""
+        offer = next((c for c in self.pending if c.id == contract_id), None)
+        if offer is None:
+            return None
+        if len(self.active) >= CONTRACT_MAX_ACTIVE:
+            return None
+        self.pending.remove(offer)
+        self.active.append(offer)
+        return offer
+
+    def decline(self, contract_id: int) -> Contract | None:
+        """Wave an offer off; Earth takes no offence at a polite no."""
+        offer = next((c for c in self.pending if c.id == contract_id), None)
+        if offer is None:
+            return None
+        self.pending.remove(offer)
+        return offer
+
+    def expire_pending(self) -> list[Contract]:
+        """Withdraw offers the director never answered."""
+        stale = [c for c in self.pending if self.market.day > c.deadline_day - 30.0]
+        for offer in stale:
+            self.pending.remove(offer)
+        return stale
 
     def register_delivery(self, cargo: dict) -> list[Contract]:
         """Credit a delivery against matching orders; return completed ones."""
@@ -307,6 +335,7 @@ class Contracts:
     def to_json(self) -> dict:
         return {
             "active": [c.to_json() for c in self.active],
+            "pending": [c.to_json() for c in self.pending],
             "completed_count": self.completed_count,
             "failed_count": self.failed_count,
             "reputation": dict(self.reputation),
@@ -318,6 +347,7 @@ class Contracts:
     def from_json(cls, data: dict, market: "Market") -> "Contracts":
         contracts = cls(market)
         contracts.active = [Contract.from_json(entry) for entry in data.get("active", [])]
+        contracts.pending = [Contract.from_json(entry) for entry in data.get("pending", [])]
         contracts.completed_count = int(data.get("completed_count", 0))
         contracts.failed_count = int(data.get("failed_count", 0))
         contracts.reputation = {name: float(value)

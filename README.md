@@ -30,6 +30,10 @@ python3 -m venv .venv
 - X: toggle surface scraping / core drilling (fuller holds, more wear and risk)
 - M: toggle automatic hull maintenance (bills the treasury)
 - 1–4: commission a scout / freighter / refinery / hauler
+- B / V: accept / decline the oldest Earth offer
+- G / H: hire a miner / dismiss the unhappiest crew member (Z: botanist)
+- J: jump the warp to the next interesting event (windows, ETAs, deadlines)
+- N: mute audio
 - F5 / F9: quick-save / quick-load (`saves/` JSON)
 - Mouse wheel: zoom
 - Esc: quit

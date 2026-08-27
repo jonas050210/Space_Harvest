@@ -43,12 +43,16 @@ from src.config import (  # noqa: E402
     LIFE_START_WATER,
     LIFE_WATER_PER_CREW_DAY,
     LIFE_WATER_RECYCLE_FRACTION,
+    CREW_BOTANIST_SAVING_CAP,
+    CREW_BOTANIST_WATER_SAVING,
+    CREW_HIRE_COST,
     HULL_CRITICAL_PCT,
     MARKET_BASE_PRICES,
     REDISPATCH_SCAN_DAYS,
     SHIP_CLASSES,
     SHIP_REFUEL_ENERGY_PER_MS,
     START_CREDITS,
+    TIME_WARP_STEPS,
     WINDOW_SIZE,
     WINDOW_TITLE,
 )
@@ -118,6 +122,10 @@ class Game:
         self.tutorial_text = ""
         self._tut = {"dispatched": False, "sold": False, "drilled": False,
                      "bought": False, "saved": False, "done": False}
+        # Jump-to-event: (label, absolute sim time) the warp is racing toward.
+        self._jump_target: tuple[str, float] | None = None
+        self._jump_warp_restore: float | None = None
+        self.muted = False
         # Alert edges, so tones play once per incident instead of every frame.
         self._alert_edges = {"flare": False, "hull": False, "shortage": False}
         # Procedural audio (windowed only): hum + alert tones, synthesised at
@@ -220,6 +228,7 @@ class Game:
         self._refuel_and_redispatch(dt_days)
         self._tick_tutorial()
         self._tick_audio()
+        self._tick_jump()
 
         if self.scene is not None:
             self.scene.update(self.sim)
@@ -227,6 +236,8 @@ class Game:
         if self.hud is not None:
             self.hud.update(self.sim, self.colony.summary(), self._current_message(),
                             extra=self._ops_hud_data())
+            if self.sim.log:
+                self.hud.ticker.text = f"tail  {self.sim.log[-1].text[:120]}"[:130]
 
     def _sample_credits_history(self) -> None:
         days = self.sim.time / SIM_SECONDS_PER_DAY
@@ -384,6 +395,7 @@ class Game:
             "crew_line": self._crew_hud_line(),
             "weather": self.sim.weather_alert(),
             "contract_line": self._contract_hud_line(),
+            "pending_line": self._pending_hud_line(),
             "rep_line": self._reputation_hud_line(),
             "life_line": self._life_hud_line(),
             "tutorial": self.tutorial_text,
@@ -410,6 +422,13 @@ class Game:
         days_left = max(0.0, contract.deadline_day - self.market.day)
         return (f"Order: {contract.resource} {pct:.0f}% by {days_left:,.0f} d "
                 f"({contract.faction})")
+
+    def _pending_hud_line(self) -> str:
+        if not self.contracts.pending:
+            return ""
+        offer = self.contracts.pending[0]
+        return (f"OFFER {offer.tonnes:,.0f}t {offer.resource} "
+                f"{offer.reward_credits:,.0f}cr [B/V]")
 
     def _reputation_hud_line(self) -> str:
         avg = self.contracts.average_reputation()
@@ -503,10 +522,11 @@ class Game:
         want_food = need_food + max(0.0, LIFE_START_FOOD - resources.get("food", 0.0))
         spare_water = max(0.0, resources.get("water", 0.0) - need_water)
         budget = max(0.0, resources.get("energy", 0.0))
+        water_per_food = LIFE_HYDROPONICS_WATER_PER_FOOD * self.sim.botanist_water_factor()
         made_food = min(want_food,
-                        spare_water / LIFE_HYDROPONICS_WATER_PER_FOOD,
+                        spare_water / water_per_food,
                         budget / LIFE_HYDROPONICS_ENERGY_PER_FOOD)
-        resources["water"] = resources.get("water", 0.0) - made_food * LIFE_HYDROPONICS_WATER_PER_FOOD
+        resources["water"] = resources.get("water", 0.0) - made_food * water_per_food
         resources["energy"] = resources.get("energy", 0.0) - made_food * LIFE_HYDROPONICS_ENERGY_PER_FOOD
         energy_used += made_food * LIFE_HYDROPONICS_ENERGY_PER_FOOD
         resources["food"] = resources.get("food", 0.0) + made_food
@@ -534,7 +554,7 @@ class Game:
         self.power_load = min(1.0, max(0.05, load))
 
     def _tick_contracts(self) -> None:
-        """Post fresh Earth orders and retire overdue ones."""
+        """Post offers, honour decisions, retire overdue and stale paper."""
         recent = {ore for ore, day in self._recent_deliveries.items()
                   if self.market.day - day < 1200.0}
         if not recent:
@@ -542,10 +562,19 @@ class Game:
         offer = self.contracts.maybe_offer(recent)
         if offer is not None and not self.headless:
             self.say(
-                f"{offer.faction} orders {offer.tonnes:,.0f} t of {offer.resource} "
-                f"by day {offer.deadline_day:,.0f} for {offer.reward_credits:,.0f} cr.",
-                seconds=8.0,
+                f"OFFER from {offer.faction}: {offer.tonnes:,.0f} t of {offer.resource} "
+                f"by day {offer.deadline_day:,.0f} for {offer.reward_credits:,.0f} cr. "
+                "B to accept, V to decline.",
+                seconds=9.0,
             )
+        # The autopilot accepts orders it plausibly can fill.
+        if self.headless:
+            for pending in list(self.contracts.pending):
+                if pending.resource in recent and len(self.contracts.active) < 2:
+                    self.contracts.accept(pending.id)
+        for withdrawn in self.contracts.expire_pending():
+            if not self.headless:
+                self.say(f"{withdrawn.faction} withdrew its offer for {withdrawn.resource}.")
         for contract in self.contracts.expire_overdue():
             if not self.headless:
                 self.say(
@@ -553,6 +582,108 @@ class Game:
                     f"-- standing {self.contracts.reputation[contract.faction]:+.0f}.",
                     seconds=8.0,
                 )
+
+    def accept_contract(self) -> None:
+        """Accept the oldest posted offer."""
+        if not self.contracts.pending:
+            self.say("No offers on the desk.")
+            return
+        offer = self.contracts.pending[0]
+        accepted = self.contracts.accept(offer.id)
+        if accepted is None:
+            self.say("The order book is full; finish or fail a standing order first.")
+            return
+        self.say(
+            f"Accepted: {accepted.tonnes:,.0f} t {accepted.resource} for "
+            f"{accepted.faction} -- {accepted.reward_credits:,.0f} cr on delivery.",
+            seconds=8.0,
+        )
+
+    def decline_contract(self) -> None:
+        offer = self.contracts.decline(self.contracts.pending[0].id) if self.contracts.pending else None
+        self.say("Offer declined." if offer else "No offers on the desk.")
+
+    # -- hiring ------------------------------------------------------------------
+    def hire(self, role: str) -> None:
+        cost = CREW_HIRE_COST.get(role)
+        if cost is None:
+            self.say(f"Nobody trains '{role}' here.")
+            return
+        if self.credits < cost:
+            self.say(f"A {role} costs {cost:,.0f} cr signing bonus; treasury holds {self.credits:,.0f} cr.")
+            return
+        if role == "botanist":
+            ok, message = self.sim.hire("botanist")
+        else:
+            ship = min(self.sim.ships, key=lambda s: len(self.sim.crew.get(s.name, [])))
+            ok, message = self.sim.hire(role, ship.name)
+        if not ok:
+            self.say(message)
+            return
+        self.credits -= cost
+        self.say(f"{message} Signing bonus {cost:,.0f} cr.")
+
+    def fire_worst_morale(self) -> None:
+        candidates = [(m, ship.name) for ship in self.sim.ships
+                      for m in self.sim.crew.get(ship.name, [])]
+        if not candidates:
+            self.say("No one to dismiss.")
+            return
+        member, ship_name = min(candidates, key=lambda item: item[0].morale)
+        ok, message = self.sim.fire(ship_name, member)
+        self.say(message)
+
+    # -- jump-to-event -------------------------------------------------------------
+    def upcoming_events(self) -> list[tuple[str, float]]:
+        """Timed things worth racing the warp toward."""
+        events: list[tuple[str, float]] = []
+        if self.hud is not None:
+            window = self.sim.launch_window("colony", self.hud.selected_target())
+            if window is not None and window.departure_time > self.sim.time:
+                events.append((f"window to {self.sim.bodies[self.hud.selected_target()].name}",
+                               window.departure_time))
+        for ship in self.sim.ships:
+            mission = self.sim.missions.get(ship.name)
+            if mission is not None:
+                events.append((f"{ship.name} {mission.leg.value} completes",
+                               self.sim._event_time(mission)))
+        if self.sim.flare_state == "quiet":
+            events.append(("flare warning", self.sim.time + max(0.0, self.sim._flare_timer)))
+        for contract in self.contracts.active:
+            events.append((f"{contract.resource} order due", contract.deadline_day * SIM_SECONDS_PER_DAY))
+        for contract in self.contracts.pending:
+            events.append((f"{contract.resource} offer expires",
+                           (contract.deadline_day - 30.0) * SIM_SECONDS_PER_DAY))
+        return [e for e in events if e[1] > self.sim.time + SIM_SECONDS_PER_DAY]
+
+    def cycle_jump(self) -> None:
+        """Pick the next upcoming event and race the warp toward it."""
+        events = sorted(self.upcoming_events(), key=lambda e: e[1])
+        if not events:
+            self.say("Nothing worth jumping to right now.")
+            return
+        label, when = events[0]
+        if self._jump_target is not None:
+            index = next((i for i, e in enumerate(events) if abs(e[1] - self._jump_target[1]) < 1e-6), -1)
+            label, when = events[(index + 1) % len(events)]
+        self._jump_target = (label, when)
+        if self._jump_warp_restore is None:
+            self._jump_warp_restore = self.sim.warp_days_per_second
+        self.sim.warp_days_per_second = max(TIME_WARP_STEPS)
+        self.say(f"Jumping to {label} in {(when - self.sim.time) / SIM_SECONDS_PER_DAY:,.0f} days.",
+                 seconds=6.0)
+
+    def _tick_jump(self) -> None:
+        if self._jump_target is None:
+            return
+        label, when = self._jump_target
+        if self.sim.time >= when:
+            self._jump_target = None
+            if self._jump_warp_restore is not None:
+                self.sim.warp_days_per_second = self._jump_warp_restore
+                self._jump_warp_restore = None
+            if not self.headless:
+                self.say(f"Arrived at: {label}.", seconds=5.0)
 
     # -- flight-orientation checklist -------------------------------------------
     TUTORIAL_STEPS = (
@@ -578,14 +709,22 @@ class Game:
 
     # -- procedural audio ------------------------------------------------------
     def _tick_audio(self) -> None:
-        """Follow the power load with the hum; play alerts on rising edges."""
+        """Follow the power load with the hum; play alerts on rising edges.
+
+        The hum ducks under any recent alert so the tone reads clearly, and
+        the whole mixer mutes with N for quiet play.
+        """
         if not self.audio:
             return
         hum = self.audio.get("hum")
         if hum is not None:
             try:
-                hum.volume = 0.15 + 0.55 * self.power_load
-                hum.pitch = 0.85 + 0.45 * self.power_load
+                if self.muted:
+                    hum.volume = 0.0
+                else:
+                    ducking = time.time() < getattr(self, "_duck_until", 0.0)
+                    hum.volume = (0.05 if ducking else 0.15) + 0.55 * self.power_load * (0.3 if ducking else 1.0)
+                    hum.pitch = 0.85 + 0.45 * self.power_load
             except Exception:
                 pass
 
@@ -601,15 +740,20 @@ class Game:
             self._alert_edges[kind] = active
 
     def _play_alert(self, kind: str) -> None:
-        if not self.audio:
+        if not self.audio or self.muted:
             return
         sound = self.audio.get(kind)
         if sound is None:
             return
         try:
             sound.play()
+            self._duck_until = time.time() + 1.2
         except Exception:
             pass
+
+    def toggle_mute(self) -> None:
+        self.muted = not self.muted
+        self.say("Audio muted." if self.muted else "Audio on.")
 
     def _refuel_and_redispatch(self, dt_days: float) -> None:
         """Top up docked freighters from colony energy and send them back out.
@@ -844,6 +988,20 @@ def run_windowed() -> None:
             game.save_game()
         elif key == "f9":
             game.load_game()
+        elif key == "j":
+            game.cycle_jump()
+        elif key == "b":
+            game.accept_contract()
+        elif key == "v":
+            game.decline_contract()
+        elif key == "g":
+            game.hire("miner")
+        elif key == "h":
+            game.fire_worst_morale()
+        elif key == "z":
+            game.hire("botanist")
+        elif key == "n":
+            game.toggle_mute()
         elif key == "scroll up":
             camera.position *= 0.9
         elif key == "scroll down":
