@@ -352,7 +352,6 @@ def test_vertical_slice_mine_deliver_sell_buy():
     game.buy_ship_class("scout")
     assert len(game.sim.ships) == fleet_before + 1
     assert game.credits == pytest.approx(10_000.0 - SHIP_CLASSES["scout"]["price"])
-    assert game.buy_ship_class is not None
 
 
 def test_game_save_and_load_round_trip(monkeypatch, tmp_path):
