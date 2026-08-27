@@ -108,86 +108,183 @@ def _fallback_capture(reason: BaseException) -> int:
     game.sim.dispatch(game.sim.ships[1], "inner_belt")
 
     trails: dict[str, list[tuple[float, float]]] = {ship.name: [] for ship in game.sim.ships}
-    dt_days = game.sim.warp_days_per_second / 6.0  # approximates a low-FPS capture at 90 sim-days/s
+    # A lively mid-game moment: ~1,000 days in, fleet busy, colony funded.
+    dt_days = 2.0
+    next_sale = 90.0 * SIM_SECONDS_PER_DAY
     for _ in range(FRAMES):
         game.update(dt_days)
+        if game.sim.time >= next_sale:
+            next_sale += 90.0 * SIM_SECONDS_PER_DAY
+            game.sell_all()
         for ship in game.sim.ships:
             r, _ = ship.state_at(game.sim.time)
             trails[ship.name].append((float(r[0]), float(r[1])))
-            trails[ship.name] = trails[ship.name][-180:]
+            trails[ship.name] = trails[ship.name][-70:]
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    from src.utils.procedural import GAME_BODY_PALETTES
+
+    def _font(size: int):
+        try:
+            return ImageFont.load_default(size=size)
+        except TypeError:
+            return ImageFont.load_default()
 
     size = (1920, 1200)
-    img = Image.new("RGB", size, (3, 5, 14))
+    img = Image.new("RGB", size, (4, 5, 12))
     draw = ImageDraw.Draw(img)
+
+    # -- starfield backdrop (the real generated skybox) -----------------------
+    stars_path = os.path.join("assets", "textures", "game", "skybox_stars.png")
+    if os.path.isfile(stars_path):
+        stars = Image.open(stars_path).convert("RGB").resize(size)
+        img = Image.blend(img, stars, alpha=0.9)
+        draw = ImageDraw.Draw(img)
+
     cx, cy = size[0] // 2, size[1] // 2
     scale = 118.0
 
     def p(x: float, y: float) -> tuple[int, int]:
         return int(cx + x * scale), int(cy - y * scale)
 
-    # faint grid and title
-    for r in range(1, 5):
-        rr = int(r * scale)
-        draw.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), outline=(22, 29, 48), width=1)
-    draw.ellipse((cx - 18, cy - 18, cx + 18, cy + 18), fill=(255, 196, 58), outline=(255, 239, 150), width=3)
-
-    palette = {
-        "colony": (80, 180, 255),
-        "inner_belt": (170, 140, 105),
-        "metallic_belt": (210, 210, 220),
-        "gas_giant_orbit": (230, 160, 90),
-        "deep_belt": (120, 180, 170),
-        "derelict_zone": (180, 115, 220),
-    }
-
     now = game.sim.time
-    # Sample each body orbit in the ecliptic projection.
+
+    # -- sun with layered glow sprites ----------------------------------------
+    glow_path = os.path.join("assets", "textures", "game", "sun_glow.png")
+    if os.path.isfile(glow_path):
+        for glow_px, opacity in ((340, 0.85), (720, 0.45)):
+            sprite = Image.open(glow_path).convert("RGBA").resize((glow_px, glow_px))
+            alpha = sprite.split()[3].point(lambda a: int(a * opacity))
+            sprite.putalpha(alpha)
+            img.paste(sprite, (cx - glow_px // 2, cy - glow_px // 2), sprite)
+        draw = ImageDraw.Draw(img)
+    draw.ellipse((cx - 20, cy - 20, cx + 20, cy + 20), fill=(255, 214, 130),
+                 outline=(255, 244, 200), width=3)
+
+    # -- asteroid belt scatter -------------------------------------------------
+    import random as _random
+
+    rng = _random.Random(11)
+    for _ in range(260):
+        a = rng.uniform(1.32, 2.28)
+        angle = rng.uniform(0.0, 2.0 * math.pi)
+        ax, ay = p(a * math.cos(angle), a * math.sin(angle))
+        shade = rng.randint(70, 120)
+        r_px = rng.randint(1, 2)
+        draw.ellipse((ax - r_px, ay - r_px, ax + r_px, ay + r_px), fill=(shade, shade, shade + 8))
+
+    # -- orbits, then textured planets ------------------------------------------
     for key, body in BODIES.items():
+        if key == "nix":
+            continue
+        rgb = tuple(int(c * 255) for c in body.palette)
         pts = []
         period = 2 * math.pi * math.sqrt(abs(body.elements.a) ** 3 / (4 * math.pi * math.pi))
         for i in range(240):
             r_sample, _ = body_state(body.elements, 4 * math.pi * math.pi, i / 239 * period)
             pts.append(p(float(r_sample[0]), float(r_sample[1])))
         if len(pts) > 1:
-            draw.line(pts, fill=tuple(int(c * 0.42) for c in palette.get(key, (150, 150, 150))), width=2)
+            draw.line(pts, fill=tuple(int(c * 0.40) for c in rgb), width=2)
+
+    for key, body in BODIES.items():
+        if key == "nix":
+            continue
         r_body, _ = body_state(body.elements, 4 * math.pi * math.pi, now)
         bx, by = p(float(r_body[0]), float(r_body[1]))
-        col = palette.get(key, (180, 180, 180))
-        radius = 12 if key == "colony" else 8
-        draw.ellipse((bx - radius, by - radius, bx + radius, by + radius), fill=col, outline=(255, 255, 255), width=1)
+        diameter = int(30 + 44 * body.render_scale)
+        tex_path = os.path.join("assets", "textures", "game", f"{key}.png")
+        if os.path.isfile(tex_path):
+            tex = Image.open(tex_path).convert("RGB").resize((diameter, diameter))
+            mask = Image.new("L", (diameter, diameter), 0)
+            ImageDraw.Draw(mask).ellipse((0, 0, diameter, diameter), fill=255)
+            img.paste(tex, (bx - diameter // 2, by - diameter // 2), mask)
+            draw = ImageDraw.Draw(img)
+        else:
+            rgb = tuple(int(c * 255) for c in body.palette)
+            draw.ellipse((bx - diameter // 2, by - diameter // 2,
+                          bx + diameter // 2, by + diameter // 2), fill=rgb)
         if key == "gas_giant_orbit":
-            draw.ellipse((bx - 22, by - 7, bx + 22, by + 7), outline=(245, 210, 130), width=2)
-            draw.ellipse((bx + 28, by - 3, bx + 34, by + 3), fill=(205, 210, 230))
-        draw.text((bx + 12, by - 9), body.name, fill=(210, 220, 235))
+            ring_box = (bx - int(diameter * 1.05), by - int(diameter * 0.30),
+                        bx + int(diameter * 1.05), by + int(diameter * 0.30))
+            draw.ellipse(ring_box, outline=(235, 205, 245), width=3)
+        # name tag pill
+        font_tag = _font(17)
+        tw = draw.textlength(body.name, font=font_tag)
+        pill = (bx - tw / 2 - 10, by - diameter // 2 - 34,
+                bx + tw / 2 + 10, by - diameter // 2 - 6)
+        draw.rounded_rectangle(pill, radius=9, fill=(8, 12, 22))
+        draw.text((pill[0] + 10, pill[1] + 4), body.name, font=font_tag, fill=(205, 232, 255))
 
-    ship_cols = [(100, 255, 180), (255, 120, 120), (130, 170, 255)]
-    for idx, ship in enumerate(game.sim.ships):
-        col = ship_cols[idx % len(ship_cols)]
+    # -- ships with fading trails -------------------------------------------------
+    class_cols = {"scout": (120, 210, 255), "freighter": (235, 235, 245),
+                  "refinery": (255, 214, 140), "hauler": (255, 160, 160)}
+    for ship in game.sim.ships:
+        col = class_cols.get(game.sim.ship_class.get(ship.name), (200, 220, 255))
         pts = [p(x, y) for x, y in trails.get(ship.name, [])]
         if len(pts) > 1:
             for j in range(1, len(pts)):
                 fade = j / len(pts)
-                draw.line([pts[j - 1], pts[j]], fill=tuple(int(c * fade) for c in col), width=3)
+                draw.line([pts[j - 1], pts[j]], fill=tuple(int(c * fade * 0.8) for c in col), width=3)
         r, _ = ship.state_at(game.sim.time)
         sx, sy = p(float(r[0]), float(r[1]))
-        draw.polygon([(sx, sy - 10), (sx + 9, sy + 9), (sx - 9, sy + 9)], fill=col, outline=(255, 255, 255))
         status = game.sim.ship_report(ship)["status"]
-        draw.text((sx + 13, sy - 10), f"{ship.name} {status}", fill=col)
+        thrusting = status in ("outbound", "inbound", "pending")
+        if thrusting:
+            draw.ellipse((sx - 14, sy - 14, sx + 14, sy + 14), outline=col, width=2)
+        draw.polygon([(sx, sy - 10), (sx + 9, sy + 9), (sx - 9, sy + 9)], fill=col,
+                     outline=(255, 255, 255))
+        draw.text((sx + 13, sy - 10), f"{ship.name} {status}", font=_font(15), fill=col)
 
-    panel = (20, 20, 620, 300)
-    draw.rounded_rectangle(panel, radius=14, fill=(8, 14, 28), outline=(70, 95, 140), width=2)
-    lines = [
-        "Asteroid Colony Proto — Orbital Supply Chains",
-        f"Fallback render (no Xvfb/libGL in sandbox); frame {FRAMES}",
-        f"T + {game.sim.time / SIM_SECONDS_PER_DAY:,.1f} days   warp 90 d/s",
-        f"runs completed {game.sim.stats['runs_completed']}   delivered {game.sim.stats['mass_delivered']:.0f} t",
-        f"delta-v spent {game.sim.stats['delta_v_spent']:.0f} m/s",
-        "controls: TAB target · ENTER dispatch · [ ] warp · O orbits · F follow · C overview",
+    # -- HUD: mission panel (left) and colony panel (right) -----------------------
+    def panel(box, title, lines, accent=(90, 140, 210)):
+        draw.rounded_rectangle(box, radius=14, fill=(8, 13, 26), outline=accent, width=2)
+        draw.text((box[0] + 20, box[1] + 14), title, font=_font(21), fill=(120, 200, 255))
+        y = box[1] + 52
+        for line in lines:
+            draw.text((box[0] + 22, y), line, font=_font(16), fill=(226, 234, 250))
+            y += 26
+
+    days = game.sim.time / SIM_SECONDS_PER_DAY
+    fleet_lines = []
+    for report in game.sim.fleet_report():
+        hull = game.sim.hull.get(report["name"], 100.0)
+        fleet_lines.append(
+            f"{report['name']:<8} {report['status']:<9} {report['delta_v_left']:>6,.0f} m/s  H{hull:.0f}%"
+        )
+    panel((24, 24, 660, 320), "ORBITAL LOGISTICS", [
+        f"Mission day {days:,.0f}   (year {days / 365.25:.2f})",
+        f"runs {game.sim.stats['runs_completed']}   delivered {game.sim.stats['mass_delivered']:,.0f} t",
+        *fleet_lines,
+    ])
+    resources = game.colony.state["resources"]
+    prices = ", ".join(f"{res} {game.market.price(res):.1f}" for res in ("iron", "silver", "gold"))
+    right_lines = [
+        f"treasury {game.credits:,.0f} cr",
+        f"market: {prices} cr/t",
+        f"ice {resources.get('ice', 0):.0f} t   O2 {resources.get('oxygen', 0):.0f}   food {resources.get('food', 0):.0f}",
+        f"crew morale {game.sim.fleet_morale():.0f}/100",
+        f"depots: {len(game.sim.depots)}   mining: {game.sim.mining_mode}",
     ]
-    y = 42
-    for line in lines:
-        draw.text((42, y), line, fill=(230, 238, 255))
-        y += 38
+    panel((size[0] - 560, 24, size[0] - 24, 268), "COLONY", right_lines, accent=(70, 110, 90))
+
+    # -- toasts + title topline ------------------------------------------------------
+    recent = [text for _, text in reversed(game.toasts)][:3]
+    y = 40
+    for text in recent:
+        tw = draw.textlength(text, font=_font(17))
+        box = (size[0] / 2 - tw / 2 - 14, y - 6, size[0] / 2 + tw / 2 + 14, y + 24)
+        draw.rounded_rectangle(box, radius=10, fill=(10, 16, 30))
+        draw.text((box[0] + 14, y), text, font=_font(17), fill=(210, 235, 255))
+        y += 40
+    title_font = _font(40)
+    title = "ORBITAL SUPPLY CHAINS"
+    tw = draw.textlength(title, font=title_font)
+    draw.text((size[0] / 2 - tw / 2 + 2, size[1] - 74 + 2), title, font=title_font, fill=(20, 40, 70))
+    draw.text((size[0] / 2 - tw / 2, size[1] - 76), title, font=title_font, fill=(110, 200, 255))
+    sub = "fallback render (no GL in sandbox) - the real game is 3-D Ursina"
+    draw.text((size[0] / 2 - draw.textlength(sub, font=_font(15)) / 2, size[1] - 30),
+              sub, font=_font(15), fill=(140, 160, 190))
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     img.save(OUT)
