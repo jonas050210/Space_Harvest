@@ -1,0 +1,30 @@
+# run-log.txt — first launch evidence (captured 2026-08-26)
+# 1) headless self-test
+$ python -m src.main --headless --sim-days 6000
+[headless] 24000 frames over 6,000 sim-days
+  Kestrel pending  Inner Belt Field         6,974 m/s left
+  Petrel  pending  Inner Belt Field         6,986 m/s left
+  runs completed : 18
+  mass delivered : 4,320 t
+  delta-v spent  : 112,790 m/s
+  deliveries into colony economy: 18
+  colony storage : {'used': 615.0, 'capacity': 1500, 'delivered': 850.0}
+  research points: 212.5
+
+# 2) windowed launch under Xvfb (rendering proof, 700 frames)
+$ xvfb-run -a --server-args="-screen 0 1920x1200x24" python scripts/capture_frame.py
+application successfully started
+[capture] wrote /home/user/asteroid-colony-proto/logs/screenshot.png (188361 bytes)
+[capture] wrote /home/user/asteroid-colony-proto/logs/screenshot-1.png (187169 bytes)
+[capture] frames=700 shots=2 runs=37 delivered=8880t
+
+# 3) test suites
+$ python -m pytest tests/ -q
+...........................................                              [100%]
+43 passed in 10.45s
+$ (upstream) python vendor/asteroid-colony-upstream/test_overall.py
+
+=== Result: 25 passed, 0 failed ===
+
+# 4) porkchop plot
+wrote logs/porkchop.png
