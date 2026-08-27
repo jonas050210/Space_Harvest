@@ -42,6 +42,8 @@ from src.config import (  # noqa: E402
     LIFE_START_OXYGEN,
     LIFE_START_WATER,
     LIFE_WATER_PER_CREW_DAY,
+    LIFE_WATER_RECYCLE_FRACTION,
+    HULL_CRITICAL_PCT,
     MARKET_BASE_PRICES,
     REDISPATCH_SCAN_DAYS,
     SHIP_CLASSES,
@@ -109,12 +111,18 @@ class Game:
         # Fraction of the colony's power budget in use; drives the ambient hum.
         self.power_load = 0.2
         self._life_shortage_flag = False
+        # resource -> market day of the most recent delivery, so Earth orders
+        # what the fleet actually trades these days.
+        self._recent_deliveries: dict[str, float] = {}
         # One-shot flags the flight-orientation checklist watches.
         self.tutorial_text = ""
         self._tut = {"dispatched": False, "sold": False, "drilled": False,
                      "bought": False, "saved": False, "done": False}
         # Alert edges, so tones play once per incident instead of every frame.
         self._alert_edges = {"flare": False, "hull": False, "shortage": False}
+        # Procedural audio (windowed only): hum + alert tones, synthesised at
+        # startup. None in headless mode.
+        self.audio: dict | None = None
         self.scene = None
         self.hud = None
         self.follow_target: str | None = None
@@ -211,6 +219,7 @@ class Game:
         self._book_deliveries()
         self._refuel_and_redispatch(dt_days)
         self._tick_tutorial()
+        self._tick_audio()
 
         if self.scene is not None:
             self.scene.update(self.sim)
@@ -235,9 +244,12 @@ class Game:
             stored = sum(result["stored"].values())
             overflow = sum(result["overflow"].values())
             self.deliveries_booked += 1
+            for ore in delivery.cargo:
+                self._recent_deliveries[ore] = self.market.day
             for contract in self.contracts.register_delivery(delivery.cargo):
                 reward = self.contracts.complete(contract)
                 self.credits += reward
+                self._play_alert("contract")
                 self.say(
                     f"Order filled: {contract.tonnes:,.0f} t {contract.resource} for "
                     f"{contract.faction} -- {reward:,.0f} cr.",
@@ -499,10 +511,14 @@ class Game:
         energy_used += made_food * LIFE_HYDROPONICS_ENERGY_PER_FOOD
         resources["food"] = resources.get("food", 0.0) + made_food
 
-        # The crew breathes, eats and drinks.
+        # The crew breathes, eats and drinks; the recyclers claw most of the
+        # water back into the tank.
+        water_used = need_water + made_o2 * LIFE_ELECTROLYSIS_WATER_PER_O2 \
+            + made_food * LIFE_HYDROPONICS_WATER_PER_FOOD
         resources["oxygen"] = max(0.0, resources.get("oxygen", 0.0) - need_o2)
         resources["food"] = max(0.0, resources.get("food", 0.0) - need_food)
         resources["water"] = max(0.0, resources.get("water", 0.0) - need_water)
+        resources["water"] = resources.get("water", 0.0) + water_used * LIFE_WATER_RECYCLE_FRACTION
 
         # Shortages grind everyone down; the HUD and the audio alert pick up
         # the flag from _life_shortage().
@@ -519,7 +535,11 @@ class Game:
 
     def _tick_contracts(self) -> None:
         """Post fresh Earth orders and retire overdue ones."""
-        offer = self.contracts.maybe_offer()
+        recent = {ore for ore, day in self._recent_deliveries.items()
+                  if self.market.day - day < 1200.0}
+        if not recent:
+            recent = set(self.colony.state.get("logistics", {}).get("lifetime_delivered", {}))
+        offer = self.contracts.maybe_offer(recent)
         if offer is not None and not self.headless:
             self.say(
                 f"{offer.faction} orders {offer.tonnes:,.0f} t of {offer.resource} "
@@ -555,6 +575,41 @@ class Game:
                 return
         self._tut["done"] = True
         self.tutorial_text = ""
+
+    # -- procedural audio ------------------------------------------------------
+    def _tick_audio(self) -> None:
+        """Follow the power load with the hum; play alerts on rising edges."""
+        if not self.audio:
+            return
+        hum = self.audio.get("hum")
+        if hum is not None:
+            try:
+                hum.volume = 0.15 + 0.55 * self.power_load
+                hum.pitch = 0.85 + 0.45 * self.power_load
+            except Exception:
+                pass
+
+        hull_critical = any(pct < HULL_CRITICAL_PCT for pct in self.sim.hull.values())
+        edges = {
+            "flare": self.sim.flare_state in ("warning", "flare"),
+            "hull": hull_critical,
+            "shortage": bool(getattr(self, "_life_shortage_flag", False)),
+        }
+        for kind, active in edges.items():
+            if active and not self._alert_edges.get(kind):
+                self._play_alert(kind)
+            self._alert_edges[kind] = active
+
+    def _play_alert(self, kind: str) -> None:
+        if not self.audio:
+            return
+        sound = self.audio.get(kind)
+        if sound is None:
+            return
+        try:
+            sound.play()
+        except Exception:
+            pass
 
     def _refuel_and_redispatch(self, dt_days: float) -> None:
         """Top up docked freighters from colony energy and send them back out.
@@ -614,7 +669,10 @@ class Game:
                                            + LIFE_OXYGEN_PER_CREW_DAY * LIFE_ELECTROLYSIS_WATER_PER_O2
                                            + LIFE_FOOD_PER_CREW_DAY * LIFE_HYDROPONICS_WATER_PER_FOOD))
         urgency = max(0.0, 1.0 - days_left / LIFE_ICE_HORIZON_DAYS)
-        return LIFE_ICE_PREMIUM_MAX * urgency
+        # Quadratic: comfortable pantries barely move the dispatcher; a real
+        # shortage outbids the metals market. Linear urgency made every ship
+        # mine ice forever and nobody haul metal.
+        return LIFE_ICE_PREMIUM_MAX * urgency * urgency
 
     def _estimate_run_value(self, target_key: str, ship) -> float:
         """Estimated value of one hold at ``target_key``, life support included.
@@ -714,6 +772,27 @@ def run_headless(sim_days: float, frames_per_day: int = 4, verbose: bool = True,
     return game
 
 
+def _setup_audio(game: "Game") -> None:
+    """Synthesise the ambient hum and alert tones; never fatal if audio fails."""
+    try:
+        from ursina import Audio
+
+        from src.utils.procedural import make_alert_wav, make_hum_wav
+
+        directory = os.path.join("logs", "audio")
+        os.makedirs(directory, exist_ok=True)
+        audio = {"hum": Audio(make_hum_wav(os.path.join(directory, "hum.wav")),
+                              loop=True, autoplay=True)}
+        for kind in ("flare", "hull", "shortage", "contract"):
+            audio[kind] = Audio(make_alert_wav(kind, os.path.join(directory, f"{kind}.wav")),
+                                autoplay=False)
+        game.audio = audio
+        print("[audio] procedural hum and alert tones ready")
+    except Exception as exc:  # no audio device / no numpy wave support
+        game.audio = None
+        print(f"[audio] disabled ({exc})")
+
+
 def run_windowed() -> None:
     from ursina import Ursina, camera, color, window
     from ursina import scene as ursina_scene
@@ -726,6 +805,7 @@ def run_windowed() -> None:
 
     game = Game(headless=False)
     game.build_scene(ursina_scene)
+    _setup_audio(game)
     camera.orthographic = False
     camera.fov = 55
 

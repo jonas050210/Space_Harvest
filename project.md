@@ -55,7 +55,12 @@ The upstream `asteroid-colony` economic regions are modelled as real heliocentri
 | Mining & depletion | Deterministic per-body ore fingerprints; exponential depletion ledgers with slow multi-year recovery; per-vein reservations for concurrent runs; surface scraping vs core drilling (hold-capped yield, hull wear, incident risk). |
 | Earth market | Dynamic prices (seasonal sine + mean-reverting noise), per-resource absorption so big sales flood their own price, exponential flood recovery, trend arrows and treasury sparkline in the HUD. |
 | Fleet classes & hull | Data-driven scout/freighter/refinery/hauler (hold, delta-v budget, refuel rate, wear factor, price); per-burn hull wear; low-hull dispatch interlock; credit-billed auto-repair; seeded mining incidents. |
-| Save / load | F5/F9 quick-save of the full game state (ships in flight, missions, windows, ledgers, market RNG, colony state) as JSON via the upstream savegame slots. |
+| Crew & morale | Named 4-seat rosters per ship; fatigue accrues in flight and layovers, recovers docked; morale reacts to captures, payday, overwork, cabin fever, boredom (floored) and shortages; tired crews refuse dispatch, cause incidents and mine less. |
+| Space weather | Deterministic solar-flare cycles (quiet -> warning -> flare) and periodic debris seasons; per-day hull wear only for ships in flight; HUD + audio alerts. |
+| Earth contracts | Faction orders against recent trade patterns; completion pays credits + reputation, expiry costs it; standing swings sale prices by up to 6%. |
+| Life support | Oxygen/food/water loop over the whole crew: ice refinery, electrolysis, hydroponics and ISS-style water recycling on a solar-fed energy budget; shortages drain morale; the dispatcher outbids the market for ice when the pantry runs low. |
+| Procedural audio | Ambient hum pitched by colony power load and four alert tones (flare, hull, shortage, payday chime), synthesised to WAV at startup - no binary assets. |
+| Save / load | F5/F9 quick-save of the full game state (ships in flight, missions, windows, ledgers, market RNG, colony state, crews, weather, contracts) as JSON via the upstream savegame slots. |
 | Rendering | Ursina sun/halo, line-mesh orbits, bodies, freighters (new commissions appear automatically), fading trails, camera presets/follow. |
 | HUD | Clock/warp, selected target, transfer plan with live assay, fleet status with hull, ETA, delta-v, flight log, Earth-market panel, fleet-ops panel, storage and lifetime tonnage. |
 | Assets | Procedural OBJ/PNG only; no external binary blobs. |
@@ -101,8 +106,12 @@ derelict zone; scouts are cheap long-range probes of new fields.
 
 Failure modes are honest and data-driven: ships that cannot afford a burn are
 left drifting with a log entry; hulls below 20% refuse dispatch until
-repaired; a broke colony lets its fleet decay; mined-out veins yield thin
-holds until the fields slowly recover (tau about 2,400 days).
+repaired; exhausted crews refuse to fly; a broke colony lets its fleet decay;
+mined-out veins yield thin holds until the fields recover (metals tau about
+2,400 days, ice 900); an empty pantry grinds every crew's morale down.
+
+The flight-orientation checklist (bottom of the screen) walks a new director
+through dispatch, selling, drilling, commissioning and saving.
 
 ---
 
@@ -195,10 +204,11 @@ src/game diff vs upstream excluding caches: (empty — vendored code untouched)
 ## 7. Known limits
 
 * Lambert is single-revolution only; multi-revolution branches are future work.
-* Colony energy production is not ticked by the orbital loop, so refuelling bills energy that floors at 0; with a large fleet the energy ledger is decorative rather than binding.
-* Vein recovery is slow (e-folding time about 2,400 days); a fully mined-out field yields thin holds until then. The market eventually prices around it, but a mono-crop economy can stagnate.
-* Auto-dispatch waits for a near-full tank and prefers the most expensive affordable run, so the inner belt has become an early-game field; the idle scan may look "lazy" while a ship tops up.
-* The savegame stores full RNG state (market, incidents); replaying a save is deterministic, which is intended for testing but means saved "luck" repeats.
+* Auto-dispatch waits for a near-full tank and the life-support premium keeps the fleet ice-heavy whenever the pantry is thin; a director who wants metal runs should sell surplus ice down to the reserve first (the premium eases once the buffer grows).
+* Roughly a third to half of Earth orders still expire unfilled under the autopilot; deadlines are matched to mission cycles but two concurrent orders can still outrun six ships.
+* Colony energy is now ticked (solar array in `LIFE_SOLAR_ENERGY_PER_DAY`), but a fleet-wide refuel spike can still transiently stall the electrolysers; the life-support buffers refill afterwards.
+* The savegame stores full RNG state (market, incidents, weather); replaying a save is deterministic, which is intended for testing but means saved "luck" repeats.
+* Procedural audio needs a sound device; headless boots disable it gracefully.
 * Windowed screenshot capture on headless Linux needs host GL/Xvfb packages. The Arena apt mirror was unreachable during final verification, so the fallback screenshot was used in this sandbox.
 * `AI-Vision-Lab` is included as code only; scanner gameplay hooks are not enabled yet.
 

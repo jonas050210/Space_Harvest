@@ -22,6 +22,7 @@ from .config import (
     MINING_DRILL_YIELD_BONUS,
     MINING_LOW_HULL_YIELD_PCT,
     MINING_ORES,
+    MINING_RECOVERY_TAU_BY_ORE,
     MINING_SEED,
     MINING_VEIN_SIZE_T,
 )
@@ -100,13 +101,18 @@ class YieldLedger:
             slot[ore] = slot.get(ore, 0.0) + max(0.0, tonnes)
 
     def recover(self, dt_days: float, tau_days: float) -> None:
-        """Veins slowly recharge as the fields drift and replenish."""
+        """Veins slowly recharge as the fields drift and replenish.
+
+        Per-ore overrides win over the global tau: volatile ices replenish on
+        a much shorter timescale than metal deposits (see
+        ``MINING_RECOVERY_TAU_BY_ORE``).
+        """
         if dt_days <= 0.0 or tau_days <= 0.0:
             return
-        decay = math.exp(-dt_days / tau_days)
         for slot in self.extracted.values():
             for ore in list(slot):
-                slot[ore] *= decay
+                tau = MINING_RECOVERY_TAU_BY_ORE.get(ore, tau_days)
+                slot[ore] *= math.exp(-dt_days / tau)
 
     def to_json(self) -> dict:
         return {"extracted": {body: dict(slot) for body, slot in self.extracted.items()}}

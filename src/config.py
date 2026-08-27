@@ -55,12 +55,12 @@ SHIP_CARGO_CAPACITY = 240    # tonnes per run
 # Docked freighters regenerate propellant at this rate (m/s per sim-day),
 # drawn from colony energy. Without it a fleet grounds itself after two runs
 # and the supply chain stops.
-SHIP_REFUEL_RATE = 120.0
+SHIP_REFUEL_RATE = 160.0
 # Raised from 22 when the economy layer landed: at 22 m/s per day a docked
 # freighter could only afford the cheapest hop by the time the 30-day idle
 # scan re-dispatched it, so fleets were trapped flying inner-belt runs
-# forever. At 120 a ship tops up in about half a year of layover, which
-# matches the natural rhythm of window waits and lets deep fields open up.
+# forever. At 160 a ship tops up in under a year of layover, which matches
+# the natural rhythm of window waits and lets deep fields open up.
 SHIP_REFUEL_ENERGY_PER_MS = 0.0006  # colony energy units per m/s restored
 # Lowered from 0.004 when life support gave the colony a real energy budget
 # (solar +1.5/day): at 0.004 a single full refill cost ~104 energy, roughly a
@@ -75,13 +75,13 @@ SHIP_ISP = 3200.0            # s, electric propulsion flavour
 # hold volume, never a physics discount on the conics themselves.
 SHIP_CLASSES = {
     "scout":     {"name": "Scout",     "capacity": 120.0, "delta_v": 30.0e3, "price": 2500.0,
-                  "refuel_rate": 130.0, "wear_factor": 0.85, "mine_bonus": 1.0},
+                  "refuel_rate": 170.0, "wear_factor": 0.85, "mine_bonus": 1.0},
     "freighter": {"name": "Freighter", "capacity": SHIP_CARGO_CAPACITY, "delta_v": SHIP_START_DELTA_V,
                   "price": 4500.0, "refuel_rate": SHIP_REFUEL_RATE, "wear_factor": 1.0, "mine_bonus": 1.0},
     "refinery":  {"name": "Refinery",  "capacity": 260.0, "delta_v": 24.0e3, "price": 7500.0,
-                  "refuel_rate": 120.0, "wear_factor": 0.70, "mine_bonus": 1.3},
+                  "refuel_rate": 160.0, "wear_factor": 0.70, "mine_bonus": 1.3},
     "hauler":    {"name": "Hauler",    "capacity": 520.0, "delta_v": 21.0e3, "price": 9000.0,
-                  "refuel_rate": 150.0, "wear_factor": 1.10, "mine_bonus": 1.0},
+                  "refuel_rate": 200.0, "wear_factor": 1.10, "mine_bonus": 1.0},
 }
 DEFAULT_SHIP_CLASS = "freighter"
 FLEET_NAME_POOL = ("Kestrel", "Petrel", "Harrier", "Osprey", "Falcon", "Condor",
@@ -110,6 +110,9 @@ MINING_DRILL_YIELD_BONUS = 1.6   # core drilling multiplier per run
 MINING_DRILL_WEAR_PCT = 6.0      # hull cost of drilling on every drilled run
 MINING_LOW_HULL_YIELD_PCT = 40.0  # below this hull %, yield scales with hull
 MINING_RECOVERY_TAU_DAYS = 2400.0  # e-folding time for depleted veins to recover
+# Volatiles replenish much faster than metals: ices migrate and re-condense,
+# so a mined-out ice field comes back within a few years instead of decades.
+MINING_RECOVERY_TAU_BY_ORE = {"ice": 900.0}
 INCIDENT_CHANCE_SCRAPE = 0.02      # per capture
 INCIDENT_CHANCE_DRILL = 0.09       # per capture while core drilling
 INCIDENT_LOW_HULL_FACTOR = 1.2     # extra chance = factor * max(0, 40-hull)/100
@@ -182,10 +185,13 @@ DEBRIS_WEAR_PCT_PER_DAY = 0.35           # micrometeorite sandblasting in flight
 
 # --- Earth faction contracts --------------------------------------------------
 CONTRACT_FACTIONS = ("Terran Metals Guild", "Luna Water Authority", "Ceres Prospecting Co.")
-CONTRACT_OFFER_PERIOD_DAYS = 40.0
+CONTRACT_OFFER_PERIOD_DAYS = 70.0
 CONTRACT_MAX_ACTIVE = 2
 CONTRACT_TONNES_RANGE = (60.0, 260.0)
-CONTRACT_DEADLINE_DAYS = (60.0, 180.0)
+# Deadlines must match the network's rhythm: a round trip takes 500-700 days
+# with windows and layovers, so anything shorter is a toll on standing, not a
+# game.
+CONTRACT_DEADLINE_DAYS = (420.0, 720.0)
 CONTRACT_REWARD_MULTIPLIER_RANGE = (1.15, 1.45)  # x market price at offering
 CONTRACT_REP_ON_COMPLETE = 12.0
 CONTRACT_REP_ON_FAIL = 18.0
@@ -199,9 +205,14 @@ REPUTATION_PRICE_BONUS = 0.06  # max sell-price swing at +/-100 average standing
 # Rates are budgeted so one mixed inner-belt hold (~130 t of ice) feeds the
 # starting crew for about 250 days: incidental deliveries mostly cover the
 # colony, deliberate ice runs cover growth, and selling everything starves it.
-LIFE_OXYGEN_PER_CREW_DAY = 0.02
-LIFE_FOOD_PER_CREW_DAY = 0.016
-LIFE_WATER_PER_CREW_DAY = 0.012
+LIFE_OXYGEN_PER_CREW_DAY = 0.008
+LIFE_FOOD_PER_CREW_DAY = 0.0064
+LIFE_WATER_PER_CREW_DAY = 0.0048
+# Closed-loop recycling: most of the water the crew and the processors use is
+# reclaimed (ISS-style), so only the net loss must be replaced from the ice
+# refinery. This is what makes a growing fleet life-supportable at all given
+# that an inner-belt round trip takes ~600 days of windows and layovers.
+LIFE_WATER_RECYCLE_FRACTION = 0.6
 LIFE_ELECTROLYSIS_WATER_PER_O2 = 1.2
 LIFE_ELECTROLYSIS_ENERGY_PER_O2 = 0.4
 LIFE_HYDROPONICS_WATER_PER_FOOD = 1.1

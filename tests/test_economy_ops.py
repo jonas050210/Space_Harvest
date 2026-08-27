@@ -559,7 +559,8 @@ def test_life_support_keeps_oxygen_and_food_up_while_ice_remains():
     # Production covers the crew while the ice refinery feeds water in.
     assert min(oxygen) > 0.5 * LIFE_START_OXYGEN
     assert min(food) > 0.5 * LIFE_START_FOOD
-    assert game.colony.state["resources"]["ice"] < 190.0  # the refinery is eating ice
+    # With recycling the melt is small, but the refinery must be running.
+    assert game.colony.state["resources"]["ice"] < 199.0
     assert not getattr(game, "_life_shortage_flag", False)
 
 
@@ -622,6 +623,41 @@ def test_tutorial_walks_the_whole_checklist(monkeypatch, tmp_path):
     game.save_game("tutorial")
     game.update(1.0)
     assert game._tut["done"] and game.tutorial_text == ""
+
+
+# --------------------------------------------------------------------------
+# Procedural audio synthesis
+# --------------------------------------------------------------------------
+
+def test_procedural_alerts_and_hum_are_valid_wav_files(tmp_path):
+    import wave
+
+    from src.utils.procedural import make_alert_wav, make_hum_wav
+
+    for kind in ("flare", "hull", "shortage", "contract"):
+        path = make_alert_wav(kind, str(tmp_path / f"{kind}.wav"))
+        with wave.open(path) as handle:
+            assert handle.getnchannels() == 1
+            assert handle.getsampwidth() == 2
+            assert handle.getframerate() == 22050
+            assert handle.getnframes() > 1000
+
+    with pytest.raises(ValueError):
+        make_alert_wav("kaiju", str(tmp_path / "bad.wav"))
+
+    hum_path = make_hum_wav(str(tmp_path / "hum.wav"))
+    with wave.open(hum_path) as handle:
+        seconds = handle.getnframes() / handle.getframerate()
+        assert 2.0 < seconds < 6.0  # a short seamless loop
+
+
+def test_audio_tick_is_a_noop_without_audio_objects():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.audio = None
+    game.update(1.0)  # must not raise
+    assert game.power_load >= 0.05
 
 
 # --------------------------------------------------------------------------

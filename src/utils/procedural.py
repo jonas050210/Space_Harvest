@@ -162,3 +162,80 @@ if __name__ == "__main__":
     root = os.path.join(project_root, "assets")
     for name, path in build_all(root).items():
         print(f"  {name:22s} {os.path.getsize(path) / 1024.0:7.1f} KB  {path}")
+
+
+# ---------------------------------------------------------------------------
+# Procedural audio: everything below synthesises 16-bit mono WAV bytes at
+# runtime from numpy, so the game carries no binary sound assets.
+# ---------------------------------------------------------------------------
+
+AUDIO_SAMPLE_RATE = 22050
+
+
+def _write_wav(path: str, samples: "np.ndarray") -> str:
+    """Write samples in [-1, 1] as a 16-bit mono WAV; returns the path."""
+    import wave
+
+    pcm = np.clip(np.asarray(samples, dtype=float), -1.0, 1.0)
+    data = (pcm * 32767.0).astype("<i2").tobytes()
+    with wave.open(path, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(AUDIO_SAMPLE_RATE)
+        handle.writeframes(data)
+    return path
+
+
+def synth_tone(freq_hz: float, seconds: float, harmonics: tuple = ((1.0, 1.0), (2.0, 0.35), (3.0, 0.12)),
+               decay: float = 3.0, sample_rate: int = AUDIO_SAMPLE_RATE) -> "np.ndarray":
+    """A decaying harmonic tone; ``decay`` shapes the exponential envelope."""
+    t = np.arange(int(seconds * sample_rate), dtype=float) / sample_rate
+    wave_form = np.zeros_like(t)
+    for multiple, amplitude in harmonics:
+        wave_form += amplitude * np.sin(2.0 * math.pi * freq_hz * multiple * t)
+    return wave_form * np.exp(-decay * t / max(seconds, 1e-9))
+
+
+def make_alert_wav(kind: str, path: str) -> str:
+    """Alert tones for hull breaches, flares, shortages and good news."""
+    rate = AUDIO_SAMPLE_RATE
+    if kind == "flare":
+        # Rising two-tone: get ready.
+        a, b = synth_tone(440.0, 0.22, decay=1.2), synth_tone(660.0, 0.30, decay=1.2)
+        samples = np.concatenate([a, b, a, b])
+    elif kind == "hull":
+        # Low thud, fast decay.
+        samples = synth_tone(82.0, 0.5, harmonics=((1.0, 1.0), (2.4, 0.5)), decay=9.0)
+    elif kind == "shortage":
+        # Uneasy minor pair, slow decay.
+        samples = 0.7 * synth_tone(196.0, 0.9, decay=2.0) + 0.7 * synth_tone(233.1, 0.9, decay=2.0)
+    elif kind == "contract":
+        # Payday chime: two rising notes with a short gap.
+        gap = np.zeros(int(0.03 * rate))
+        samples = np.concatenate([synth_tone(880.0, 0.2, decay=3.0), gap,
+                                  synth_tone(1318.5, 0.4, decay=3.0)])
+    else:
+        raise ValueError(f"Unknown alert kind '{kind}'.")
+    return _write_wav(path, 0.5 * samples / max(1e-9, np.max(np.abs(samples))))
+
+
+def make_hum_wav(path: str, base_hz: float = 55.0, seconds: float = 4.0) -> str:
+    """A loopable ambient hum: low fundamental, soft harmonics, slight beat.
+
+    The game pitches the playback rate (hence the hum) with the colony's
+    power load, so a busy, hungry colony literally sounds busier.
+    """
+    rate = AUDIO_SAMPLE_RATE
+    t = np.arange(int(seconds * rate), dtype=float) / rate
+    samples = (
+        0.5 * np.sin(2.0 * math.pi * base_hz * t)
+        + 0.2 * np.sin(2.0 * math.pi * base_hz * 2.0 * t + 0.6)
+        + 0.12 * np.sin(2.0 * math.pi * base_hz * 3.01 * t)   # slight detune beats
+        + 0.05 * np.sin(2.0 * math.pi * base_hz * 0.5 * t)
+    )
+    # Crossfade the tail into the head so the loop point is seamless.
+    fade = min(int(0.05 * rate), len(samples) // 4)
+    ramp = np.linspace(0.0, 1.0, fade)
+    samples[:fade] = samples[:fade] * ramp + samples[-fade:] * (1.0 - ramp)
+    samples = samples[:-fade]
+    return _write_wav(path, 0.3 * samples / max(1e-9, np.max(np.abs(samples))))

@@ -232,13 +232,19 @@ class Contracts:
         self._next_id = 1
 
     # -- lifecycle -----------------------------------------------------------
-    def maybe_offer(self) -> Contract | None:
-        """Post a new order when the offer clock allows; otherwise None."""
+    def maybe_offer(self, delivered_resources=None) -> Contract | None:
+        """Post a new order when the offer clock allows; otherwise None.
+
+        Earth orders what the colony has actually shipped before when that is
+        known -- ordering platinum from a colony that has never seen any is a
+        toll on standing, not a game.
+        """
         day = self.market.day
         if day < self._next_offer_day or len(self.active) >= CONTRACT_MAX_ACTIVE:
             return None
         self._next_offer_day = day + CONTRACT_OFFER_PERIOD_DAYS * self.market.rng.uniform(0.8, 1.2)
-        resource = self.market.rng.choice(list(MARKET_BASE_PRICES))
+        known = [res for res in (delivered_resources or ()) if res in MARKET_BASE_PRICES]
+        resource = self.market.rng.choice(known or list(MARKET_BASE_PRICES))
         tonnes = self.market.rng.uniform(*CONTRACT_TONNES_RANGE)
         faction = self.market.rng.choice(CONTRACT_FACTIONS)
         price = max(MARKET_BASE_PRICES[resource], self.market.price(resource))

@@ -6,3 +6,4 @@ logs/*.jpg
 *.zip
 .env
 saves/
+logs/audio/
