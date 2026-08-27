@@ -48,6 +48,8 @@ class OrbitalScene:
         self.labels: dict[str, Entity] = {}
         self.orbits_visible = True
         self._asteroid_scatter: list[Entity] = []
+        self.belt_mesh: Entity | None = None
+        self.quality = {"belt": True, "trails": True, "sky": True, "labels": True}
         ring = _tex("select_ring.png")
         self.reticle = Entity(parent=self.parent, model="quad", scale=3.0,
                               texture=ring, billboard=True, unlit=True,
@@ -128,26 +130,62 @@ class OrbitalScene:
             self.labels[key] = label
 
     def _build_asteroid_belt(self) -> None:
-        """A few hundred cheap rocks between the belt bodies, for depth."""
-        if len(self._asteroid_scatter) > 0:
+        """A few hundred cheap rocks between the belt bodies, for depth.
+
+        All rocks bake into ONE triangle mesh (one draw call, one entity) --
+        hundreds of separate entities cost far more than their visual worth.
+        """
+        if self.belt_mesh is not None:
             return
         rng = random.Random(11)
-        texture = _tex("metallic_belt.png")
-        for _ in range(240):
+        vertices: list[Vec3] = []
+        for _ in range(260):
             a = rng.uniform(1.35, 2.25)
             angle = rng.uniform(0.0, 2.0 * math.pi)
             drift = rng.uniform(-0.05, 0.05)
-            x = a * math.cos(angle)
-            y = a * math.sin(angle)
-            z = drift
-            rock = Entity(parent=self.parent, model="sphere",
-                          scale=rng.uniform(0.05, 0.22),
-                          rotation=(rng.uniform(0, 360), rng.uniform(0, 360), 0),
-                          color=color.rgb(0.45, 0.45, 0.52), unlit=True)
-            if texture is not None and rng.random() < 0.3:
-                rock.texture = texture
-            rock.position = Vec3(x, z, -y) * SCENE_UNITS_PER_AU
-            self._asteroid_scatter.append(rock)
+            centre = Vec3(a * math.cos(angle), drift, -a * math.sin(angle)) * SCENE_UNITS_PER_AU
+            radius = rng.uniform(0.03, 0.12)  # scene units: ~ the old entity scales
+            # A lumpy 6-ring sphere, rotated randomly, appended in world space.
+            cr, sr = math.cos(rng.uniform(0, 6.3)), math.sin(rng.uniform(0, 6.3))
+            tilt = rng.uniform(0.2, 1.0)
+            rings, sectors = 5, 8
+            grid: list[list[Vec3]] = []
+            for r_i in range(rings + 1):
+                phi = math.pi * r_i / rings
+                ring_row: list[Vec3] = []
+                for s_i in range(sectors):
+                    th = 2.0 * math.pi * s_i / sectors
+                    v = Vec3(math.sin(phi) * math.cos(th),
+                             math.cos(phi) * tilt,
+                             math.sin(phi) * math.sin(th))
+                    v = Vec3(v[0] * cr - v[2] * sr, v[1], v[0] * sr + v[2] * cr)
+                    lump = 1.0 + 0.25 * math.sin(5.0 * th + a * 37.0)
+                    ring_row.append(centre + v * (radius * lump))
+                grid.append(ring_row)
+            for r_i in range(rings):
+                for s_i in range(sectors):
+                    a0 = grid[r_i][s_i]
+                    b0 = grid[r_i + 1][s_i]
+                    a1 = grid[r_i][(s_i + 1) % sectors]
+                    b1 = grid[r_i + 1][(s_i + 1) % sectors]
+                    vertices += [a0, b0, a1, b0, b1, a1]
+        mesh = Mesh(vertices=vertices, mode="triangle")
+        self.belt_mesh = Entity(parent=self.parent, model=mesh,
+                                color=color.rgb(0.45, 0.45, 0.52), unlit=True)
+        self.belt_mesh.double_sided = False
+
+    def apply_quality(self, **flags: bool) -> None:
+        """Toggle expensive eye-candy: belt, trails, skybox, name tags."""
+        self.quality.update(flags)
+        if self.belt_mesh is not None:
+            self.belt_mesh.enabled = self.quality["belt"]
+        if self.sky_dome is not None:
+            self.sky_dome.enabled = self.quality["sky"]
+        for label in self.labels.values():
+            label.enabled = self.quality["labels"]
+        import src.entities.ship as _ship_module
+
+        _ship_module.TRAILS_ENABLED = self.quality["trails"]
 
     def set_reticle(self, key: str | None, sim) -> None:
         """Park the selection ring on the targeted body (or hide it)."""
@@ -161,7 +199,7 @@ class OrbitalScene:
         self.reticle.scale = 2.6 * entity.scale_x * pulse
 
     def make_ship(self, name: str, class_key: str | None = None) -> Freighter:
-        ship = Freighter(name, parent=self.parent)
+        ship = Freighter(name, parent=self.parent, class_key=class_key)
         if class_key is not None:
             ship.apply_class_tint(class_key)
         self.ships[name] = ship
@@ -183,10 +221,6 @@ class OrbitalScene:
             r, _ = window_solver.body_state(body.elements, MU_SUN, sim.time)
             entity.position = au_to_scene(r)
             entity.rotation_y += 0.15
-        for rock in self._asteroid_scatter:
-            rock.rotation_y += 0.35
-            rock.rotation_x += 0.12
-
         for report in sim.fleet_report():
             ship_mesh = self.ships.get(report["name"])
             if ship_mesh is None:
