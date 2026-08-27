@@ -23,7 +23,7 @@ import numpy as np
 
 from .elements import OrbitalElements, elements_to_state, propagate_elements
 from .kepler import universal_kepler
-from .transfers import HohmannTransfer, lambert
+from .transfers import HohmannTransfer, lambert, lambert_multi
 
 
 @dataclass
@@ -37,6 +37,7 @@ class LaunchWindow:
     target_key: str
     origin_key: str
     miss_distance: float    # residual after refinement (AU-scale units of caller)
+    revs: int = 0           # extra full revolutions (0 = classic single-rev)
     r1: np.ndarray = field(default_factory=lambda: np.zeros(3))
     v1: np.ndarray = field(default_factory=lambda: np.zeros(3))
     r2: np.ndarray = field(default_factory=lambda: np.zeros(3))
@@ -214,3 +215,127 @@ def solve_window(origin: OrbitalElements, target: OrbitalElements, mu: float,
             v1_body=v1_body, v2_body=v2_body,
         )
     return None
+
+
+# ---------------------------------------------------------------------------
+# Multi-revolution window search (additive; the single-rev path is untouched)
+# ---------------------------------------------------------------------------
+
+def _solve_to_target_multi(origin: OrbitalElements, target: OrbitalElements, mu: float,
+                           t_dep: float, tof: float, revs: int,
+                          ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float] | None:
+    """Refine a multi-rev candidate into a genuine rendezvous.
+
+    Mirrors ``_solve_to_target`` but solves with ``lambert_multi`` and flies
+    whichever branch is cheaper at each secant step. The secant nudges the
+    time of flight until the propagated arrival actually meets the target.
+    """
+    r1, v1_body = body_state(origin, mu, t_dep)
+    tof_cur, tof_prev = tof, tof * 1.05
+    miss_prev = float("nan")
+    for _ in range(24):
+        r2, v2_body = body_state(target, mu, t_dep + tof_cur)
+        try:
+            candidates = lambert_multi(r1, r2, tof_cur, mu, revs=revs)
+        except (ValueError, RuntimeError, ZeroDivisionError):
+            return None
+        if not candidates:
+            return None
+        v1, v2 = min(candidates, key=lambda vs: float(np.linalg.norm(vs[0] - v1_body))
+                     + float(np.linalg.norm(vs[1] - v2_body)))
+        r_arr, _ = universal_kepler(r1, v1, tof_cur, mu)
+        miss = float(np.linalg.norm(r_arr - r2))
+        if miss < 1.0e-7 * float(np.linalg.norm(r2)):
+            return r1, v1, r2, v2, miss, tof_cur
+        if not math.isfinite(miss_prev) or abs(miss_prev - miss) < 1.0e-18:
+            tof_prev, miss_prev = tof_cur, miss
+            tof_cur *= 1.04
+            continue
+        tof_next = tof_cur - miss * (tof_cur - tof_prev) / (miss - miss_prev)
+        if not math.isfinite(tof_next) or tof_next <= 0.0:
+            tof_next = tof_cur * 1.04
+        tof_prev, miss_prev = tof_cur, miss
+        tof_cur = tof_next
+        if abs(tof_cur - tof_prev) < 1.0e-9 * tof_cur:
+            break
+    return None
+
+
+def solve_window_multi(origin: OrbitalElements, target: OrbitalElements, mu: float,
+                       origin_key: str = "", target_key: str = "",
+                       n_depart: int = 48, n_tof: int = 24,
+                       depart_span_years: float | None = None,
+                       max_departure_time: float | None = None,
+                       min_departure_time: float | None = None,
+                       epoch: float = 0.0,
+                       max_revs: int = 1,
+                       multi_rev_min_saving: float = 0.15) -> LaunchWindow | None:
+    """Cheapest window considering up to ``max_revs`` extra revolutions.
+
+    The single-rev search (``solve_window``) always runs first and its
+    refined result is the baseline. A multi-rev candidate — slower, one or
+    more full extra orbits before capture — replaces it only when cheaper by
+    at least ``multi_rev_min_saving`` (a fraction of the baseline cost), so
+    the extra flight time must genuinely buy propellant. When no single-rev
+    window exists at all, a multi-rev one is still returned if found.
+    """
+    baseline = solve_window(origin, target, mu, origin_key=origin_key, target_key=target_key,
+                            n_depart=n_depart, n_tof=n_tof,
+                            depart_span_years=depart_span_years,
+                            max_departure_time=max_departure_time,
+                            min_departure_time=min_departure_time, epoch=epoch)
+    if max_revs < 1:
+        return baseline
+
+    syn = synodic_period(origin, target, mu)
+    year = 2.0 * math.pi
+    span = (depart_span_years * year) if depart_span_years else max(syn, year)
+    depart = list(np.linspace(epoch, epoch + span, max(12, n_depart // 2)))
+    if min_departure_time is not None:
+        depart = [t for t in depart if t >= min_departure_time - 1e-12]
+    if max_departure_time is not None:
+        depart = [t for t in depart if t <= max_departure_time + 1e-12]
+    if not depart:
+        return baseline
+
+    best: tuple[float, float, float, int] | None = None  # (dv, t_dep, tof, revs)
+    for t_dep in depart:
+        r1, _ = body_state(origin, mu, t_dep)
+        r2_ref, _ = body_state(target, mu, t_dep)
+        a_transfer = 0.55 * (float(np.linalg.norm(r1)) + float(np.linalg.norm(r2_ref)))
+        period = 2.0 * math.pi * math.sqrt(a_transfer ** 3 / mu)
+        for revs in range(1, max_revs + 1):
+            for tof in np.linspace((revs + 0.35) * period, (revs + 0.95) * period, 7):
+                r2, _ = body_state(target, mu, t_dep + float(tof))
+                try:
+                    candidates = lambert_multi(r1, r2, float(tof), mu, revs=revs)
+                except (ValueError, RuntimeError, ZeroDivisionError):
+                    continue
+                if not candidates:
+                    continue
+                dv = min(float(np.linalg.norm(v1) + np.linalg.norm(v2))
+                         for v1, v2 in candidates)
+                if best is None or dv < best[0]:
+                    best = (dv, t_dep, float(tof), revs)
+    if best is None:
+        return baseline
+
+    refined = _solve_to_target_multi(origin, target, mu, best[1], best[2], best[3])
+    if refined is None:
+        return baseline
+    r1, v1, r2, v2, miss, tof_solved = refined
+    v1_body = body_state(origin, mu, best[1])[1]
+    v2_body = body_state(target, mu, best[1] + tof_solved)[1]
+    multi = LaunchWindow(
+        departure_time=best[1], tof=tof_solved,
+        dv_depart=float(np.linalg.norm(v1 - v1_body)),
+        dv_arrive=float(np.linalg.norm(v2 - v2_body)),
+        origin_key=origin_key, target_key=target_key,
+        miss_distance=miss, r1=r1, v1=v1, r2=r2, v2=v2,
+        v1_body=v1_body, v2_body=v2_body, revs=best[3],
+    )
+    if baseline is None:
+        return multi
+    if multi.total_delta_v < baseline.total_delta_v * (1.0 - multi_rev_min_saving):
+        return multi
+    return baseline

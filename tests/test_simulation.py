@@ -25,6 +25,7 @@ from src.config import (  # noqa: E402
     SIM_SECONDS_PER_YEAR,
 )
 from src.maths import windows as window_solver  # noqa: E402
+from src.maths.kepler import universal_kepler  # noqa: E402
 from src.maths.transfers import HohmannTransfer  # noqa: E402
 from src.simulation.bodies import BODIES, TRADE_TARGETS, orbital_speed_km_s, orbit_points  # noqa: E402
 from src.simulation.orbital_sim import Leg, OrbitalSimulation  # noqa: E402
@@ -296,3 +297,33 @@ def test_parked_ship_sits_on_its_body_orbit():
     colony_a = BODIES["colony"].elements.a
     assert report["distance_au"] == pytest.approx(colony_a, rel=0.05)
     assert report["speed_km_s"] == pytest.approx(orbital_speed_km_s("colony"), rel=0.05)
+
+
+# --------------------------------------------------------------------------
+# Multi-revolution window search
+# --------------------------------------------------------------------------
+
+def test_solve_window_multi_gate_keeps_the_single_rev_window():
+    """In this near-coplanar network the single-rev window dominates, so the
+    default saving gate must leave the plan untouched."""
+    origin = BODIES["colony"].elements
+    target = BODIES["derelict_zone"].elements
+    single = window_solver.solve_window(origin, target, MU_SUN, min_departure_time=0.0)
+    blended = window_solver.solve_window_multi(origin, target, MU_SUN, min_departure_time=0.0)
+    assert single is not None and blended is not None
+    assert blended.revs == 0
+    assert blended.total_delta_v == pytest.approx(single.total_delta_v)
+
+
+def test_solve_window_multi_forced_adopts_a_genuine_slow_rendezvous():
+    origin = BODIES["colony"].elements
+    target = BODIES["derelict_zone"].elements
+    single = window_solver.solve_window(origin, target, MU_SUN, min_departure_time=0.0)
+    # A negative saving forces multi-rev adoption whenever a branch exists.
+    window = window_solver.solve_window_multi(origin, target, MU_SUN, min_departure_time=0.0,
+                                              max_revs=1, multi_rev_min_saving=-100.0)
+    assert window is not None and window.revs == 1
+    assert window.tof > single.tof  # the slow route is slower by construction
+    # ... and it is still a genuine rendezvous with the moving target.
+    r_arr, _ = universal_kepler(window.r1, window.v1, window.tof, MU_SUN)
+    assert r_arr == pytest.approx(window.r2, abs=1e-4)

@@ -213,3 +213,119 @@ def lambert(r1: np.ndarray, r2: np.ndarray, tof: float, mu: float, prograde: boo
     v1 = v_r1 * i_r1 + v_t1 * i_t1
     v2 = v_r2 * i_r2 + v_t2 * i_t2
     return v1, v2
+
+
+# --------------------------------------------------------------------------
+# Multi-revolution branch of the same Izzo algorithm (additive)
+# --------------------------------------------------------------------------
+
+def lambert_multi(r1: np.ndarray, r2: np.ndarray, tof: float, mu: float,
+                  prograde: bool = True, revs: int = 1,
+                  scan_points: int = 301, bisect_iters: int = 72,
+                 ) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Solve the multi-revolution Lambert problem.
+
+    For ``revs = M >= 1`` the Izzo time-of-flight curve ``T(x)`` on
+    ``x in (-1, 1)`` dives from ``+inf`` at ``x -> -1`` to a branch minimum
+    ``T_min(M)`` somewhere in ``(-1, 0)`` and rises back to ``+inf`` at
+    ``x -> 1``. A solution therefore exists only when the requested
+    non-dimensional time of flight is at least ``T_min(M)``, and there are
+    generically *two* solutions (the left and right branch), which usually
+    differ in cost. Both are returned as a list of ``(v1, v2)`` pairs so the
+    caller can fly the cheaper one; an empty list means "no such transfer".
+
+    The geometry plumbing below mirrors ``lambert``; only the root-finding
+    differs (dense scan + monotone bisection per branch instead of the
+    single-rev initial guess + Householder). ``lambert`` itself is untouched.
+    """
+    r1 = np.asarray(r1, dtype=float)
+    r2 = np.asarray(r2, dtype=float)
+    if tof <= 0.0:
+        raise ValueError("time of flight must be positive")
+    if mu <= 0.0:
+        raise ValueError("mu must be positive")
+    if revs < 1:
+        raise ValueError("lambert_multi needs at least one full revolution")
+
+    chord = r2 - r1
+    c_norm = float(np.linalg.norm(chord))
+    r1_norm = float(np.linalg.norm(r1))
+    r2_norm = float(np.linalg.norm(r2))
+    if r1_norm == 0.0 or r2_norm == 0.0 or c_norm == 0.0:
+        raise ValueError("degenerate Lambert geometry")
+
+    s = (r1_norm + r2_norm + c_norm) * 0.5
+    i_r1, i_r2 = r1 / r1_norm, r2 / r2_norm
+    i_h = np.cross(i_r1, i_r2)
+    h_norm = float(np.linalg.norm(i_h))
+    if h_norm < 1.0e-12:
+        raise ValueError("collinear position vectors: transfer plane undefined")
+    i_h = i_h / h_norm
+
+    lam = math.sqrt(max(0.0, min(1.0, 1.0 - c_norm / s)))
+    if i_h[2] < 0.0:
+        lam = -lam
+        i_t1, i_t2 = np.cross(i_r1, i_h), np.cross(i_r2, i_h)
+    else:
+        i_t1, i_t2 = np.cross(i_h, i_r1), np.cross(i_h, i_r2)
+    if not prograde:
+        lam, i_t1, i_t2 = -lam, -i_t1, -i_t2
+
+    t_req = math.sqrt(2.0 * mu / s ** 3) * tof
+
+    # Dense scan of the time-of-flight curve; both ends blow up to +inf.
+    xs = np.linspace(-(1.0 - 1.0e-6), 1.0 - 1.0e-6, scan_points)
+    ts = np.array([_tof_equation(float(x), 0.0, lam, revs) for x in xs])
+    i_min = int(np.argmin(ts))
+
+    solutions: list[tuple[np.ndarray, np.ndarray]] = []
+    for lo_idx, hi_idx in ((0, i_min), (i_min, len(xs) - 1)):
+        g_lo = float(ts[lo_idx]) - t_req
+        g_hi = float(ts[hi_idx]) - t_req
+        if g_lo == 0.0:
+            x_root = float(xs[lo_idx])
+        elif g_hi == 0.0:
+            x_root = float(xs[hi_idx])
+        elif g_lo * g_hi > 0.0:
+            continue  # no sign change on this branch for the requested TOF
+        else:
+            # Grid bisection to bracket, then continuous bisection on the
+            # exact time-of-flight curve: the curve is steep enough near the
+            # roots that grid resolution alone leaves percent-level TOF
+            # errors, which compound into large arrival misses.
+            lo, hi = float(xs[lo_idx]), float(xs[hi_idx])
+            for _ in range(bisect_iters):
+                mid = 0.5 * (lo + hi)
+                g_mid = _tof_equation(mid, 0.0, lam, revs) - t_req
+                if g_mid == 0.0:
+                    lo = hi = mid
+                    break
+                if g_lo * g_mid < 0.0:
+                    hi = mid
+                else:
+                    lo, g_lo = mid, g_mid
+            x_root = 0.5 * (lo + hi)
+        solutions.append(_reconstruct_from_x(x_root, lam, s, c_norm, r1_norm, r2_norm,
+                                             i_r1, i_r2, i_t1, i_t2, mu))
+    return solutions
+
+
+def _reconstruct_from_x(x: float, lam: float, s: float, c_norm: float,
+                        r1_norm: float, r2_norm: float,
+                        i_r1: np.ndarray, i_r2: np.ndarray,
+                        i_t1: np.ndarray, i_t2: np.ndarray,
+                        mu: float) -> tuple[np.ndarray, np.ndarray]:
+    """Velocities from a converged Izzo ``x`` (mirrors ``lambert``'s tail)."""
+    y = _compute_y(x, lam)
+    gamma = math.sqrt(mu * s / 2.0)
+    rho = (r1_norm - r2_norm) / c_norm
+    sigma = math.sqrt(max(0.0, 1.0 - rho ** 2))
+
+    v_r1 = gamma * ((lam * y - x) - rho * (lam * y + x)) / r1_norm
+    v_r2 = -gamma * ((lam * y - x) + rho * (lam * y + x)) / r2_norm
+    v_t1 = gamma * sigma * (y + lam * x) / r1_norm
+    v_t2 = gamma * sigma * (y + lam * x) / r2_norm
+
+    v1 = v_r1 * i_r1 + v_t1 * i_t1
+    v2 = v_r2 * i_r2 + v_t2 * i_t2
+    return v1, v2

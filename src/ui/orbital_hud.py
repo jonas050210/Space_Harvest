@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from ursina import Entity, Text, Vec3, camera, color
 
-from ..config import SHIP_CARGO_CAPACITY, SIM_SECONDS_PER_DAY
+from ..config import QUALITY_ORDER, SHIP_CARGO_CAPACITY, SIM_SECONDS_PER_DAY
 from ..simulation.bodies import BODIES
 
 
@@ -57,12 +57,60 @@ class OrbitalHUD:
         ]
 
         self.help = Text(
-            text="[ / ] warp    TAB next target    ENTER dispatch    O orbits    F follow    C colony cam",
+            text="[ / ] warp   TAB target   ENTER dispatch   S sell ore   X drill   M repair   1-4 buy ship   F5/F9 save/load",
             parent=camera.ui, scale=0.46,
             color=color.rgba(0.7, 0.8, 0.9, 0.8), origin=(-0.5, 0), position=(-0.755, -0.47, -0.1),
         )
         self.status = Text(text="", parent=camera.ui, position=(-0.29, -0.47, -0.1),
                            scale=0.5, color=color.orange, origin=(0.5, 0))
+
+        # Right panel: Earth market, treasury and fleet operations.
+        ops_panel = Entity(parent=camera.ui, model="quad",
+                           color=color.rgba(0.045, 0.06, 0.10, 0.90),
+                           scale=(0.30, 0.94), position=(0.62, 0.0, 0.0))
+        self.ops_panel = ops_panel
+        self.market_title = Text(text="EARTH MARKET", parent=camera.ui, position=(0.485, 0.42, -0.1),
+                                 scale=0.9, color=color.cyan, origin=(-0.5, 0))
+        self.credits = Text(text="", parent=camera.ui, position=(0.485, 0.375, -0.1),
+                            scale=0.8, color=color.yellow, origin=(-0.5, 0))
+        self.spark = Text(text="", parent=camera.ui, position=(0.485, 0.345, -0.1),
+                          scale=0.62, color=color.gray, origin=(-0.5, 0))
+        self.price_lines = [
+            Text(text="", parent=camera.ui, position=(0.485, 0.30 - i * 0.026, -0.1),
+                 scale=0.62, origin=(-0.5, 0))
+            for i in range(7)
+        ]
+        self.ops_title = Text(text="FLEET OPS", parent=camera.ui, position=(0.485, 0.085, -0.1),
+                              scale=0.72, color=color.yellow, origin=(-0.5, 0))
+        self.ops_lines = [
+            Text(text="", parent=camera.ui, position=(0.485, 0.055 - i * 0.026, -0.1),
+                 scale=0.62, origin=(-0.5, 0))
+            for i in range(8)
+        ]
+        self.tutorial = Text(text="", parent=camera.ui, position=(0.0, -0.42, -0.1),
+                             scale=0.55, color=color.rgba(0.55, 0.9, 1.0, 0.95),
+                             origin=(0.0, 0))
+        self.board_header = Text(text="NEXT WINDOWS", parent=camera.ui, position=(0.485, -0.165, -0.1),
+                                 scale=0.62, color=color.yellow, origin=(-0.5, 0))
+        self.board_lines = [
+            Text(text="", parent=camera.ui, position=(0.485, -0.195 - i * 0.024, -0.1),
+                 scale=0.58, origin=(-0.5, 0))
+            for i in range(6)
+        ]
+        self.ticker = Text(text="", parent=camera.ui, position=(0.0, -0.51, -0.1),
+                           scale=0.5, color=color.rgba(0.75, 0.85, 0.95, 0.9),
+                           origin=(0.0, 0))
+        # Toast stack: the newest few messages, top-centre.
+        self.toast_lines = [
+            Text(text="", parent=camera.ui, position=(0.0, 0.46 - i * 0.035, -0.1),
+                 scale=0.62, origin=(0.0, 0),
+                 color=color.rgba(0.95, 0.97, 1.0, 0.95))
+            for i in range(3)
+        ]
+        # Launch-window banner: big, blinking, unmissable.
+        self.launch_banner = Text(text="", parent=camera.ui, position=(0.0, 0.30, -0.2),
+                                  scale=1.35, origin=(0.0, 0), color=color.rgb(0.45, 1.0, 0.55))
+        self._blink = 0
 
     # -- helpers -------------------------------------------------------------
     def selected_target(self) -> str:
@@ -72,11 +120,26 @@ class OrbitalHUD:
         self.target_index = (self.target_index + direction) % len(self.targets)
         return self.selected_target()
 
+    def set_target(self, key: str) -> bool:
+        """Select ``key`` directly (click-picking); False if unknown."""
+        if key in self.targets:
+            self.target_index = self.targets.index(key)
+            return True
+        return False
+
     # -- refresh -------------------------------------------------------------
-    def update(self, sim, colony_state: dict | None = None, message: str = "") -> None:
+    def update(self, sim, colony_state: dict | None = None, message: str = "",
+               extra: dict | None = None) -> None:
         days = sim.time / SIM_SECONDS_PER_DAY
         self.clock.text = f"Mission day {days:,.0f}   (year {days / 365.25:.2f})"
         self.warp.text = f"Time warp: {sim.warp_days_per_second:.0f} sim-days / real-second"
+
+        if extra is not None:
+            self._update_ops_panel(extra)
+            self._update_toasts(extra.get("toasts", []))
+            self._update_banner(extra.get("window_line", ""), extra.get("window_open", False))
+        else:
+            self._clear_ops_panel()
 
         target_key = self.selected_target()
         target_name = BODIES[target_key].name
@@ -88,15 +151,27 @@ class OrbitalHUD:
                 line.text = ""
         else:
             wait_days = max(0.0, (window.departure_time - sim.time) / SIM_SECONDS_PER_DAY)
-            rows = [
-                ("Target", f"{target_name}  (a={BODIES[target_key].elements.a:.2f} AU)"),
-                ("Window opens in", f"{wait_days:,.0f} d"),
-                ("Time of flight", f"{window.tof / SIM_SECONDS_PER_DAY:,.0f} d"),
-                ("Departure burn", f"{sim.delta_v_km_s(window.dv_depart) * 1000.0:,.0f} m/s"),
-                ("Arrival match", f"{sim.delta_v_km_s(window.dv_arrive) * 1000.0:,.0f} m/s"),
-                ("Round-trip cost", f"{sim.delta_v_km_s(window.total_delta_v) * 1000.0 * 2:,.0f} m/s (est.)"),
-                ("Cargo", f"{SHIP_CARGO_CAPACITY:.0f} t of iron / components / water / ice"),
-            ]
+            if extra is not None:
+                rows = [
+                    ("Target", f"{target_name}  (a={BODIES[target_key].elements.a:.2f} AU)"),
+                    ("Window opens in", f"{wait_days:,.0f} d"),
+                    ("Time of flight", f"{window.tof / SIM_SECONDS_PER_DAY:,.0f} d"),
+                    ("Departure burn", f"{sim.delta_v_km_s(window.dv_depart) * 1000.0:,.0f} m/s"),
+                    ("Arrival match", f"{sim.delta_v_km_s(window.dv_arrive) * 1000.0:,.0f} m/s"),
+                    ("Assay", extra.get("assay", "")),
+                    ("Veins drawn", f"{extra.get('mined_t', 0.0):,.0f} t mined, "
+                                    f"{extra.get('incidents', 0)} incidents"),
+                ]
+            else:
+                rows = [
+                    ("Target", f"{target_name}  (a={BODIES[target_key].elements.a:.2f} AU)"),
+                    ("Window opens in", f"{wait_days:,.0f} d"),
+                    ("Time of flight", f"{window.tof / SIM_SECONDS_PER_DAY:,.0f} d"),
+                    ("Departure burn", f"{sim.delta_v_km_s(window.dv_depart) * 1000.0:,.0f} m/s"),
+                    ("Arrival match", f"{sim.delta_v_km_s(window.dv_arrive) * 1000.0:,.0f} m/s"),
+                    ("Round-trip cost", f"{sim.delta_v_km_s(window.total_delta_v) * 1000.0 * 2:,.0f} m/s (est.)"),
+                    ("Cargo", f"{SHIP_CARGO_CAPACITY:.0f} t of iron / components / water / ice"),
+                ]
             for line, (label, value) in zip(self.plan_lines, rows):
                 line.text = f"{label:<17}{value}"
 
@@ -104,15 +179,27 @@ class OrbitalHUD:
             line.text = ""
         for line, report in zip(self.fleet_lines, sim.fleet_report()):
             eta = f"  ETA {report['eta_days']:,.0f}d" if report["status"] in ("outbound", "inbound", "pending") else ""
+            parts = report.get("parts") or {}
+            tag = "".join(code * count for code, count in
+                          (("T", parts.get("tank", 0)), ("D", parts.get("drill", 0)),
+                           ("Q", parts.get("quarters", 0))))
+            tag = f" [{tag}]" if tag else ""
+            hull = f"  H{report['hull']:3.0f}%" if "hull" in report else ""
+            bar = ""
+            if "dv_max" in report:
+                filled = int(round(5.0 * report["delta_v_left"] / max(1.0, report["dv_max"])))
+                bar = " " + "#" * filled + "." * (5 - filled)
             line.text = (
-                f"{report['name']:<7}{report['status']:<9}{report['at']:<21}"
-                f"{report['delta_v_left']:>6,.0f} m/s{eta}"
+                f"{report['name']:<8}{report['status']:<9}{report['at']:<18}"
+                f"{report['delta_v_left']:>6,.0f}{bar}{eta}{hull}{tag}"
             )
             line.color = (
                 color.orange if report["status"] in ("outbound", "inbound")
                 else color.red if report["delta_v_left"] < 2000.0
                 else color.white
             )
+            if "hull" in report and report["hull"] < 40.0:
+                line.color = color.red
 
         for line in self.log_lines:
             line.text = ""
@@ -123,8 +210,357 @@ class OrbitalHUD:
         if colony_state is not None:
             delivered = sim.stats["mass_delivered"]
             self.help.text = (
-                f"[ / ] warp    TAB next target    ENTER dispatch    O orbits    F follow    C colony cam"
+                f"[ / ] warp   TAB target   ENTER dispatch   S sell   X drill   M repair   1-4 buy   F5/F9 save"
                 f"      |      colony storage used {colony_state.get('used', 0):,.0f} / "
                 f"{colony_state.get('capacity', 0):,.0f}    lifetime delivered {delivered:,.0f} t"
             )
         self.status.text = message
+
+    # -- toasts and the launch banner -----------------------------------------
+    def _update_toasts(self, toasts: list[str]) -> None:
+        for line, text in zip(self.toast_lines, toasts[-3:]):
+            line.text = text
+        for line in self.toast_lines[len(toasts[-3:]):]:
+            line.text = ""
+
+    def _update_banner(self, window_line: str, is_open: bool) -> None:
+        self._blink += 1
+        if is_open:
+            # Blink roughly twice a second so the eye catches it.
+            self.launch_banner.text = window_line if self._blink % 30 < 20 else ""
+            self.launch_banner.color = color.rgb(0.45, 1.0, 0.55)
+        else:
+            self.launch_banner.text = window_line if window_line.startswith("Window in") else ""
+            self.launch_banner.color = color.rgba(0.85, 0.9, 1.0, 0.8)
+
+    # -- market / ops panel ---------------------------------------------------
+    def _update_ops_panel(self, extra: dict) -> None:
+        firsts_done, firsts_total = extra.get("firsts_count", (0, 0))
+        self.credits.text = (f"Treasury  {extra.get('credits', 0.0):,.0f} cr"
+                             f"   Firsts {firsts_done}/{firsts_total}")
+        self.spark.text = extra.get("credits_spark", "")[:46]
+        for line, (res, price, trend) in zip(self.price_lines, extra.get("prices", [])):
+            line.text = f"{res:<11}{price:>7,.1f} cr/t  {trend}"
+            line.color = (
+                color.yellow if trend == "^"
+                else color.orange if trend == "v"
+                else color.white
+            )
+        mode = extra.get("mode", "scrape")
+        mode_label = "core drilling" if mode == "drill" else "surface scraping"
+        lines = self.ops_lines
+        lines[0].text = f"Mining: {mode_label}"
+        lines[0].color = color.orange if mode == "drill" else color.white
+        lines[1].text = f"Maintenance: {'auto' if extra.get('auto_repair') else 'OFF'}"
+        lines[1].color = color.white if extra.get("auto_repair") else color.red
+        hulls = extra.get("hull", {})
+        worn = {name: pct for name, pct in hulls.items() if pct < 60.0}
+        lines[2].text = (
+            "Watch hull: " + ", ".join(f"{name} {pct:.0f}%" for name, pct in sorted(worn.items()))
+            if worn else "All hulls sound"
+        )
+        lines[2].color = color.red if worn else color.white
+
+        crew_line = extra.get("crew_line", "")
+        lines[3].text = crew_line
+        lines[3].color = color.orange if "tired" in crew_line else color.white
+
+        weather = extra.get("weather", "")
+        lines[4].text = weather or "Space weather: quiet"
+        lines[4].color = color.red if weather.startswith("ALERT") else color.white
+
+        lines[5].text = extra.get("contract_line", "")
+        lines[5].color = color.yellow
+        pending_line = extra.get("pending_line", "")
+        if pending_line:
+            lines[5].text = f"{lines[5].text}  |  {pending_line}"
+            lines[5].color = color.orange
+
+        board = extra.get("windows_board") or []
+        for line, (name, days, is_open) in zip(self.board_lines, board):
+            if is_open:
+                line.text = f"GO  {name}"
+                line.color = color.rgb(0.45, 1.0, 0.55)
+            elif days == days:  # finite
+                line.text = f"    {name:<20}{days:>6,.0f} d"
+                line.color = color.white
+            else:
+                line.text = f"    {name:<20}  no window"
+                line.color = color.rgba(0.6, 0.65, 0.75, 0.9)
+        for line in self.board_lines[len(board):]:
+            line.text = ""
+
+        depot_line = extra.get("depot_line", "")
+        parts_hint = extra.get("parts_hint", "")
+        lines[7].text = "  ".join(filter(None, (depot_line, extra.get("depot_hint", ""),
+                                                extra.get("station_hint", ""), parts_hint)))
+        lines[7].color = color.cyan if "No depots" not in depot_line else color.white
+        summary = "  ".join(filter(None, (extra.get("rep_line", ""), extra.get("life_line", ""))))
+        lines[6].text = summary
+        if "ALERT" in summary:
+            lines[6].color = color.red
+        elif "LOW" in summary:
+            lines[6].color = color.orange
+        else:
+            lines[6].color = color.white
+        self.tutorial.text = extra.get("tutorial", "")
+
+    def _clear_ops_panel(self) -> None:
+        self.credits.text = ""
+        self.spark.text = ""
+        for line in self.price_lines:
+            line.text = ""
+        for line in self.ops_lines:
+            line.text = ""
+        self.tutorial.text = ""
+        self.ticker.text = ""
+        self.launch_banner.text = ""
+        for line in self.toast_lines:
+            line.text = ""
+
+
+class MenuOverlay:
+    """Keyboard-navigable title / pause / settings / how-to-play screens.
+
+    Kept inside the HUD module on purpose: same Ursina primitives, same
+    styling, no second UI toolkit. ``handle(key)`` translates raw keys into
+    semantic action tokens the Game layer executes.
+    """
+
+    MAIN_ITEMS = ("NEW GAME", "CONTINUE", "LOAD LAST SAVE", "SETTINGS", "HOW TO PLAY", "QUIT")
+    PAUSE_ITEMS = ("RESUME", "SAVE", "LOAD LAST SAVE", "SETTINGS", "QUIT TO TITLE")
+    HOWTO_PAGES = (
+        ("THE LOOP", (
+            "TAB or click a planet to target it.",
+            "Watch NEXT WINDOWS: every rock moves on a real orbit, so rides",
+            "are only cheap when the geometry lines up. The HUD chimes and",
+            "blinks LAUNCH WINDOW OPEN when it is time -- press ENTER.",
+            "",
+            "Warp with [ and ]. Sell ore with S. Watch the price flood:",
+            "dump one market and its price sags for a while.",
+        )),
+        ("FUEL AND THE FAR RING", (
+            "Every burn costs delta-v from a finite tank; refuelling at the",
+            "colony takes days. Press R to build a refuel depot at any planet:",
+            "its ISRU plant makes propellant from local ice, and ships dock",
+            "there to top up for the ride home.",
+            "",
+            "Deep runs (Deep Belt, the Derelict Zone, Comet Vigil) are depot",
+            "runs. A depot plus a scout opens the whole system.",
+        )),
+        ("PEOPLE AND PARTS", (
+            "Crews get tired and sullen: tired crews refuse to fly and crash",
+            "drills. They earn morale from captures and payday.",
+            "",
+            "T buys Drop Tanks, Y a Deep Drill, U Crew Quarters, and P a",
+            "depot drone bay -- prices swing with the seasons, so buy cheap.",
+            "Drone bays work a waiting ship's hold full automatically.",
+        )),
+    )
+
+    def __init__(self, continue_available: bool = False):
+        self.screen = "main"          # main | settings | howto | pause
+        self.cursor = 0
+        self.howto_page = 0
+        self.continue_available = continue_available
+        self.settings = {"quality": "medium", "muted": False, "glide": True}
+        self.on_settings_changed = None   # callable(dict) set by the game
+
+        self.panel = Entity(parent=camera.ui, model="quad",
+                            color=color.rgba(0.02, 0.03, 0.06, 0.90),
+                            scale=(0.9, 1.0), z=0.5)
+        self.title = Text(text="ORBITAL SUPPLY CHAINS", parent=camera.ui,
+                          position=(0.0, 0.30, -0.4), scale=2.4, origin=(0.0, 0),
+                          color=color.rgb(0.5, 0.9, 1.0))
+        self.subtitle = Text(text="wait for the window  --  mine the belt  --  keep the colony alive",
+                             parent=camera.ui, position=(0.0, 0.235, -0.4),
+                             scale=0.7, origin=(0.0, 0), color=color.rgba(0.8, 0.88, 1.0, 0.9))
+        self.items: list[Text] = [
+            Text(text="", parent=camera.ui, position=(0.0, 0.10 - i * 0.05, -0.4),
+                 scale=0.9, origin=(0.0, 0), color=color.white)
+            for i in range(max(len(self.MAIN_ITEMS), len(self.PAUSE_ITEMS)))
+        ]
+        self.settings_lines = [
+            Text(text="", parent=camera.ui, position=(0.0, 0.10 - i * 0.05, -0.4),
+                 scale=0.85, origin=(0.0, 0), color=color.white)
+            for i in range(4)
+        ]
+        self.howto_title = Text(text="", parent=camera.ui, position=(0.0, 0.24, -0.4),
+                                scale=1.2, origin=(0.0, 0), color=color.yellow)
+        self.howto_lines = [
+            Text(text="", parent=camera.ui, position=(0.0, 0.14 - i * 0.048, -0.4),
+                 scale=0.72, origin=(0.0, 0), color=color.rgba(0.9, 0.94, 1.0, 0.95))
+            for i in range(9)
+        ]
+        self.footer = Text(text="W/S move   ENTER select   ESC back", parent=camera.ui,
+                           position=(0.0, -0.40, -0.4), scale=0.6, origin=(0.0, 0),
+                           color=color.rgba(0.6, 0.7, 0.85, 0.9))
+        self.show_main()
+
+    # -- visibility ------------------------------------------------------------
+    def _hide_all(self) -> None:
+        self.panel.enabled = False
+        self.title.enabled = self.subtitle.enabled = False
+        for text in self.items + self.settings_lines + self.howto_lines:
+            text.enabled = False
+        self.howto_title.enabled = False
+        self.footer.enabled = False
+
+    def _show_shell(self) -> None:
+        self.panel.enabled = True
+        self.footer.enabled = True
+
+    def show_main(self, continue_available: bool | None = None) -> None:
+        self.screen = "main"
+        if continue_available is not None:
+            self.continue_available = continue_available
+        self.cursor = 0
+        self._show_shell()
+        self.title.enabled = self.subtitle.enabled = True
+        self._render_items(self.MAIN_ITEMS)
+
+    def show_pause(self) -> None:
+        self.screen = "pause"
+        self.cursor = 0
+        self._show_shell()
+        self.title.text = "PAUSED"
+        self.subtitle.text = "the belt waits for no one"
+        self.title.enabled = self.subtitle.enabled = True
+        self._render_items(self.PAUSE_ITEMS)
+
+    def show_settings(self, settings: dict) -> None:
+        self.back_target = self.screen if self.screen in ("main", "pause") else "main"
+        self.screen = "settings"
+        self.cursor = 0
+        self.settings = dict(settings)
+        self._show_shell()
+        self.title.text = "SETTINGS"
+        self.subtitle.text = "changes save instantly"
+        self.title.enabled = self.subtitle.enabled = True
+        self._render_settings()
+
+    def show_howto(self, page: int = 0) -> None:
+        self.back_target = self.screen if self.screen in ("main", "pause") else "main"
+        self.screen = "howto"
+        self.howto_page = page
+        self._show_shell()
+        heading, lines = self.HOWTO_PAGES[page]
+        self.howto_title.text = f"HOW TO PLAY  ({page + 1}/{len(self.HOWTO_PAGES)})  --  {heading}"
+        self.howto_title.enabled = True
+        for i, text_entity in enumerate(self.howto_lines):
+            text_entity.enabled = i < len(lines)
+            text_entity.text = lines[i] if i < len(lines) else ""
+
+    def hide(self) -> None:
+        self._hide_all()
+
+    # -- rendering ---------------------------------------------------------------
+    def _render_items(self, items: tuple) -> None:
+        for i, text_entity in enumerate(self.items):
+            enabled = i < len(items)
+            text_entity.enabled = enabled
+            if not enabled:
+                continue
+            label = items[i]
+            if self.screen == "main" and label == "CONTINUE" and not self.continue_available:
+                label += "   (no save)"
+                text_entity.color = color.rgba(0.45, 0.5, 0.58, 0.9)
+            else:
+                text_entity.color = color.white
+            if i == self.cursor:
+                text_entity.text = f">  {label}  <"
+                text_entity.color = color.rgb(0.5, 0.95, 1.0)
+            else:
+                text_entity.text = f"   {label}"
+
+    def _render_settings(self) -> None:
+        rows = (
+            f"Quality preset    < {self.settings['quality']} >",
+            f"Audio             < {'muted' if self.settings['muted'] else 'on'} >",
+            f"Camera glide      < {'on' if self.settings['glide'] else 'snappy'} >",
+            "",
+        )
+        for i, text_entity in enumerate(self.settings_lines):
+            text_entity.enabled = True
+            text_entity.text = rows[i]
+            text_entity.color = color.rgb(0.5, 0.95, 1.0) if i == self.cursor else color.white
+
+    # -- input --------------------------------------------------------------------
+    def handle(self, key: str) -> str | None:
+        """Translate a raw key into an action token; None if unhandled."""
+        if key in ("w", "up"):
+            self.cursor = (self.cursor - 1) % self._item_count()
+            self._refresh()
+            return None
+        if key in ("s", "down"):
+            self.cursor = (self.cursor + 1) % self._item_count()
+            self._refresh()
+            return None
+        if key == "enter":
+            return self._select()
+        if key == "escape":
+            if self.screen in ("settings", "howto"):
+                target = getattr(self, "back_target", "main")
+                self.cursor = 0
+                if target == "pause":
+                    self.show_pause()
+                else:
+                    self.show_main()
+                return "back"
+            if self.screen == "pause":
+                return "resume"
+            return "quit"
+        if self.screen == "howto" and key in ("a", "d", "left arrow", "right arrow"):
+            self.howto_page = (self.howto_page + (1 if key in ("d", "right arrow") else -1)) % len(self.HOWTO_PAGES)
+            self.show_howto(self.howto_page)
+            return None
+        return None
+
+    def _item_count(self) -> int:
+        if self.screen == "settings":
+            return 3
+        if self.screen == "pause":
+            return len(self.PAUSE_ITEMS)
+        return len(self.MAIN_ITEMS)
+
+    def _refresh(self) -> None:
+        if self.screen == "main":
+            self._render_items(self.MAIN_ITEMS)
+        elif self.screen == "pause":
+            self._render_items(self.PAUSE_ITEMS)
+        elif self.screen == "settings":
+            self._render_settings()
+
+    def _cycle_setting(self, key: str, forward: bool = True) -> None:
+        if key == "quality":
+            index = QUALITY_ORDER.index(self.settings["quality"])
+            self.settings["quality"] = QUALITY_ORDER[(index + (1 if forward else -1)) % len(QUALITY_ORDER)]
+        elif key in ("muted", "glide"):
+            self.settings[key] = not self.settings[key]
+        self._render_settings()
+        if self.on_settings_changed is not None:
+            self.on_settings_changed(dict(self.settings))
+
+    def _select(self) -> str | None:
+        if self.screen == "settings":
+            keys = ("quality", "muted", "glide")
+            self._cycle_setting(keys[self.cursor])
+            return None
+        if self.screen == "howto":
+            self.howto_page = (self.howto_page + 1) % len(self.HOWTO_PAGES)
+            self.show_howto(self.howto_page)
+            return None
+        if self.screen == "pause":
+            action = ("resume", "save", "load", "settings", "quit_to_title")[self.cursor]
+            if action == "settings":
+                self.show_settings(dict(self.settings))
+        else:
+            action = ("new_game", "continue", "load", "settings", "howto", "quit")[self.cursor]
+            if action == "continue" and not self.continue_available:
+                return None
+            if action == "settings":
+                self.show_settings(dict(self.settings))
+            elif action == "howto":
+                self.show_howto(0)
+        self.cursor = 0
+        return action

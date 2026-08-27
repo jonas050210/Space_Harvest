@@ -408,3 +408,386 @@ project.md
 remaining project caches: 0
 du excluding .venv: 6.3M
 file count excluding .venv: 322
+
+# =============================================================
+# run-log.txt — economy-layer session (captured 2026-08-27 05:51 UTC)
+# Branch: arena/01a041a3-asteroid-colony-proto
+# Scope: mining fingerprints/depletion, Earth market, fleet classes,
+#        hull wear/maintenance, save/load, HUD market+ops panels.
+# =============================================================
+
+# 1) project tests (43 orbital-core + 22 colony-operations)
+$ python -m pytest tests/ -q
+65 passed in 46.55s
+
+# 2) upstream asteroid-colony tests
+$ python vendor/asteroid-colony-upstream/test_overall.py
+=== Result: 25 passed, 0 failed ===
+
+# 3) astrodynamics invariance: current tree, old policy, pinned to the
+#    pre-economy refuel rate; src/maths + src/simulation diff vs e2543e3
+#    is empty; the e2543e3 tree itself reproduces the recorded baseline.
+[parity] runs completed : 18 (baseline: 18)
+[parity] mass delivered : 4,320 t (baseline: 4,320 t)
+[parity] delta-v spent  : 112,790 m/s (baseline: 112,790 m/s)
+src/maths + src/simulation diff vs e2543e3 (must be empty):
+0
+
+# 4) full-economy self-test (sells every 90 d, reinvests in ship classes)
+$ python -m src.main --headless --sim-days 6000
+  Petrel  parked   Colony Hub              23,059 m/s left   hull 100.0%
+  Harrier inbound  Deep Belt Outpost       11,614 m/s left   hull  74.2%
+  Osprey  parked   Colony Hub              11,469 m/s left   hull 100.0%
+  Falcon  inbound  Metallic Belt Field     12,192 m/s left   hull  87.8%
+  Condor  inbound  Metallic Belt Field     11,128 m/s left   hull  80.8%
+  runs completed : 84
+  mass delivered : 11,934 t
+  delta-v spent  : 1,467,051 m/s
+  deliveries into colony economy: 84
+  colony storage : {'used': 364.320234177281, 'capacity': 1500, 'delivered': 11832.818005943145}
+  research points: 2,958.2
+  ore mined      : 11,934 t   incidents: 0
+  market day 6,000 (cr/t): ice 6.7, iron 18.0, silver 43.4, gold 80.4, platinum 214.7, components 54.0, electronics 135.5
+  treasury       : 393,585 cr
+
+# 5) capture + porkchop artifacts (fallback render: no X/GL in sandbox)
+$ python scripts/capture_frame.py
+[capture] wrote /home/user/asteroid-colony-proto/logs/screenshot.png (80941 bytes)
+[capture] frames=700 shots=1 runs=8 delivered=1434t fallback=1
+$ python scripts/plot_porkchop.py metallic_belt logs/porkchop.png
+wrote logs/porkchop.png
+
+# 6) workspace prune check
+du excluding .venv and .git: 4.8M
+file count excluding .venv and .git: 334
+remaining project caches: 0
+
+# =============================================================
+# run-log.txt — crew/weather/contracts/life-support session (2026-08-27 09:45 UTC)
+# Branch: arena/01a041a3-asteroid-colony-proto
+# Scope: crew rosters (morale/fatigue), space weather (flares/debris),
+#        Earth faction contracts + reputation, colony life support
+#        (O2/food/water loop), value-aware dispatch, orientation
+#        checklist, procedural audio. Orbital core untouched.
+# =============================================================
+
+# 1) project tests (43 orbital-core + 42 colony-operations)
+$ python -m pytest tests/ -q
+85 passed in 58.28s
+
+# 2) upstream asteroid-colony tests
+$ python vendor/asteroid-colony-upstream/test_overall.py
+=== Result: 25 passed, 0 failed ===
+
+# 3) astrodynamics invariance: core diff vs base commit
+src/maths + src/simulation diff vs e2543e3 (must be empty):
+0
+
+# 4) full-economy self-test, 6,000 days
+$ python -m src.main --headless --sim-days 6000
+  Harrier parked   Colony Hub              15,135 m/s left   hull 100.0%
+  Osprey  pending  Inner Belt Field        24,130 m/s left   hull 100.0%
+  Falcon  pending  Inner Belt Field        24,000 m/s left   hull 100.0%
+  Condor  pending  Inner Belt Field        19,146 m/s left   hull 100.0%
+  runs completed : 63
+  mass delivered : 11,033 t
+  delta-v spent  : 571,839 m/s
+  deliveries into colony economy: 63
+  colony storage : {'used': 0.0, 'capacity': 1500, 'delivered': 10380.68063147702}
+  research points: 2,595.2
+  ore mined      : 11,216 t   incidents: 3
+  market day 6,000 (cr/t): ice 7.6, iron 11.8, silver 64.5, gold 118.4, platinum 165.9, components 43.4, electronics 190.9
+  treasury       : 265,815 cr
+
+# 5) economy probe: contracts, life support, morale at day 6,000
+life support: O2 40 food 35 water 14.9 ice 41 t
+contracts: 12 completed / 14 expired, price multiplier 0.978
+fleet morale 44 | incidents 2 | treasury 161684 cr | runs 60
+
+# 6) capture + porkchop artifacts (fallback render: no X/GL in sandbox)
+$ python scripts/capture_frame.py
+[capture] wrote /home/user/asteroid-colony-proto/logs/screenshot.png (109510 bytes)
+[capture] frames=700 shots=1 runs=45 delivered=8501t fallback=1
+$ python scripts/plot_porkchop.py metallic_belt logs/porkchop.png
+wrote logs/porkchop.png
+
+# 7) workspace prune check
+du excluding .venv and .git: 5.1M
+file count excluding .venv and .git: 336
+remaining project caches: 0
+
+# =============================================================
+# run-log.txt — specialisations/negotiation/perturbation session (2026-08-27 10:07 UTC)
+# Branch: arena/01a041a3-asteroid-colony-proto
+# Scope: crew specialisations (pilot/engineer/botanist, hire+fire),
+#        contract negotiation (B/V, autopilot accept), jump-to-event,
+#        gravitational perturbations, audio mute/duck. Orbital core
+#        still untouched (diff below).
+# =============================================================
+
+# 1) project tests
+$ python -m pytest tests/ -q
+94 passed in 66.77s (0:01:06)
+
+# 2) upstream asteroid-colony tests
+$ python vendor/asteroid-colony-upstream/test_overall.py
+=== Result: 25 passed, 0 failed ===
+
+# 3) astrodynamics invariance
+src/maths + src/simulation diff vs e2543e3 (must be empty):
+0
+
+# 4) full-economy self-test, 6,000 days
+$ python -m src.main --headless --sim-days 6000
+  Harrier parked   Inner Belt Field         2,389 m/s left   hull  44.2%
+  Osprey  parked   Colony Hub               3,524 m/s left   hull 100.0%
+  Falcon  parked   Inner Belt Field         1,916 m/s left   hull  63.7%
+  Condor  pending  Inner Belt Field        18,258 m/s left   hull 100.0%
+  runs completed : 46
+  mass delivered : 8,751 t
+  delta-v spent  : 466,515 m/s
+  deliveries into colony economy: 49
+  colony storage : {'used': 18.252800000000455, 'capacity': 1500, 'delivered': 7936.889119661365}
+  research points: 1,984.2
+  ore mined      : 8,838 t   incidents: 2
+  market day 6,000 (cr/t): ice 11.0, iron 10.4, silver 39.7, gold 125.8, platinum 244.2, components 47.5, electronics 171.2
+  treasury       : 150,269 cr
+
+# 5) perturbation + negotiation probe at day 6,000
+perturbed bodies: ['inner_belt', 'metallic_belt', 'deep_belt', 'derelict_zone']
+life: O2 40 food 35 water 14.9 ice 41
+contracts: 12 done / 12 failed, standing mult 0.986
+morale 45 | incidents 2 | credits 182286 | runs 57
+
+# 6) capture artifact
+[capture] frames=700 shots=1 runs=8 delivered=1577t fallback=1
+
+# 7) workspace prune check
+du excluding .venv and .git: 5.1M
+file count excluding .venv and .git: 336
+
+# =============================================================
+# run-log.txt — multi-revolution Lambert session (2026-08-27 10:57 UTC)
+# Branch: arena/01a041a3-asteroid-colony-proto
+# Scope: multi-rev Izzo branches (lambert_multi), multi-rev window
+#        search with a propellant-saving gate, ops-layer planning
+#        overrides, campaign determinism fix. Verified core
+#        (src/simulation) diff vs e2543e3 remains empty.
+# =============================================================
+
+# 1) project tests
+$ python -m pytest tests/ -q
+101 passed in 125.14s (0:02:05)
+
+# 2) upstream asteroid-colony tests
+$ python vendor/asteroid-colony-upstream/test_overall.py
+=== Result: 25 passed, 0 failed ===
+
+# 3) astrodynamics invariance
+[parity] runs 18 (baseline 18) | mass 4320 t (4,320) | dv 112790 m/s (112,790)
+src/simulation diff vs e2543e3 (must be 0):
+0
+
+# 4) campaign determinism (hash-order fix): identical runs across processes
+6000-day: runs 61 | credits 169637 cr | incidents 2
+6000-day replay: runs 61 | credits 169637 cr (must match exactly)
+
+# 5) capture + porkchop artifacts
+[capture] frames=700 shots=1 runs=15 delivered=2620t fallback=1
+wrote logs/porkchop.png
+
+# 6) workspace prune check
+du excluding .venv and .git: 5.2M
+file count excluding .venv and .git: 336
+
+# =============================================================
+# run-log.txt — game-polish session (2026-08-27 11:43 UTC)
+# Branch: arena/01a041a3-asteroid-colony-proto
+# Scope: Steam-facing polish — stylised textures/sounds, scene and
+#        ship overhaul, refuel depots, title/pause menus, launch-
+#        window GO moment, toasts, click-picking, smoothed camera,
+#        screenshot fallback rebuilt as key art. Verified core and
+#        economy bridge untouched.
+# =============================================================
+
+# 1) project tests
+$ python -m pytest tests/ -q
+107 passed in 141.93s (0:02:21)
+
+# 2) upstream asteroid-colony tests
+=== Result: 25 passed, 0 failed ===
+
+# 3) windowed-path construction smoke (Ursina headless boot)
+[93mwarning: No monitors found [0m
+package_folder: /home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/ursina
+asset_folder: .
+[game] Director online. TAB to pick a target -- wait for the window, then go.
+[game] Depot online at Inner Belt Field. Bill: 3,500 cr.
+[game] Target: Aurelia.
+[smoke] scene bodies 6, labels 6, asteroids 240, depots 1, target gas_giant_orbit
+[smoke] WINDOWED PATH OK
+
+# 4) headless self-test
+$ python -m src.main --headless --sim-days 6000
+  deliveries into colony economy: 63
+  colony storage : {'used': 41.40800000000047, 'capacity': 1500, 'delivered': 9027.539558873768}
+  research points: 2,256.9
+  ore mined      : 10,234 t   incidents: 1
+  market day 6,000 (cr/t): ice 9.0, iron 14.6, silver 33.0, gold 86.1, platinum 278.7, components 67.7, electronics 229.7
+  treasury       : 192,550 cr
+
+# 5) capture artifact (fallback render, real assets)
+[capture] frames=700 shots=1 runs=5 delivered=1127t fallback=1
+
+# 6) astrodynamics invariance
+src/simulation diff vs e2543e3 (must be 0):
+0
+
+# =============================================================
+# run-log.txt — full-featured build session (2026-08-27 13:09 UTC)
+# Branch: arena/01a041a3-asteroid-colony-proto
+# Scope: windows board + reticle + dv bars, merged belt mesh + quality
+#        presets, Comet Vigil, parts market + upgrades + drone bays,
+#        full game menu + settings persistence + how-to-play.
+# =============================================================
+
+# 1) project tests
+$ python -m pytest tests/ -q
+123 passed in 187.65s (0:03:07)
+
+# 2) upstream asteroid-colony tests
+=== Result: 25 passed, 0 failed ===
+
+# 3) menu + comet + parts windowed smoke (Ursina headless boot)
+[93mwarning: No monitors found [0m
+package_folder: /home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/ursina
+asset_folder: .
+[game] Director online. TAB to pick a target -- wait for the window, then go.
+[game] Depot online at Inner Belt Field. Bill: 3,500 cr.
+[game] Drone bay online at the Inner Belt Field depot. Bill 3,436 cr.
+[game] Drop Tanks installed on Kestrel. Bill 2,055 cr.
+[game] Deep Drill installed on Petrel. Bill 2,920 cr.
+[game] OFFER from Luna Water Authority: 100 t of iron by day 501 for 1,855 cr. B to accept, V to decline.
+[smoke] comet in board: True
+[smoke] depot {'inner_belt': {'drones': 1}} | ship parts {'tank': 1}
+[smoke] reticle on: True | tail: True
+[smoke] FULL FEATURE PASS OK
+
+# 4) headless self-test
+$ python -m src.main --headless --sim-days 6000
+  deliveries into colony economy: 63
+  colony storage : {'used': 41.40800000000047, 'capacity': 1500, 'delivered': 9023.979545262748}
+  research points: 2,256.0
+  ore mined      : 10,335 t   incidents: 2
+  market day 6,000 (cr/t): ice 12.8, iron 16.0, silver 36.6, gold 82.7, platinum 273.1, components 45.1, electronics 144.1
+  treasury       : 189,420 cr
+
+# 5) capture artifact
+[capture] frames=700 shots=1 runs=5 delivered=1128t fallback=1
+
+# 6) astrodynamics invariance
+src/simulation diff vs e2543e3 (must be 0):
+0
+workspace: 6.3M / 356 files
+
+# =============================================================
+# run-log.txt — ores/refinery/firsts session (2026-08-27 14:03 UTC)
+# Branch: arena/01a041a3-asteroid-colony-proto
+# Scope: thorite + aurellium ores, refinery stations (arrival smelting
+#        + drone synergy), 19 Firsts milestones with credit/research
+#        rewards, capture counters, milestone HUD counter.
+# =============================================================
+
+# 1) project tests
+$ python -m pytest tests/ -q
+129 passed in 125.44s (0:02:05)
+
+# 2) upstream asteroid-colony tests
+=== Result: 25 passed, 0 failed ===
+
+# 3) windowed smoke (refinery build, milestone counter)
+:prc(warning): Invalid integer value for ConfigVariable win-size: 576.0
+:prc(warning): Invalid integer value for ConfigVariable win-size: 1024.0
+:device(error): Error adding inotify watch on /dev/input: No such file or directory
+:device(error): Error opening directory /dev/input: No such file or directory
+AL lib: (WW) pulse_load: Failed to load libpulse.so.0
+AL lib: (WW) alc_initconfig: Failed to initialize backend "pulse"
+AL lib: (WW) alsa_load: Failed to load libasound.so.2
+AL lib: (WW) alc_initconfig: Failed to initialize backend "alsa"
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+:audio(error): Couldn't open default OpenAL device
+:audio(error): OpenALAudioManager: No open device or context
+:audio(error):   OpenALAudioManager is not valid, will use NullAudioManager
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+:audio(error): Couldn't open default OpenAL device
+:audio(error): OpenALAudioManager: No open device or context
+:audio(error):   OpenALAudioManager is not valid, will use NullAudioManager
+[93mwarning: No monitors found [0m
+package_folder: /home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/ursina
+asset_folder: .
+[game] Director online. TAB to pick a target -- wait for the window, then go.
+[game] Refinery online at Inner Belt Field. Bill: 4,200 cr. Waiting runs arrive refined.
+[game] MILESTONE: First dispatch -- the fleet is alive  (+250 cr, +2 RP)
+[game] MILESTONE: First refinery smelting  (+600 cr, +6 RP)
+[game] MILESTONE: Treasury passes 25,000 cr  (+0 cr, +10 RP)
+[game] OFFER from Ceres Prospecting Co.: 64 t of silver by day 650 for 3,841 cr. B to accept, V to decline.
+[smoke] refineries ['inner_belt'] | firsts 3/19 | panel 'Treasury  26,650 cr   Firsts 3/19'
+[smoke] FULL PASS OK
+
+# 4) headless 6,000-day arc with the new economy
+$ python -m src.main --headless --sim-days 6000
+  deliveries into colony economy: 56
+  colony storage : {'used': 0.0, 'capacity': 1500, 'delivered': 7352.8321967219745}
+  research points: 2,001.2
+  ore mined      : 9,626 t   incidents: 4
+  market day 6,000 (cr/t): ice 9.6, iron 14.7, silver 50.0, gold 124.3, platinum 205.7, components 52.6, electronics 162.2, thorite 44.2, aurellium 669.4
+  treasury       : 224,014 cr
+
+# 5) economy probe: firsts + refined deliveries at day 6,000
+firsts fired: 15 of 19 | notable: ['first_capture_comet', 'first_refinery', 'thorite_1']
+refined delivered: components 985 t | thorite 77 t | refineries ['inner_belt']
+
+# 6) astrodynamics invariance
+src/simulation diff vs e2543e3 (must be 0):
+0
+workspace: 6.4M / 356 files
+
+# =============================================================
+# run-log.txt — CEO session: science, aurellium payoff, goals (2026-08-27 16:01 UTC)
+# Branch: arena/01a041a3-asteroid-colony-proto
+# Scope: TECHS research unlocks (RP -> generic sim multipliers),
+#        Navigation Suite super-part (aurellium-gated), GOALS quest
+#        log (next 3 Firsts on the HUD). Core untouched.
+# =============================================================
+
+# 1) project tests
+$ python -m pytest tests/ -q
+134 passed in 194.81s (0:03:14)
+
+# 2) upstream tests
+=== Result: 25 passed, 0 failed ===
+
+# 3) 3,000-day arc probe
+runs 27 | credits 158533 | firsts 15
+src/simulation + src/game diff vs e2543e3 (must be 0):
+0
+
+# =============================================================
+date: extra operand '%H:%M'
+Try 'date --help' for more information.
+# run-log.txt — CEO session: science in the self-test ()
+# =============================================================
+
+134 passed in 189.96s (0:03:09)
+=== Result: 25 passed, 0 failed ===
+6,000-day arc: runs 59 | credits 284907 | firsts 16/19
+techs owned by the autopilot: ['crew_rotation', 'isru_catalysts', 'plasma_lances', 'standard_contracts']
+tech mults: {'depot_generation': 1.5, 'refinery': 1.5, 'fatigue': 0.75}
+src/simulation + src/game diff vs e2543e3 (must be 0):
+0
