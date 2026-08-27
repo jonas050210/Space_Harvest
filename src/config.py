@@ -259,6 +259,17 @@ LIFE_SHORTAGE_MORALE_DRAIN_PER_DAY = 3.0
 LIFE_SOLAR_ENERGY_PER_DAY = 1.5
 
 
+# --- multi-revolution planning -------------------------------------------------
+# The window solver can consider transfers with extra full revolutions (slow
+# routes). Izzo multi-rev branches only replace the single-rev plan when they
+# save at least MIN_SAVING of its cost, so the extra flight time must buy
+# real propellant. In this near-coplanar network single-rev Hohmann-class
+# windows dominate (as orbital mechanics predicts), so the gate rarely opens;
+# strongly perturbed or inclined future targets are where it pays off. Set
+# the saving to a negative value to force multi-rev plans (used by tests).
+PLANNING_MAX_REVS = 1
+PLANNING_MULTI_REV_MIN_SAVING = 0.15
+
 # --- window search ---------------------------------------------------------
 WINDOW_GRID_DEPART = 72
 WINDOW_GRID_TOF = 30

@@ -2,6 +2,8 @@
 
 A compact 3-D colony-tycoon / orbital-logistics prototype. The upstream `asteroid-colony` regions are real heliocentric bodies, and freighters fly patched-conic supply chains with launch windows, delta-v budgets, capture/docking burns, layovers, and deliveries booked into the upstream colony economy.
 
+The orbital layer runs patched-conic transfers solved with Izzo's universal Lambert algorithm, including its multi-revolution branches (slow, propellant-cheap routes that the planner only picks when they genuinely pay).
+
 On top of the verified astrodynamics core sits a colony-operations layer: every rock has a procedural ore fingerprint whose veins deplete as you mine them, a dynamic Earth market pays (and crashes) for your ore, named crews fly tired and happy (or bored, or hungry), solar flares and debris seasons threaten ships in flight, Earth factions post orders that move prices with your standing, and the colony's oxygen/food/water loop runs on ice you might rather have sold.
 
 Read `project.md` for the full architecture, units, controls, QA results, known limits, and owner commands.

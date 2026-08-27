@@ -85,6 +85,9 @@ from .config import (
     MINING_DRILL_WEAR_PCT,
     MINING_LOW_HULL_YIELD_PCT,
     MINING_RECOVERY_TAU_DAYS,
+    MU_SUN,
+    PLANNING_MAX_REVS,
+    PLANNING_MULTI_REV_MIN_SAVING,
     PERTURB_DA_FRACTION,
     PERTURB_DE_MAX,
     PERTURB_MAX_INTERVAL_DAYS,
@@ -154,6 +157,9 @@ class OpsSimulation(OrbitalSimulation):
         self._perturb_timer = self.rng.uniform(
             PERTURB_MIN_INTERVAL_DAYS, PERTURB_MAX_INTERVAL_DAYS
         ) * SIM_SECONDS_PER_DAY
+        # Multi-rev planning knobs (see config comments).
+        self._max_revs = PLANNING_MAX_REVS
+        self._multi_rev_min_saving = PLANNING_MULTI_REV_MIN_SAVING
         #: ship name -> sim time of the last departure or docking
         self.last_active: dict[str, float] = {}
         # Space weather state (deterministic, ticked in step()).
@@ -309,6 +315,14 @@ class OpsSimulation(OrbitalSimulation):
                 for ore, tonnes in payload.items():
                     slot[ore] = slot.get(ore, 0.0) + tonnes
                 self._inflight[ship.name] = (target_key, dict(payload))
+                mission = self.missions.get(ship.name)
+                if mission is not None and mission.return_window is not None:
+                    revs = max(getattr(mission.return_window, "revs", 0), 0)
+                    if revs >= 1:
+                        self.note(
+                            f"{ship.name} flies a {revs}-revolution slow route "
+                            f"(propellant over pace)."
+                        )
             return ok, message
         return super().dispatch(ship, target_key, cargo=cargo)
 
@@ -551,6 +565,68 @@ class OpsSimulation(OrbitalSimulation):
             return "Debris season: elevated hull wear in flight"
         return ""
 
+    # -- multi-rev-aware window planning ---------------------------------------
+    def _solve_window(self, origin_key: str, target_key: str, *,
+                      epoch: float, min_departure_time: float | None = None,
+                      max_departure_time: float | None = None):
+        """Window search including multi-rev branches when they pay off."""
+        from .config import WINDOW_GRID_DEPART, WINDOW_GRID_TOF
+
+        return window_solver.solve_window_multi(
+            self.bodies[origin_key].elements, self.bodies[target_key].elements, MU_SUN,
+            origin_key=origin_key, target_key=target_key,
+            n_depart=WINDOW_GRID_DEPART, n_tof=WINDOW_GRID_TOF,
+            epoch=epoch, min_departure_time=min_departure_time,
+            max_departure_time=max_departure_time,
+            max_revs=self._max_revs,
+            multi_rev_min_saving=self._multi_rev_min_saving,
+        )
+
+    def launch_window(self, origin_key: str, target_key: str, refresh: bool = False):
+        """Multi-rev-aware override of the cached window lookup."""
+        cache_key = (origin_key, target_key)
+        if not refresh and cache_key in self._window_cache:
+            cached = self._window_cache[cache_key]
+            if cached.departure_time >= self.time - 1e-9:
+                return cached
+        window = self._solve_window(origin_key, target_key, epoch=self.time,
+                                    min_departure_time=self.time)
+        if window is not None:
+            self._window_cache[cache_key] = window
+            self.stats["windows_solved"] += 1
+        return window
+
+    def plan_round_trip(self, origin_key: str, target_key: str, max_age: float | None = None):
+        """Multi-rev-aware override of the round-trip planner.
+
+        Semantics mirror the base implementation (cache with TTL, stale
+        outbound re-solved from now, inbound bounded below by arrival) but
+        every window search may consider multi-rev branches.
+        """
+        # Core semantics: ``max_age=None`` means "fresh pricing" (no cache
+        # read) -- dispatch depends on that; a TTL is passed by callers that
+        # merely want a recent estimate.
+        cache_key = (origin_key, target_key)
+        if max_age is not None:
+            cached = self._round_trip_cache.get(cache_key)
+            if cached is not None and (self.time - cached[0]) < max_age:
+                return cached[1], cached[2]
+
+        outbound = self.launch_window(origin_key, target_key)
+        if outbound is None:
+            return None, None
+        if outbound.departure_time < self.time - 1e-9:
+            outbound = self._solve_window(origin_key, target_key, epoch=self.time,
+                                          min_departure_time=self.time)
+            if outbound is None:
+                return None, None
+        arrival = outbound.departure_time + outbound.tof
+        inbound = self._solve_window(target_key, origin_key, epoch=arrival,
+                                     min_departure_time=arrival)
+        if inbound is not None:
+            self._round_trip_cache[cache_key] = (self.time, outbound, inbound)
+        return outbound, inbound
+
     # -- stepping --------------------------------------------------------------
     def step(self, dt_days: float) -> list[LogEntry]:
         """Tick the ops layer (crew, weather) on top of the base event step.
@@ -683,6 +759,7 @@ class OpsSimulation(OrbitalSimulation):
                 "v2": np.asarray(window.v2).tolist(),
                 "v1_body": np.asarray(window.v1_body).tolist(),
                 "v2_body": np.asarray(window.v2_body).tolist(),
+                "revs": int(getattr(window, "revs", 0)),
             }
 
         missions = {}
@@ -765,6 +842,8 @@ class OpsSimulation(OrbitalSimulation):
         sim.incident_chance_scrape = INCIDENT_CHANCE_SCRAPE
         sim.incident_chance_drill = INCIDENT_CHANCE_DRILL
         sim.hull_critical_pct = HULL_CRITICAL_PCT
+        sim._max_revs = PLANNING_MAX_REVS
+        sim._multi_rev_min_saving = PLANNING_MULTI_REV_MIN_SAVING
         sim.crew = {}
         sim.last_active = {}
         sim.botanists = int(data.get("botanists", 0))
@@ -831,6 +910,7 @@ class OpsSimulation(OrbitalSimulation):
                 v2=np.array(w["v2"], dtype=float),
                 v1_body=np.array(w["v1_body"], dtype=float),
                 v2_body=np.array(w["v2_body"], dtype=float),
+                revs=int(w.get("revs", 0)),
             )
 
         for name, m in data["missions"].items():

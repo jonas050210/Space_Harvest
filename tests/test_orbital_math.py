@@ -208,3 +208,49 @@ def test_lambert_rejects_degenerate_geometry():
         transfers.lambert(r, r * -2.0, 0.0, MU_SUN)      # zero time of flight
     with pytest.raises(ValueError):
         transfers.lambert(np.zeros(3), r, 1.0e7, MU_SUN)  # zero radius
+
+
+# --------------------------------------------------------------------------
+# Multi-revolution Lambert (Izzo branches, M >= 1)
+# --------------------------------------------------------------------------
+
+def _half_turn_geometry():
+    """A wide two-body geometry with a ~90-degree transfer angle."""
+    r1 = np.array([1.2, 0.0, 0.0])
+    r2 = np.array([0.0, 3.4, 0.3])
+    c = float(np.linalg.norm(r2 - r1))
+    s = 0.5 * (float(np.linalg.norm(r1)) + float(np.linalg.norm(r2)) + c)
+    period = 2.0 * math.pi * math.sqrt(s ** 3 / MU_SUN)
+    return r1, r2, s, period
+
+
+def test_multi_rev_lambert_arrives_after_the_requested_revolutions():
+    r1, r2, _s, period = _half_turn_geometry()
+    tof = 1.6 * period
+    solutions = transfers.lambert_multi(r1, r2, tof, MU_SUN, revs=1)
+    assert len(solutions) == 2  # left and right branch of the TOF curve
+    for v1, v2 in solutions:
+        r_arr, _ = kepler.universal_kepler(r1, v1, tof, MU_SUN)
+        assert r_arr == pytest.approx(r2, abs=1e-6)
+        # Revolution count: the transfer orbit period must satisfy
+        # M * P < tof < (M + 1) * P, i.e. the conic wraps once fully.
+        a = 1.0 / (2.0 / float(np.linalg.norm(r1)) - float(np.dot(v1, v1)) / MU_SUN)
+        orbital_period = 2.0 * math.pi * math.sqrt(a ** 3 / MU_SUN)
+        assert 0.5 < orbital_period / tof < 1.0
+
+
+def test_multi_rev_lambert_needs_a_long_enough_time_of_flight():
+    r1, r2, _s, period = _half_turn_geometry()
+    assert transfers.lambert_multi(r1, r2, 0.25 * period, MU_SUN, revs=1) == []
+    assert transfers.lambert_multi(r1, r2, 0.05 * period, MU_SUN, revs=2) == []
+
+
+def test_multi_rev_lambert_left_branch_is_cheaper_than_the_fast_single_rev():
+    """The classical result this module exists for: at a long TOF the multi-rev
+    conic is a lower-energy ride than the slow single-rev arc."""
+    r1, r2, _s, period = _half_turn_geometry()
+    tof = 1.6 * period
+    single = transfers.lambert(r1, r2, tof, MU_SUN)
+    multi = transfers.lambert_multi(r1, r2, tof, MU_SUN, revs=1)
+    cost = lambda sol: float(np.linalg.norm(sol[0]) + np.linalg.norm(sol[1]))
+    assert min(cost(s) for s in multi) < cost(single)

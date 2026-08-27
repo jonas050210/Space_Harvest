@@ -849,6 +849,51 @@ def test_audio_mute_and_ducking_with_a_stub_mixer():
 
 
 # --------------------------------------------------------------------------
+# Multi-revolution planning in the campaign layer
+# --------------------------------------------------------------------------
+
+def test_forced_multi_rev_mission_flies_and_delivers():
+    """With the saving gate forced open the plan adopts slow 1-revolution
+    routes. They cost 2-4x a single-rev round trip (Hohmann-class windows
+    dominate this near-coplanar network), so a deep-budget ship flies it:
+    the point is proving the event system, burn billing and capture handle
+    multi-rev arcs end to end."""
+    from src.config import SIM_SECONDS_PER_DAY
+
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim._multi_rev_min_saving = -100.0  # force adoption when a branch exists
+    sim.ships[0].delta_v = 500_000.0    # a deep propellant budget for the slow route
+    ok, _ = sim.dispatch(sim.ships[0], "derelict_zone")
+    assert ok
+    mission = sim.missions["Kestrel"]
+    assert mission.return_window.revs == 1
+    window_days = mission.tof / SIM_SECONDS_PER_DAY
+    assert window_days > 200.0  # well beyond the single-rev ~144 d arc
+
+    deliveries = 0
+    for _ in range(900):
+        sim.step(3.0)
+        if sim.pending_deliveries:
+            deliveries += 1
+            sim.pending_deliveries.clear()
+        if not sim.missions:
+            break
+    assert deliveries >= 1
+    report = sim.ship_report(sim.ships[0])
+    assert report["status"] in ("parked", "waiting")
+
+
+def test_planning_knobs_survive_a_json_round_trip():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim.dispatch(sim.ships[0], "inner_belt")
+    restored = OpsSimulation.from_json(json.loads(json.dumps(sim.to_json())))
+    assert restored._max_revs == sim._max_revs
+    assert restored._multi_rev_min_saving == sim._multi_rev_min_saving
+    assert restored.missions["Kestrel"].return_window.revs == \
+        sim.missions["Kestrel"].return_window.revs
+
+
+# --------------------------------------------------------------------------
 # The whole vertical slice through the real Game loop
 # --------------------------------------------------------------------------
 

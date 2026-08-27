@@ -555,10 +555,12 @@ class Game:
 
     def _tick_contracts(self) -> None:
         """Post offers, honour decisions, retire overdue and stale paper."""
-        recent = {ore for ore, day in self._recent_deliveries.items()
-                  if self.market.day - day < 1200.0}
+        # Sorted: set iteration order is hash-randomised between processes,
+        # and Earth's choice must not depend on it.
+        recent = sorted(ore for ore, day in self._recent_deliveries.items()
+                        if self.market.day - day < 1200.0)
         if not recent:
-            recent = set(self.colony.state.get("logistics", {}).get("lifetime_delivered", {}))
+            recent = sorted(self.colony.state.get("logistics", {}).get("lifetime_delivered", {}))
         offer = self.contracts.maybe_offer(recent)
         if offer is not None and not self.headless:
             self.say(

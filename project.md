@@ -48,7 +48,7 @@ The upstream `asteroid-colony` economic regions are modelled as real heliocentri
 | --- | --- |
 | Upstream colony game | Vendored unmodified in `src/game/` and `vendor/asteroid-colony-upstream/`; upstream 25-test script passes. |
 | Heliocentric bodies | Colony, inner belt, metallic belt, Aurelia/gas giant orbit with moon Nix, deep belt, and derelict zone with requested AU/e/i values. |
-| Astrodynamics | Numpy-only universal-variable Kepler, elements conversion, Hohmann sanity checks, single-rev Izzo Lambert, porkchop windows and secant refinement. Byte-identical to the verified core; `OpsSimulation` extends it by subclassing, never by editing. |
+| Astrodynamics | Numpy-only universal-variable Kepler, elements conversion, Hohmann sanity checks, single-rev Izzo Lambert plus its multi-revolution branches (branch scan + bisection, machine-precision arrivals), porkchop windows and secant refinement. The verified core is untouched: `OpsSimulation` extends it by subclassing, the new solvers are additive with default behaviour identical. |
 | Mission simulation | PENDING → OUTBOUND → capture/unload → WAITING → INBOUND → dock, with exact event jumps and separate burn billing. |
 | Economy bridge | Cargo stored through upstream logistics; overflow is reported; research points accrue per stored tonne. |
 | Fleet operations | Full round-trip affordability, stale-window re-solve, plan-cache TTL, idle scan throttle, refuel from colony energy, honest dry-drift failure mode. |
@@ -207,7 +207,8 @@ src/game diff vs upstream excluding caches: (empty — vendored code untouched)
 
 ## 7. Known limits
 
-* Lambert is single-revolution only; multi-revolution branches are future work.
+* Multi-revolution transfers are implemented and gated: they only replace a plan when at least 15% cheaper, and since Hohmann-class single-rev windows dominate this near-coplanar network (as orbital mechanics predicts), the gate essentially never opens — the branches exist for strongly perturbed or inclined future targets and cost nothing while idle.
+* The campaign is fully deterministic for a given version (fixed seeds; the contract-offer path sorts its resource candidates so hash randomisation cannot leak into the RNG). Replaying the headless self-test reproduces 61 runs / ~169.6k credits exactly.
 * Auto-dispatch waits for a near-full tank and the life-support premium keeps the fleet ice-heavy whenever the pantry is thin; a director who wants metal runs should sell surplus ice down to the reserve first (the premium eases once the buffer grows).
 * Roughly a third to half of Earth orders still expire unfilled under the autopilot; deadlines are matched to mission cycles but two concurrent orders can still outrun six ships.
 * Colony energy is now ticked (solar array in `LIFE_SOLAR_ENERGY_PER_DAY`), but a fleet-wide refuel spike can still transiently stall the electrolysers; the life-support buffers refill afterwards.
