@@ -41,6 +41,7 @@ from .config import (
     COMET_KEY,
     COMET_VEIN_BONUS,
     CREW_BOTANIST_SAVING_CAP,
+    MINING_EXTRA_SPAWNS,
     CREW_BOTANIST_WATER_SAVING,
     DEPOT_BUILD_COST,
     DEPOT_CAPACITY_PER_LEVEL,
@@ -97,6 +98,10 @@ from .config import (
     MU_SUN,
     PARTS_CATALOG,
     PLANNING_MAX_REVS,
+    REFINERY_ARRIVAL_BATCHES,
+    REFINERY_BATCHES_PER_DAY,
+    REFINERY_BUILD_COST,
+    REFINERY_RECIPES,
     PLANNING_MULTI_REV_MIN_SAVING,
     PERTURB_DA_FRACTION,
     PERTURB_DE_MAX,
@@ -108,7 +113,7 @@ from .config import (
 from .market import rng_from_json, rng_to_json
 from .maths.elements import OrbitalElements
 from .maths import windows as window_solver
-from .mining import YieldLedger, plan_extraction, register_body_ores
+from .mining import YieldLedger, plan_extraction, register_body_ores, register_extra_spawns
 from .simulation.bodies import BODIES
 from .simulation.bodies import BODIES, Body, TRADE_TARGETS
 from .simulation.orbital_sim import Delivery, Leg, LogEntry, Mission, OrbitalSimulation, Ship
@@ -149,6 +154,29 @@ class Depot:
         return cls(body_key=data["body_key"], level=int(data.get("level", 1)),
                    fuel_ms=float(data.get("fuel_ms", 0.0)),
                    upgrades={k: int(v) for k, v in data.get("upgrades", {}).items()})
+
+
+@dataclass
+class Refinery:
+    """A player-built smelting station at a trade body.
+
+    While a ship waits at its body for the return window, the refinery
+    converts raw ore in the ship's hold into high-value refined stock
+    (components, electronics). Fractional batches accumulate in ``progress``.
+    """
+
+    body_key: str
+    progress: float = 0.0
+    batches_done: int = 0
+
+    def to_json(self) -> dict:
+        return {"body_key": self.body_key, "progress": self.progress,
+                "batches_done": self.batches_done}
+
+    @classmethod
+    def from_json(cls, data: dict) -> "Refinery":
+        return cls(body_key=data["body_key"], progress=float(data.get("progress", 0.0)),
+                   batches_done=int(data.get("batches_done", 0)))
 
 
 @dataclass
@@ -201,6 +229,8 @@ class OpsSimulation(OrbitalSimulation):
         self.upgrades: dict[str, dict[str, int]] = {}
         #: body key -> refuel depot (player-built)
         self.depots: dict[str, Depot] = {}
+        #: body key -> refinery station (player-built)
+        self.refineries: dict[str, Refinery] = {}
         #: the network this campaign flies (extra bodies, e.g. a comet)
         self.trade_targets: tuple[str, ...] = tuple(TRADE_TARGETS)
 
@@ -254,11 +284,14 @@ class OpsSimulation(OrbitalSimulation):
             description="A long-period comet. Rare windows, fast arrival, primordial wealth.",
             render_scale=0.45,
         )
-        register_body_ores(COMET_KEY, ("ice", "platinum"))
+        register_body_ores(COMET_KEY, ("ice", "platinum", "thorite", "aurellium"))
+        register_extra_spawns(MINING_EXTRA_SPAWNS)
         if COMET_KEY not in self.trade_targets:
             self.trade_targets = tuple(self.trade_targets) + (COMET_KEY,)
         self.stats.setdefault("incidents", 0)
         self.stats.setdefault("ore_mined_t", 0.0)
+        self.stats.setdefault("full_returns", 0)
+        self.stats.setdefault("captures_by_body", {})
 
     # -- construction --------------------------------------------------------
     def _parked_ship(self, name: str, body_key: str) -> Ship:
@@ -539,6 +572,53 @@ class OpsSimulation(OrbitalSimulation):
         if depot is None:
             return DEPOT_BUILD_COST
         return depot.upgrade_cost
+
+    # -- refinery stations -------------------------------------------------------
+    def build_refinery(self, body_key: str) -> tuple[bool, str]:
+        """Raise a smelting station at ``body_key`` (caller pays the credits)."""
+        if body_key not in self.trade_targets:
+            return False, "Pick a trade body to build at."
+        if body_key in self.refineries:
+            return False, f"A refinery already operates at {self.bodies[body_key].name}."
+        self.refineries[body_key] = Refinery(body_key=body_key)
+        self.note(f"Refinery online at {self.bodies[body_key].name}.")
+        return True, f"Refinery online at {self.bodies[body_key].name}."
+
+    def refinery_upgrade_cost(self, body_key: str) -> float:
+        return REFINERY_BUILD_COST if body_key not in self.refineries else 0.0
+
+    def _refinery_smelt_waiting(self, dt_days: float) -> int:
+        """Smelt raw ore in waiting ships' holds; returns batches executed."""
+        if dt_days <= 0.0 or not self.refineries:
+            return 0
+        batches = 0
+        for ship in self.ships:
+            mission = self.missions.get(ship.name)
+            if mission is None or mission.leg is not Leg.WAITING:
+                continue
+            refinery = self.refineries.get(mission.target)
+            if refinery is None:
+                continue
+            refinery.progress += REFINERY_BATCHES_PER_DAY * dt_days
+            while refinery.progress >= 1.0:
+                recipe = self._first_craftable_recipe(ship)
+                if recipe is None:
+                    refinery.progress = min(refinery.progress, 1.0)  # idle: never bank up
+                    break
+                refinery.progress -= 1.0
+                refinery.batches_done += 1
+                batches += 1
+                for ore, amount in recipe["input"].items():
+                    ship.cargo[ore] = ship.cargo.get(ore, 0.0) - amount
+                ship.cargo[recipe["output"]] = ship.cargo.get(recipe["output"], 0.0) + recipe["amount"]
+        return batches
+
+    @staticmethod
+    def _first_craftable_recipe(ship: Ship):
+        for recipe in REFINERY_RECIPES:
+            if all(ship.cargo.get(ore, 0.0) >= amount for ore, amount in recipe["input"].items()):
+                return recipe
+        return None
 
     def tick_depots(self, dt_days: float) -> None:
         """ISRU plants crack local ice into propellant."""
@@ -908,6 +988,7 @@ class OpsSimulation(OrbitalSimulation):
         self.tick_depots(dt_days)
         self._depot_refuel_waiting(dt_days)
         self._depot_drones_load(dt_days)
+        self._refinery_smelt_waiting(dt_days)
         return entries
 
     # -- mission hooks (wear, depletion, incidents) --------------------------
@@ -953,9 +1034,34 @@ class OpsSimulation(OrbitalSimulation):
                 f"(+{draw:,.0f} m/s, {depot.fuel_ms:,.0f} m/s left)."
             )
 
+    def _smelt_hold(self, ship: Ship, body_key: str, batches: int) -> int:
+        """Run up to ``batches`` smelting passes over a hold; returns runs."""
+        refinery = self.refineries.get(body_key)
+        if refinery is None:
+            return 0
+        done = 0
+        for _ in range(batches):
+            recipe = self._first_craftable_recipe(ship)
+            if recipe is None:
+                break
+            for ore, amount in recipe["input"].items():
+                ship.cargo[ore] = ship.cargo.get(ore, 0.0) - amount
+            ship.cargo[recipe["output"]] = ship.cargo.get(recipe["output"], 0.0) + recipe["amount"]
+            refinery.batches_done += 1
+            done += 1
+        return done
+
     def _capture(self, ship: Ship, mission: Mission, target) -> None:
         if mission.leg is Leg.OUTBOUND:
             self._depot_topup_on_arrival(ship, mission)
+            if self.refineries.get(mission.target) is not None:
+                smelted = self._smelt_hold(ship, mission.target, REFINERY_ARRIVAL_BATCHES)
+                if smelted:
+                    self.note(
+                        f"{ship.name}'s ore is smelted at the "
+                        f"{self.bodies[mission.target].name} refinery "
+                        f"({smelted} batches: {dict((k, round(v, 1)) for k, v in ship.cargo.items() if v > 0)})."
+                    )
         inflight = self._inflight.pop(ship.name, None)
         before = ship.delta_v
         super()._capture(ship, mission, target)
@@ -980,6 +1086,11 @@ class OpsSimulation(OrbitalSimulation):
         # Success: draw the vein down, pay the crew's pride, charge drilling.
         self.ledger.commit(body_key, payload)
         self.stats["ore_mined_t"] += sum(payload.values())
+        self.stats["captures_by_body"][body_key] = self.stats["captures_by_body"].get(body_key, 0) + 1
+        if self.pending_deliveries:
+            delivered_total = float(sum(self.pending_deliveries[-1].cargo.values()))
+            if delivered_total >= ship.capacity * 0.98:
+                self.stats["full_returns"] += 1
         self.last_active[ship.name] = self.time
         for member in self.crew.get(ship.name, []):
             member.morale = min(CREW_MORALE_MAX, member.morale + CREW_MORALE_CAPTURE_BONUS)
@@ -1099,6 +1210,7 @@ class OpsSimulation(OrbitalSimulation):
             "crew": {name: [member.to_json() for member in roster]
                      for name, roster in self.crew.items()},
             "depots": [depot.to_json() for depot in self.depots.values()],
+            "refineries": [r.to_json() for r in self.refineries.values()],
             "botanists": self.botanists,
             "perturb_timer": self._perturb_timer,
             "body_overrides": {
@@ -1138,6 +1250,8 @@ class OpsSimulation(OrbitalSimulation):
         sim._round_trip_cache = {}
         sim._next_scan_time = float(data["next_scan_time"])
         sim.stats = dict(data["stats"])
+        sim.stats.setdefault("full_returns", 0)
+        sim.stats.setdefault("captures_by_body", {})
         sim.pending_deliveries = []
         sim.ship_class = {}
         sim.hull = {}
@@ -1154,6 +1268,7 @@ class OpsSimulation(OrbitalSimulation):
         sim.bodies = dict(sim.bodies)
         sim._install_comet()
         sim.depots = {d["body_key"]: Depot.from_json(d) for d in data.get("depots", [])}
+        sim.refineries = {r["body_key"]: Refinery.from_json(r) for r in data.get("refineries", [])}
         sim.botanists = int(data.get("botanists", 0))
         sim._perturb_timer = float(data.get("perturb_timer",
                                             PERTURB_MIN_INTERVAL_DAYS * SIM_SECONDS_PER_DAY))

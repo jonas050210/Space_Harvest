@@ -100,12 +100,19 @@ HULL_REPAIR_COST_PER_PCT = 12.0  # credits per percentage point restored
 
 # --- mining: ore fingerprints, depletion, extraction modes -------------------
 MINING_SEED = 20260826         # combined with the body key, deterministic
-MINING_ORES = ("ice", "iron", "silver", "gold", "platinum", "components", "electronics")
+MINING_ORES = ("ice", "iron", "silver", "gold", "platinum", "components", "electronics",
+               "thorite", "aurellium")
 # Vein size per ore in tonnes: after extracting one vein-size the yield is at
 # 1/e, forcing expansion to fresh rocks while slow recovery keeps the game
 # from dead-ending.
 MINING_VEIN_SIZE_T = {"ice": 1200.0, "iron": 1600.0, "silver": 700.0,
-                      "gold": 450.0, "platinum": 300.0, "components": 500.0, "electronics": 250.0}
+                      "gold": 450.0, "platinum": 300.0, "components": 500.0, "electronics": 250.0,
+                      "thorite": 380.0, "aurellium": 140.0}
+# Campaign-only ore spawns, appended to a body's module-declared resources.
+# The deep belt and the derelict hull carry radioactive thorite in their slag;
+# aurellium exists ONLY in the comet -- the jackpot that makes the chase pay.
+MINING_EXTRA_SPAWNS = {"deep_belt": ("thorite",), "derelict_zone": ("thorite",),
+                       "comet_vigil": ("thorite", "aurellium")}
 MINING_DRILL_YIELD_BONUS = 1.6   # core drilling multiplier per run
 MINING_DRILL_WEAR_PCT = 6.0      # hull cost of drilling on every drilled run
 MINING_LOW_HULL_YIELD_PCT = 40.0  # below this hull %, yield scales with hull
@@ -122,15 +129,18 @@ INCIDENT_CARGO_LOSS = 0.35         # fraction of the delivery lost to an inciden
 MARKET_BASE_PRICES = {  # credits per tonne
     "ice": 8.0, "iron": 12.0, "silver": 40.0, "gold": 90.0,
     "platinum": 220.0, "components": 65.0, "electronics": 160.0,
+    "thorite": 70.0, "aurellium": 480.0,
 }
 # Tonnes the Earth market absorbs before the price visibly sags; rare ores
 # flood much faster, so dumping a hauler load of platinum crashes its price.
 MARKET_ABSORPTION_T = {"ice": 400.0, "iron": 320.0, "silver": 140.0, "gold": 60.0,
-                       "platinum": 30.0, "components": 80.0, "electronics": 40.0}
+                       "platinum": 30.0, "components": 80.0, "electronics": 40.0,
+                       "thorite": 45.0, "aurellium": 12.0}
 MARKET_FLOOD_HALF_LIFE_DAYS = 30.0
 MARKET_SEASONAL_AMPLITUDE = 0.22
 MARKET_SEASONAL_PERIOD_DAYS = {"ice": 240.0, "iron": 300.0, "silver": 360.0,
-                               "gold": 420.0, "platinum": 480.0, "components": 390.0, "electronics": 450.0}
+                               "gold": 420.0, "platinum": 480.0, "components": 390.0, "electronics": 450.0,
+                               "thorite": 330.0, "aurellium": 540.0}
 MARKET_NOISE_SIGMA = 0.05           # random-walk strength, per sqrt(day)
 MARKET_NOISE_MEAN_REVERSION = 0.02  # per day toward demand 1.0
 MARKET_PRICE_FLOOR_FRACTION = 0.15  # price never drops below this share of base
@@ -317,6 +327,46 @@ WINDOW_GRID_TOF = 30
 ROUND_TRIP_CACHE_DAYS = 365.0
 # How often the idle-fleet dispatch scan may re-price the network.
 REDISPATCH_SCAN_DAYS = 30.0
+
+# --- refinery stations ----------------------------------------------------------
+# A refinery smelts raw ore in a docked (waiting) ship's hold: components from
+# iron+silver, electronics from gold. Refined stock sells far above raw ore,
+# which is the whole economic reason to build one. The station crafts even
+# while no ship is there only in tiny amounts -- it is a service, not a factory.
+REFINERY_BUILD_COST = 4200.0
+REFINERY_BATCHES_PER_DAY = 3.0
+# Smelting passes run against a run's payload the moment the ship docks --
+# this is the refinery's core service: the run arrives REFINED.
+REFINERY_ARRIVAL_BATCHES = 14
+REFINERY_RECIPES = (
+    {"output": "components", "amount": 2.0, "input": {"iron": 3.0, "silver": 1.0}},
+    {"output": "electronics", "amount": 2.0, "input": {"gold": 3.0}},
+)
+
+# --- "Firsts": KSP-style one-shot milestones -------------------------------------
+# (key, toast label, credit bonus, research bonus). Checked by the game layer
+# every few frames against read-only campaign state; each fires exactly once.
+FIRSTS = (
+    ("first_dispatch", "First dispatch -- the fleet is alive", 250.0, 2.0),
+    ("first_capture_belt", "First capture: the inner belt", 200.0, 2.0),
+    ("first_capture_metallic", "First capture: the metallic belt", 350.0, 4.0),
+    ("first_capture_deep", "First capture: the deep belt", 700.0, 8.0),
+    ("first_capture_derelict", "First capture: the Derelict Zone", 900.0, 10.0),
+    ("first_capture_aurelia", "First capture: Aurelia orbit", 800.0, 8.0),
+    ("first_capture_comet", "FIRST COMET ENCOUNTER -- history made", 2500.0, 40.0),
+    ("first_depot", "First refuel depot online", 500.0, 5.0),
+    ("first_refinery", "First refinery smelting", 600.0, 6.0),
+    ("first_drones", "Drone bay operational", 400.0, 4.0),
+    ("full_return_1", "First full-hold return", 300.0, 3.0),
+    ("full_return_10", "Ten full-hold returns -- a professional outfit", 1200.0, 12.0),
+    ("mass_2500", "2,500 t delivered to the colony", 800.0, 8.0),
+    ("mass_10000", "10,000 t delivered -- the belt industry", 3000.0, 30.0),
+    ("fleet_5", "Five ships under command", 600.0, 6.0),
+    ("rich_25k", "Treasury passes 25,000 cr", 0.0, 10.0),
+    ("rich_100k", "Treasury passes 100,000 cr", 0.0, 25.0),
+    ("thorite_1", "First thorite shipment", 500.0, 6.0),
+    ("aurellium_1", "First aurellium shipment -- Earth is stunned", 2000.0, 30.0),
+)
 
 # --- quality presets -----------------------------------------------------------
 # Flags feed OrbitalScene.apply_quality; "high" is everything on.

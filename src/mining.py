@@ -20,6 +20,7 @@ import zlib
 
 from .config import (
     MINING_DRILL_YIELD_BONUS,
+    MINING_EXTRA_SPAWNS,
     MINING_LOW_HULL_YIELD_PCT,
     MINING_ORES,
     MINING_RECOVERY_TAU_BY_ORE,
@@ -36,6 +37,8 @@ _JITTER = 0.45  # fingerprint variation applied to each weight
 _fingerprint_cache: dict[str, dict[str, float]] = {}
 #: ores for campaign-only bodies that live outside the module body table
 _EXTRA_BODY_ORES: dict[str, tuple[str, ...]] = {}
+#: extra ores appended to module bodies' own lists (campaign rarity map)
+_EXTRA_SPAWNS: dict[str, tuple[str, ...]] = {}
 
 
 def register_body_ores(body_key: str, ores: tuple[str, ...]) -> None:
@@ -49,14 +52,32 @@ def register_body_ores(body_key: str, ores: tuple[str, ...]) -> None:
     _fingerprint_cache.pop(body_key, None)
 
 
+def register_extra_spawns(mapping: dict) -> None:
+    """Declare campaign-only ore spawns on module bodies (idempotent)."""
+    for key, ores in mapping.items():
+        _EXTRA_SPAWNS[key] = tuple(ores)
+        _fingerprint_cache.pop(key, None)
+
+
+# The campaign rarity map is static config, so it registers at import: the
+# fingerprints of deep_belt / derelict_zone / comet_vigil are correct even
+# before any OpsSimulation exists.
+register_extra_spawns(MINING_EXTRA_SPAWNS)
+
+
 def _body_ores(body_key: str) -> tuple[str, ...]:
     """The minable ores a body offers, filtered to known upstream resources."""
     extra = _EXTRA_BODY_ORES.get(body_key)
     if extra is not None:
         return extra
-    body = BODIES[body_key]
-    ores = tuple(ore for ore in body.resources if ore in MINING_ORES)
-    return ores or ("iron",)
+    if body_key in BODIES:
+        body = BODIES[body_key]
+        ores = tuple(ore for ore in body.resources if ore in MINING_ORES)
+    else:
+        ores = ()
+    spawn = _EXTRA_SPAWNS.get(body_key, ())
+    merged = tuple(dict.fromkeys(ores + tuple(o for o in spawn if o in MINING_ORES)))
+    return merged or ("iron",)
 
 
 def body_fingerprint(body_key: str, seed: int = MINING_SEED) -> dict[str, float]:

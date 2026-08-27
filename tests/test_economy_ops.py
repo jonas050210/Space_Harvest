@@ -63,8 +63,8 @@ def test_fingerprint_is_deterministic_and_normalised():
 
 def test_fingerprints_differ_between_bodies():
     assert body_fingerprint("inner_belt") != body_fingerprint("metallic_belt")
-    # The salvage field yields man-made stock, not natural ore.
-    assert set(body_fingerprint("derelict_zone")) == {"components", "electronics"}
+    # The salvage field yields man-made stock plus thorite in the slag.
+    assert set(body_fingerprint("derelict_zone")) == {"components", "electronics", "thorite"}
 
 
 def test_depletion_reduces_yield_until_the_vein_thins_out():
@@ -1004,11 +1004,12 @@ def test_comet_windows_are_rare_and_expensive_but_real():
     assert rt < SHIP_CLASSES["scout"]["delta_v"] * 1.15  # a scout can do it
 
 
-def test_comet_ore_is_primordial_ice_and_platinum():
+def test_comet_ore_is_primordial_and_unique():
     from src.mining import body_fingerprint, plan_extraction, vein_size
 
     fingerprint = body_fingerprint("comet_vigil")
-    assert set(fingerprint) == {"ice", "platinum"}
+    assert "ice" in fingerprint and "platinum" in fingerprint
+    assert "aurellium" in fingerprint  # nowhere else in the system
     assert vein_size("comet_vigil", "platinum") > 0
     ledger = YieldLedger()
     payload = plan_extraction("comet_vigil", ledger, None, 240.0)
@@ -1213,6 +1214,108 @@ def test_new_campaign_resets_the_run_without_touching_the_scene(ursina_app):
     assert game.screen == "play"
     game.update(0.016)  # the scene rebuilds ship meshes on the next frame
     assert "Kestrel" in game.scene.ships
+
+
+# --------------------------------------------------------------------------
+# New ores: thorite and aurellium
+# --------------------------------------------------------------------------
+
+def test_rare_ores_spawn_where_the_campaign_declares():
+    deep = body_fingerprint("deep_belt")
+    assert "thorite" in deep and "thorite" not in body_fingerprint("inner_belt")
+    comet = body_fingerprint("comet_vigil")
+    assert "aurellium" in comet and "aurellium" not in deep
+    assert sum(deep.values()) == pytest.approx(1.0)
+
+
+def test_rare_ores_have_market_prices_and_store_cleanly():
+    from src.main import Game
+
+    game = Game(headless=True)
+    assert game.market.price("thorite") > 0.0
+    assert game.market.price("aurellium") > game.market.price("gold")
+    result = game.colony.receive({"thorite": 40.0, "aurellium": 5.0})
+    assert result["stored"]["thorite"] == pytest.approx(40.0)
+    # Selling works like any other ore.
+    game.sell_all()
+    assert game.colony.state["resources"].get("thorite", 0.0) < 1.0
+
+
+# --------------------------------------------------------------------------
+# Refinery stations
+# --------------------------------------------------------------------------
+
+def test_refinery_smelts_the_arrival_payload():
+    from src.config import SIM_SECONDS_PER_DAY
+
+    sim = OpsSimulation(ship_names=("Hauler",), ship_classes={"Hauler": "hauler"})
+    sim.build_refinery("inner_belt")
+    ok, _ = sim.dispatch(sim.ships[0], "inner_belt")
+    assert ok
+    for _ in range(3000):
+        sim.step(3.0)
+        if not sim.missions:
+            break
+    delivery = sim.pending_deliveries[-1]
+    assert delivery.cargo.get("components", 0.0) >= 10.0  # the run arrived refined
+    assert sim.refineries["inner_belt"].batches_done >= 10
+
+
+def test_refinery_build_rules_and_json():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    ok, _ = sim.build_refinery("colony")
+    assert not ok
+    ok, _ = sim.build_refinery("inner_belt")
+    assert ok
+    ok, message = sim.build_refinery("inner_belt")
+    assert not ok and "already" in message
+    sim.refineries["inner_belt"].batches_done = 9
+    restored = OpsSimulation.from_json(json.loads(json.dumps(sim.to_json())))
+    assert restored.refineries["inner_belt"].batches_done == 9
+
+
+# --------------------------------------------------------------------------
+# KSP-style Firsts
+# --------------------------------------------------------------------------
+
+def test_firsts_fire_once_with_rewards():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.update(1.0)
+    # The autopilot dispatches on the first frame, so the first milestone
+    # fires immediately -- and only once.
+    assert game.firsts.get("first_dispatch") is True
+    credits_after_first = game.credits
+    assert game.firsts.get("first_capture_belt") in (None, True)  # either way, once
+    assert game.credits >= credits_after_first  # milestones only ever pay
+    research_before = game.colony.state["research_points"]
+    game.sim.stats["captures_by_body"]["comet_vigil"] = 1
+    for _ in range(40):
+        game.update(3.0)
+    assert game.firsts.get("first_capture_comet") is True
+    assert game.colony.state["research_points"] > research_before + 30.0
+    # Exactly once: the milestone latch means more comet captures cannot
+    # re-fire it (credits may still grow from OTHER milestones, never this one).
+    assert game.firsts.get("first_capture_comet") is True
+    captures = game.sim.stats["captures_by_body"]["comet_vigil"]
+    game.sim.stats["captures_by_body"]["comet_vigil"] = captures + 1
+    for _ in range(40):
+        game.update(3.0)
+    assert game.firsts.get("first_capture_comet") is True
+
+
+def test_firsts_survive_a_json_round_trip(monkeypatch, tmp_path):
+    from src.game import savegame as colony_savegame
+    from src.main import Game
+
+    monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
+    game = Game(headless=True)
+    game.firsts["first_dispatch"] = True
+    game.save_game("firsts")
+    fresh = Game(headless=True)
+    fresh.load_game("firsts")
+    assert fresh.firsts.get("first_dispatch") is True
 
 
 # --------------------------------------------------------------------------

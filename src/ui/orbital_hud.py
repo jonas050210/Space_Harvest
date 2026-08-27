@@ -290,7 +290,8 @@ class OrbitalHUD:
 
         depot_line = extra.get("depot_line", "")
         parts_hint = extra.get("parts_hint", "")
-        lines[7].text = "  ".join(filter(None, (depot_line, extra.get("depot_hint", ""), parts_hint)))
+        lines[7].text = "  ".join(filter(None, (depot_line, extra.get("depot_hint", ""),
+                                                extra.get("station_hint", ""), parts_hint)))
         lines[7].color = color.cyan if "No depots" not in depot_line else color.white
         summary = "  ".join(filter(None, (extra.get("rep_line", ""), extra.get("life_line", ""))))
         lines[6].text = summary

@@ -47,6 +47,7 @@ from src.config import (  # noqa: E402
     CREW_BOTANIST_WATER_SAVING,
     CREW_HIRE_COST,
     DEPOT_BUILD_COST,
+    FIRSTS,
     HULL_CRITICAL_PCT,
     PARTS_CATALOG,
     MARKET_BASE_PRICES,
@@ -137,6 +138,9 @@ class Game:
         self.settings = self._load_settings() if not headless else {
             "quality": "medium", "muted": False, "glide": True}
         self.toasts: list[tuple[float, str]] = []
+        # KSP-style one-shot milestones (see config.FIRSTS).
+        self.firsts: dict[str, bool] = {}
+        self._firsts_frame = 0
         self._window_fired_day: dict[str, float] = {}
         self._window_dep_day: dict[str, float] = {}
         self._camera_goal = None
@@ -284,6 +288,7 @@ class Game:
         self._tick_audio()
         self._tick_jump()
         self._tick_window_moments()
+        self._tick_firsts()
 
         if self.scene is not None:
             self.scene.update(self.sim)
@@ -376,6 +381,7 @@ class Game:
         self.credits = START_CREDITS
         self.credits_history = []
         self.toasts = []
+        self.firsts = {}
         self.deliveries_booked = 0
         self.screen = "play"
         self.paused = False
@@ -494,6 +500,7 @@ class Game:
             "auto_repair": self.auto_repair,
             "market": self.market.to_json(),
             "contracts": self.contracts.to_json(),
+            "firsts": dict(self.firsts),
             "colony": self.colony.state,
             "sim": self.sim.to_json(),
         }
@@ -510,6 +517,7 @@ class Game:
         self.auto_repair = bool(data.get("auto_repair", True))
         self.market = Market.from_json(data["market"])
         self.contracts = Contracts.from_json(data.get("contracts", {}), self.market)
+        self.firsts = {k: bool(v) for k, v in data.get("firsts", {}).items()}
         self.colony.state = data["colony"]
         self.sim = OpsSimulation.from_json(data["sim"])
         self.credits_history = []
@@ -549,10 +557,56 @@ class Game:
             "windows_board": self._windows_board,
             "depot_line": self._depot_hud_line(),
             "parts_hint": self._parts_hint_line(),
+            "station_hint": self._station_hint_line(),
             "depot_hint": self._depot_hint_line(),
             "tutorial": self.tutorial_text,
             "power_load": self.power_load,
         }
+
+    # -- "Firsts": one-shot milestones ------------------------------------------
+    def _first_conditions(self) -> dict:
+        """Read-only predicates for every milestone in config.FIRSTS."""
+        sim = self.sim
+        captures = sim.stats.get("captures_by_body", {})
+        return {
+            "first_dispatch": bool(sim.missions) or sim.stats["runs_completed"] >= 1,
+            "first_capture_belt": captures.get("inner_belt", 0) >= 1,
+            "first_capture_metallic": captures.get("metallic_belt", 0) >= 1,
+            "first_capture_deep": captures.get("deep_belt", 0) >= 1,
+            "first_capture_derelict": captures.get("derelict_zone", 0) >= 1,
+            "first_capture_aurelia": captures.get("gas_giant_orbit", 0) >= 1,
+            "first_capture_comet": captures.get("comet_vigil", 0) >= 1,
+            "first_depot": len(sim.depots) >= 1,
+            "first_refinery": len(sim.refineries) >= 1,
+            "first_drones": any(d.upgrades.get("drones", 0) >= 1 for d in sim.depots.values()),
+            "full_return_1": sim.stats.get("full_returns", 0) >= 1,
+            "full_return_10": sim.stats.get("full_returns", 0) >= 10,
+            "mass_2500": sim.stats["mass_delivered"] >= 2500.0,
+            "mass_10000": sim.stats["mass_delivered"] >= 10000.0,
+            "fleet_5": len(sim.ships) >= 5,
+            "rich_25k": self.credits >= 25_000.0,
+            "rich_100k": self.credits >= 100_000.0,
+            "thorite_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("thorite", 0.0) > 0.0,
+            "aurellium_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("aurellium", 0.0) > 0.0,
+        }
+
+    def _tick_firsts(self) -> None:
+        self._firsts_frame += 1
+        if self._firsts_frame % 30 != 1:  # a few times a second at most
+            return
+        conditions = self._first_conditions()
+        for key, label, credits, research in FIRSTS:
+            if self.firsts.get(key):
+                continue
+            if conditions.get(key):
+                self.firsts[key] = True
+                if credits:
+                    self.credits += credits
+                self.colony.state["research_points"] = float(
+                    self.colony.state.get("research_points", 0.0)) + research
+                self._play_alert("contract")
+                self.say(f"MILESTONE: {label}  (+{credits:,.0f} cr, +{research:.0f} RP)",
+                         seconds=9.0)
 
     def _update_windows_board(self) -> None:
         """Soonest-next launch windows across the whole network.
@@ -595,6 +649,17 @@ class Game:
         days_left = max(0.0, contract.deadline_day - self.market.day)
         return (f"Order: {contract.resource} {pct:.0f}% by {days_left:,.0f} d "
                 f"({contract.faction})")
+
+    def _station_hint_line(self) -> str:
+        if self.hud is None:
+            return ""
+        target = self.hud.selected_target()
+        hints = []
+        if target not in self.sim.depots:
+            hints.append("R depot")
+        if target not in self.sim.refineries:
+            hints.append("E refinery")
+        return "Build: " + "  ".join(hints) if hints else ""
 
     def _parts_hint_line(self) -> str:
         ship = self._best_part_ship()
@@ -834,6 +899,21 @@ class Game:
         self.credits -= price
         self._play_alert("build")
         self.say(f"{message} Bill {price:,.0f} cr.", seconds=7.0)
+
+    def build_refinery_selected(self) -> None:
+        """Build a smelting station at the selected body."""
+        target = self.hud.selected_target() if self.hud is not None else "metallic_belt"
+        cost = self.sim.refinery_upgrade_cost(target)
+        if self.credits < cost:
+            self.say(f"A refinery costs {cost:,.0f} cr; the treasury holds {self.credits:,.0f} cr.")
+            return
+        ok, message = self.sim.build_refinery(target)
+        if not ok:
+            self.say(message)
+            return
+        self.credits -= cost
+        self._play_alert("build")
+        self.say(f"{message} Bill: {cost:,.0f} cr. Waiting runs arrive refined.", seconds=8.0)
 
     def build_depot_selected(self) -> None:
         """Build (or upgrade) a refuel depot at the selected body.
@@ -1374,6 +1454,8 @@ def run_windowed() -> None:
             game.hire("botanist")
         elif key == "r":
             game.build_depot_selected()
+        elif key == "e":
+            game.build_refinery_selected()
         elif key == "t":
             game.buy_part("tank")
         elif key == "y":
