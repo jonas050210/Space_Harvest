@@ -46,6 +46,7 @@ from src.config import (  # noqa: E402
     CREW_BOTANIST_SAVING_CAP,
     CREW_BOTANIST_WATER_SAVING,
     CREW_HIRE_COST,
+    DEPOT_BUILD_COST,
     HULL_CRITICAL_PCT,
     MARKET_BASE_PRICES,
     REDISPATCH_SCAN_DAYS,
@@ -398,6 +399,8 @@ class Game:
             "pending_line": self._pending_hud_line(),
             "rep_line": self._reputation_hud_line(),
             "life_line": self._life_hud_line(),
+            "depot_line": self._depot_hud_line(),
+            "depot_hint": self._depot_hint_line(),
             "tutorial": self.tutorial_text,
             "power_load": self.power_load,
         }
@@ -422,6 +425,23 @@ class Game:
         days_left = max(0.0, contract.deadline_day - self.market.day)
         return (f"Order: {contract.resource} {pct:.0f}% by {days_left:,.0f} d "
                 f"({contract.faction})")
+
+    def _depot_hud_line(self) -> str:
+        if not self.sim.depots:
+            return "No depots (R builds one: 3,500 cr)"
+        parts = []
+        for key, depot in sorted(self.sim.depots.items()):
+            parts.append(f"{self.sim.bodies[key].name} L{depot.level} "
+                         f"{depot.fuel_ms / 1000:.1f}k/{depot.capacity / 1000:.0f}k")
+        return "Depots: " + "  ".join(parts)
+
+    def _depot_hint_line(self) -> str:
+        if self.hud is None:
+            return ""
+        target = self.hud.selected_target()
+        cost = self.sim.depot_upgrade_cost(target)
+        verb = "Upgrade" if target in self.sim.depots else "Build"
+        return f"{verb} depot at {self.sim.bodies[target].name}: {cost:,.0f} cr [R]"
 
     def _pending_hud_line(self) -> str:
         if not self.contracts.pending:
@@ -584,6 +604,26 @@ class Game:
                     f"-- standing {self.contracts.reputation[contract.faction]:+.0f}.",
                     seconds=8.0,
                 )
+
+    def build_depot_selected(self) -> None:
+        """Build (or upgrade) a refuel depot at the selected body.
+
+        Headless mode has no selection, so it defaults to the deep belt --
+        the depot site that unlocks the far network.
+        """
+        target = self.hud.selected_target() if self.hud is not None else "deep_belt"
+        cost = self.sim.depot_upgrade_cost(target)
+        if self.credits < cost:
+            self.say(f"A depot at {self.sim.bodies[target].name} costs {cost:,.0f} cr; "
+                     f"the treasury holds {self.credits:,.0f} cr.")
+            return
+        ok, message = self.sim.build_depot(target)
+        if not ok:
+            self.say(message)
+            return
+        self.credits -= cost
+        self._play_alert("build")
+        self.say(f"{message} Bill: {cost:,.0f} cr.", seconds=8.0)
 
     def accept_contract(self) -> None:
         """Accept the oldest posted offer."""
@@ -895,6 +935,11 @@ def run_headless(sim_days: float, frames_per_day: int = 4, verbose: bool = True,
                 if game.credits > price + 3000.0:
                     buy_index += 1
                     game.buy_ship_class(cls_key)
+        # A deep-belt depot unlocks the far network for the whole fleet.
+        depot_cost = game.sim.depot_upgrade_cost("deep_belt")
+        depot_level = game.sim.depots["deep_belt"].level if "deep_belt" in game.sim.depots else 0
+        if depot_level < 2 and game.credits > depot_cost + 6000.0:
+            game.build_depot_selected()
 
     if verbose:
         print(f"[headless] {game.frames} frames over {sim_days:,.0f} sim-days")
@@ -929,7 +974,7 @@ def _setup_audio(game: "Game") -> None:
         os.makedirs(directory, exist_ok=True)
         audio = {"hum": Audio(make_hum_wav(os.path.join(directory, "hum.wav")),
                               loop=True, autoplay=True)}
-        for kind in ("flare", "hull", "shortage", "contract"):
+        for kind in ("flare", "hull", "shortage", "contract", "build"):
             audio[kind] = Audio(make_alert_wav(kind, os.path.join(directory, f"{kind}.wav")),
                                 autoplay=False)
         game.audio = audio
@@ -1002,6 +1047,8 @@ def run_windowed() -> None:
             game.fire_worst_morale()
         elif key == "z":
             game.hire("botanist")
+        elif key == "r":
+            game.build_depot_selected()
         elif key == "n":
             game.toggle_mute()
         elif key == "scroll up":

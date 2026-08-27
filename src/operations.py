@@ -39,6 +39,12 @@ import numpy as np
 from .config import (
     CREW_BOTANIST_SAVING_CAP,
     CREW_BOTANIST_WATER_SAVING,
+    DEPOT_BUILD_COST,
+    DEPOT_CAPACITY_PER_LEVEL,
+    DEPOT_GENERATION_PER_LEVEL,
+    DEPOT_START_FUEL,
+    DEPOT_UPGRADE_COST,
+    DEPOT_UPGRADE_COST_GROWTH,
     CREW_ENGINEER_REPAIR_BONUS,
     CREW_FATIGUE_EXHAUSTED,
     CREW_FIRE_MORALE_HIT,
@@ -105,6 +111,40 @@ from .simulation.orbital_sim import Delivery, Leg, LogEntry, Mission, OrbitalSim
 
 
 @dataclass
+class Depot:
+    """A player-built refuel station at a trade body.
+
+    The tank stores propellant measured in delta-v (m/s) -- the same currency
+    the ships burn -- and an ISRU plant slowly cracks local ice into more.
+    """
+
+    body_key: str
+    level: int = 1
+    fuel_ms: float = DEPOT_START_FUEL
+
+    @property
+    def capacity(self) -> float:
+        return DEPOT_CAPACITY_PER_LEVEL * self.level
+
+    @property
+    def generation_per_day(self) -> float:
+        return DEPOT_GENERATION_PER_LEVEL * self.level
+
+    @property
+    def upgrade_cost(self) -> float:
+        return DEPOT_UPGRADE_COST * DEPOT_UPGRADE_COST_GROWTH ** (self.level - 1)
+
+    def to_json(self) -> dict:
+        return {"body_key": self.body_key, "level": self.level,
+                "fuel_ms": self.fuel_ms}
+
+    @classmethod
+    def from_json(cls, data: dict) -> "Depot":
+        return cls(body_key=data["body_key"], level=int(data.get("level", 1)),
+                   fuel_ms=float(data.get("fuel_ms", 0.0)))
+
+
+@dataclass
 class CrewMember:
     """One named crew member aboard a colony ship."""
 
@@ -150,6 +190,8 @@ class OpsSimulation(OrbitalSimulation):
         self.rng = random.Random(seed ^ 0x5EED)
         #: ship name -> roster of CrewMember
         self.crew: dict[str, list[CrewMember]] = {}
+        #: body key -> refuel depot (player-built)
+        self.depots: dict[str, Depot] = {}
         #: colony-side botanists (they work the hydroponics racks, not ships)
         self.botanists = 0
         # Gravitational perturbation clock: this sim owns its own body table,
@@ -280,6 +322,33 @@ class OpsSimulation(OrbitalSimulation):
         return restored, spent
 
     # -- mining-aware dispatch ----------------------------------------------
+    def _depot_bond(self, ship: Ship, target_key: str) -> float:
+        """Delta-v loan a depot at ``target_key`` can back, or 0.
+
+        Conditions: the ship can reach the target on its own tank (outbound
+        window total fits), and the depot tank holds enough to cover the ride
+        home that the ship cannot pay for itself.
+        """
+        depot = self.depots.get(target_key)
+        if depot is None:
+            return 0.0
+        outbound = self.launch_window(ship.origin, target_key)
+        if outbound is None:
+            return 0.0
+        _, return_window = self.plan_round_trip(ship.origin, target_key, max_age=None)
+        if return_window is None:
+            return 0.0
+        out_cost = self.delta_v_km_s(outbound.total_delta_v) * 1000.0
+        back_cost = self.delta_v_km_s(return_window.total_delta_v) * 1000.0
+        if out_cost > ship.delta_v:
+            return 0.0
+        shortfall = back_cost - (ship.delta_v - out_cost)
+        if shortfall <= 0.0:
+            return 0.0
+        if depot.fuel_ms < shortfall:
+            return 0.0
+        return shortfall
+
     def dispatch(self, ship: Ship, target_key: str, cargo: dict[str, float] | None = None) -> tuple[bool, str]:
         if self.hull.get(ship.name, HULL_MAX_PCT) < self.hull_critical_pct:
             return False, (
@@ -309,6 +378,29 @@ class OpsSimulation(OrbitalSimulation):
                     f"The veins at {self.bodies[target_key].name} are worked out; "
                     "the field needs years to recover."
                 )
+            bond = self._depot_bond(ship, target_key)
+            if bond > 0.0:
+                # Depot-assisted run: lend the ship the delta-v it will be
+                # granted at the depot so the round-trip check passes, then
+                # take the loan back -- the ride home comes from the depot
+                # tank while the ship waits for the return window.
+                ship.delta_v += bond
+                try:
+                    ok, message = super().dispatch(ship, target_key, cargo=payload)
+                finally:
+                    ship.delta_v -= bond
+                if ok:
+                    depot = self.depots[target_key]
+                    self.note(
+                        f"{ship.name} plans a depot-supported run to "
+                        f"{self.bodies[target_key].name} "
+                        f"({depot.fuel_ms:,.0f} m/s in the tank)."
+                    )
+                    slot = self.reserved.setdefault(target_key, {})
+                    for ore, tonnes in payload.items():
+                        slot[ore] = slot.get(ore, 0.0) + tonnes
+                    self._inflight[ship.name] = (target_key, dict(payload))
+                return ok, message
             ok, message = super().dispatch(ship, target_key, cargo=payload)
             if ok:
                 slot = self.reserved.setdefault(target_key, {})
@@ -337,6 +429,56 @@ class OpsSimulation(OrbitalSimulation):
 
     def recover_mines(self, dt_days: float) -> None:
         self.ledger.recover(dt_days, MINING_RECOVERY_TAU_DAYS)
+
+    # -- refuel depots ---------------------------------------------------------
+    def build_depot(self, body_key: str) -> tuple[bool, str]:
+        """Raise a depot at ``body_key`` (caller pays the credits)."""
+        if body_key not in TRADE_TARGETS:
+            return False, "Pick a trade body to build at."
+        if body_key in self.depots:
+            depot = self.depots[body_key]
+            depot.level += 1
+            self.note(f"Depot at {self.bodies[body_key].name} upgraded to level {depot.level}.")
+            return True, (f"Depot upgraded to level {depot.level} "
+                          f"(+{DEPOT_GENERATION_PER_LEVEL:.0f} m/s per day).")
+        self.depots[body_key] = Depot(body_key=body_key)
+        self.note(f"Refuel depot online at {self.bodies[body_key].name}.")
+        return True, f"Depot online at {self.bodies[body_key].name}."
+
+    def depot_upgrade_cost(self, body_key: str) -> float:
+        depot = self.depots.get(body_key)
+        if depot is None:
+            return DEPOT_BUILD_COST
+        return depot.upgrade_cost
+
+    def tick_depots(self, dt_days: float) -> None:
+        """ISRU plants crack local ice into propellant."""
+        if dt_days <= 0.0:
+            return
+        for depot in self.depots.values():
+            depot.fuel_ms = min(depot.capacity, depot.fuel_ms + depot.generation_per_day * dt_days)
+
+    def _depot_refuel_waiting(self, dt_days: float) -> float:
+        """Top up ships holding at a depot body; returns m/s transferred."""
+        granted = 0.0
+        for ship in self.ships:
+            mission = self.missions.get(ship.name)
+            if mission is None or mission.leg is not Leg.WAITING:
+                continue
+            depot = self.depots.get(mission.target)
+            if depot is None:
+                continue
+            headroom = self.class_spec(ship.name)["delta_v"] - ship.delta_v
+            if headroom <= 0.0:
+                continue
+            draw = min(headroom, depot.fuel_ms,
+                       self.class_spec(ship.name)["refuel_rate"] * dt_days)
+            if draw <= 0.0:
+                continue
+            ship.delta_v += draw
+            depot.fuel_ms -= draw
+            granted += draw
+        return granted
 
     # -- crew ----------------------------------------------------------------
     def crew_stats(self, ship_name: str) -> tuple[float, float]:
@@ -639,6 +781,8 @@ class OpsSimulation(OrbitalSimulation):
         self.tick_weather(dt_days)
         self.tick_crew(dt_days)
         self.tick_perturbations(dt_days)
+        self.tick_depots(dt_days)
+        self._depot_refuel_waiting(dt_days)
         return entries
 
     # -- mission hooks (wear, depletion, incidents) --------------------------
@@ -656,7 +800,37 @@ class OpsSimulation(OrbitalSimulation):
         self._apply_wear(ship, spent * (1.0 - self.pilots_discount(ship.name)))
         self.last_active[ship.name] = self.time
 
+    def _depot_topup_on_arrival(self, ship: Ship, mission: Mission) -> None:
+        """Docking at a depot body: draw the ride home from its tank.
+
+        The base class checks return-leg affordability at the capture instant,
+        so the fuel the ship needs has to be in its tank *before* that check
+        runs -- this is the gas-station stop, not a trickle.
+        """
+        depot = self.depots.get(mission.target)
+        if depot is None or mission.return_window is None:
+            return
+        target = self.bodies[mission.target]
+        _, v_target = window_solver.body_state(target.elements, MU_SUN, self.time)
+        _, v_ship = ship.state_at(self.time)
+        dv_match_ms = self.delta_v_km_s(float(np.linalg.norm(v_ship - v_target))) * 1000.0
+        if dv_match_ms > ship.delta_v:
+            return  # the capture itself will fail; nothing to service yet
+        need = self.delta_v_km_s(mission.return_window.total_delta_v) * 1000.0
+        shortfall = max(0.0, need - (ship.delta_v - dv_match_ms))
+        headroom = self.class_spec(ship.name)["delta_v"] - ship.delta_v
+        draw = min(headroom, depot.fuel_ms, shortfall + 2000.0)
+        if draw > 0.0:
+            ship.delta_v += draw
+            depot.fuel_ms -= draw
+            self.note(
+                f"{ship.name} refuels at the {self.bodies[mission.target].name} depot "
+                f"(+{draw:,.0f} m/s, {depot.fuel_ms:,.0f} m/s left)."
+            )
+
     def _capture(self, ship: Ship, mission: Mission, target) -> None:
+        if mission.leg is Leg.OUTBOUND:
+            self._depot_topup_on_arrival(ship, mission)
         inflight = self._inflight.pop(ship.name, None)
         before = ship.delta_v
         super()._capture(ship, mission, target)
@@ -796,6 +970,7 @@ class OpsSimulation(OrbitalSimulation):
             "inflight": {name: [body, payload] for name, (body, payload) in self._inflight.items()},
             "crew": {name: [member.to_json() for member in roster]
                      for name, roster in self.crew.items()},
+            "depots": [depot.to_json() for depot in self.depots.values()],
             "botanists": self.botanists,
             "perturb_timer": self._perturb_timer,
             "body_overrides": {
@@ -846,6 +1021,7 @@ class OpsSimulation(OrbitalSimulation):
         sim._multi_rev_min_saving = PLANNING_MULTI_REV_MIN_SAVING
         sim.crew = {}
         sim.last_active = {}
+        sim.depots = {d["body_key"]: Depot.from_json(d) for d in data.get("depots", [])}
         sim.botanists = int(data.get("botanists", 0))
         sim._perturb_timer = float(data.get("perturb_timer",
                                             PERTURB_MIN_INTERVAL_DAYS * SIM_SECONDS_PER_DAY))

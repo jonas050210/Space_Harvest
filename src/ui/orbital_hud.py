@@ -85,7 +85,7 @@ class OrbitalHUD:
         self.ops_lines = [
             Text(text="", parent=camera.ui, position=(0.485, 0.055 - i * 0.026, -0.1),
                  scale=0.62, origin=(-0.5, 0))
-            for i in range(7)
+            for i in range(8)
         ]
         self.tutorial = Text(text="", parent=camera.ui, position=(0.0, -0.42, -0.1),
                              scale=0.55, color=color.rgba(0.55, 0.9, 1.0, 0.95),
@@ -221,6 +221,9 @@ class OrbitalHUD:
             lines[5].text = f"{lines[5].text}  |  {pending_line}"
             lines[5].color = color.orange
 
+        depot_line = extra.get("depot_line", "")
+        lines[7].text = "  ".join(filter(None, (depot_line, extra.get("depot_hint", ""))))
+        lines[7].color = color.cyan if "No depots" not in depot_line else color.white
         summary = "  ".join(filter(None, (extra.get("rep_line", ""), extra.get("life_line", ""))))
         lines[6].text = summary
         if "ALERT" in summary:

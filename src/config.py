@@ -259,6 +259,19 @@ LIFE_SHORTAGE_MORALE_DRAIN_PER_DAY = 3.0
 LIFE_SOLAR_ENERGY_PER_DAY = 1.5
 
 
+# --- refuel depots -----------------------------------------------------------
+# Player-built stations at trade bodies. A depot makes its own propellant from
+# local ice (ISRU flavour), so ships can top up far from home and fly deep
+# runs that a round trip from the colony could never afford. Dispatch counts
+# depot stock as the ride home; the ship refuels while it waits for the
+# return window.
+DEPOT_BUILD_COST = 3500.0          # credits
+DEPOT_UPGRADE_COST = 2600.0        # multiplied by 1.6^(level - 1)
+DEPOT_CAPACITY_PER_LEVEL = 22000.0  # m/s of stored delta-v per level
+DEPOT_GENERATION_PER_LEVEL = 7.0    # m/s per day produced per level
+DEPOT_START_FUEL = 9000.0           # m/s in the tank when it comes online
+DEPOT_UPGRADE_COST_GROWTH = 1.6
+
 # --- multi-revolution planning -------------------------------------------------
 # The window solver can consider transfers with extra full revolutions (slow
 # routes). Izzo multi-rev branches only replace the single-rev plan when they

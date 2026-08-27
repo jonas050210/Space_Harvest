@@ -894,6 +894,92 @@ def test_planning_knobs_survive_a_json_round_trip():
 
 
 # --------------------------------------------------------------------------
+# Refuel depots
+# --------------------------------------------------------------------------
+
+def test_depot_enables_a_run_the_ship_cannot_afford_alone():
+    from src.config import SIM_SECONDS_PER_DAY
+
+    sim = OpsSimulation(ship_names=("Hauler",), ship_classes={"Hauler": "hauler"})
+    rt_cost = sim.round_trip_cost_ms("colony", "deep_belt")
+    assert rt_cost is not None and rt_cost > sim.ships[0].delta_v  # beyond the tank
+    ok, _ = sim.dispatch(sim.ships[0], "deep_belt")
+    assert not ok
+    sim.build_depot("deep_belt")
+    ok, _ = sim.dispatch(sim.ships[0], "deep_belt")
+    assert ok
+    # The bond is a loan: the visible tank must show the real propellant.
+    assert sim.ships[0].delta_v == SHIP_CLASSES["hauler"]["delta_v"]
+    for _ in range(6000):
+        sim.step(3.0)
+        if not sim.missions:
+            break
+    report = sim.ship_report(sim.ships[0])
+    assert report["at_key"] == "colony"  # made it home on the depot top-up
+
+
+def test_depot_refuses_to_back_a_run_when_the_tank_is_short():
+    sim = OpsSimulation(ship_names=("Hauler",), ship_classes={"Hauler": "hauler"})
+    sim.build_depot("deep_belt")
+    sim.depots["deep_belt"].fuel_ms = 100.0  # not enough for the ride home
+    ok, _ = sim.dispatch(sim.ships[0], "deep_belt")
+    assert not ok
+
+
+def test_depot_generation_refills_and_clips_at_capacity():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim.build_depot("metallic_belt")
+    depot = sim.depots["metallic_belt"]
+    depot.fuel_ms = 0.0
+    for _ in range(100):
+        sim.tick_depots(1.0)
+    assert 0.0 < depot.fuel_ms <= depot.capacity
+    depot.fuel_ms = depot.capacity
+    for _ in range(50):
+        sim.tick_depots(1.0)
+    assert depot.fuel_ms == depot.capacity
+
+
+def test_depot_upgrade_scales_level_and_cost():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    assert sim.depot_upgrade_cost("inner_belt") == 3500.0
+    sim.build_depot("inner_belt")
+    assert sim.depots["inner_belt"].level == 1
+    first_upgrade = sim.depot_upgrade_cost("inner_belt")
+    sim.build_depot("inner_belt")
+    assert sim.depots["inner_belt"].level == 2
+    assert sim.depot_upgrade_cost("inner_belt") > first_upgrade
+    ok, _ = sim.build_depot("colony")
+    assert not ok  # the colony is not a trade target
+
+
+def test_depots_survive_a_json_round_trip():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim.build_depot("deep_belt")
+    sim.depots["deep_belt"].fuel_ms = 12345.0
+    sim.depots["deep_belt"].level = 2
+    restored = OpsSimulation.from_json(json.loads(json.dumps(sim.to_json())))
+    assert restored.depots["deep_belt"].fuel_ms == pytest.approx(12345.0)
+    assert restored.depots["deep_belt"].level == 2
+
+
+def test_game_build_depot_pays_and_reports():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.update(1.0)  # ensures the HUD target feed exists
+    game.credits = 4000.0
+    game.build_depot_selected()
+    assert game.credits == pytest.approx(4000.0 - 3500.0)
+    assert len(game.sim.depots) == 1
+    broke = Game(headless=True)
+    broke.credits = 10.0
+    broke.update(1.0)
+    broke.build_depot_selected()
+    assert not broke.sim.depots
+
+
+# --------------------------------------------------------------------------
 # The whole vertical slice through the real Game loop
 # --------------------------------------------------------------------------
 
