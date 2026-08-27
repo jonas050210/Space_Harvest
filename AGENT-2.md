@@ -1,70 +1,52 @@
-# AGENT 2 — continuation prompt (part 2 of 3)
+# AGENT 2 PROMPT — copy everything below the line into a fresh AI session
 
-You are the SECOND of three agents building "Asteroid Colony Proto — orbital
-supply chains". Agent 1 finished the physics, mission simulation, rendering,
-HUD and economy bridge; all of it is verified (`pytest tests/ -q` = 43 passed,
-upstream `test_overall.py` = 25 passed — both must stay green after your
-changes). **Read `project.md` completely before touching anything**,
-especially §0 (budget rule), §3 (units) and §5 (pitfall list).
+You are agent 2 of 4 building "Asteroid Colony Proto — orbital supply chains".
+Agent 1's finished, tested work lives in the GitHub repo
+https://github.com/jonas050210/asteroid-colony-proto (public). The folder you
+are in contains ONLY markdown; the code is in the repo.
 
-## Setup
+## Start
 
 ```bash
-cd asteroid-colony-proto
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest tests/ -q
+git clone https://github.com/jonas050210/asteroid-colony-proto.git work
+cd work
+python3 -m venv .venv            # ONLY here, never at the home root (budget!)
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m pytest tests/ -q        # expect 43 passed
 ```
 
-## Your part (finish ALL of it, then stop; agent 3 finishes the rest)
+Read `project.md` COMPLETELY first — §3 units (AU, mu=4pi^2, 4.7405 km/s per
+AU/yr) and §5 pitfall list are mandatory. Never modify `src/game/` (upstream
+`test_overall.py` must stay 25/25).
 
-1. **Transfer-arc + porkchop visuals**
-   - Render the active ship's current conic and its planned return arc as
-     line meshes (sample with `elements.propagate_elements` or
-     `kepler.universal_kepler`; reuse `OrbitLine`).
-   - Add an in-game porkchop panel: `sim.porkchop(origin, target)` already
-     returns `{depart, tof, dv, best}`; draw it as a coloured quad grid on the
-     HUD (matplotlib is optional for `scripts/plot_porkchop.py` only).
-   - Mark the selected window's departure date on the HUD clock.
+## Your part — do ALL of it, verify, commit, push if you have credentials,
+otherwise leave commits for the next agent
 
-2. **Save / load the orbital state**
-   - Serialise ships (r, v, epoch, delta_v, cargo), missions and `sim.time`
-     through the upstream `src/game/savegame.py` (keys `S`/`L` in the old
-     game; add bindings here). Add a test: save → mutate → load → identical.
+1. Transfer visuals: draw each flying ship's current conic AND its planned
+   return arc as `Mesh(mode="line")` strips; show the chosen window's
+   departure date on the HUD. Add an in-game porkchop panel from
+   `sim.porkchop(origin, target)` (`{depart, tof, dv, best}`), coloured quads,
+   matplotlib only in `scripts/`.
+2. Save/load the orbital state (ships r/v/epoch/delta_v/cargo, missions,
+   sim.time) through `src/game/savegame.py`; keys S/L; round-trip test.
+3. Economy depth: price deliveries with `config.REGION_ECONOMY` trade_value;
+   surface one premium contract from `game.contracts` on the HUD and pay it on
+   matching delivery.
+4. Optional AI-Vision scan bonus: if `mediapipe`+`opencv-python-headless`
+   import, analyse a rendered body texture while a ship is WAITING there and
+   grant bonus research; otherwise log and continue. Never download weights
+   (vendor/ai-vision is code-only), never crash on missing deps.
+5. Multi-revolution Lambert (M>0, Izzo) in `src/maths/`; offer "slow
+   freighter" plans (cheaper, longer) in the transfer plan; verify solutions
+   by propagating them to the target exactly like the existing Lambert tests.
 
-3. **Demand pricing & trade contracts**
-   - Use `game.config.REGION_ECONOMY` trade_value multipliers to price
-     deliveries per destination; credit credits/research accordingly in
-     `Colony.receive`.
-   - Surface one active premium contract (upstream `contracts.py`) on the HUD
-     and pay it when a delivery matches its cargo.
+## Definition of done (run every one, paste outputs into run-log.txt)
 
-4. **AI-Vision-Lab scan bonus (optional integration, must degrade gracefully)**
-   - `vendor/ai-vision` is CODE ONLY. If `mediapipe`/`opencv-python-headless`
-     import successfully, run `app/vision` analysis on a rendered body texture
-     while a scout-holding ship WAITING at a body and grant bonus research;
-     otherwise log "vision unavailable" and continue. **Never** download model
-     weights; **never** let a missing dependency crash the game.
-
-5. **Multi-revolution Lambert (M>0)**
-   - Extend `src/maths/transfers.py` or `windows.py` with the M>0 branch of
-     Izzo's solver; offer "slow freighter" plans that trade time for delta-v
-     (show both options in the transfer plan). Verify by propagating solutions
-     to the target exactly like the existing Lambert tests do.
-
-6. **Tests & verification (mandatory)**
-   - New tests for every feature above (save/load round trip, contract pay-out,
-     M>0 arrival check, pricing sanity).
-   - Run: `pytest tests/ -q`, upstream `test_overall.py`,
-     `python -m src.main --headless --sim-days 4000`,
-     and one `scripts/capture_frame.py` run under xvfb.
-   - Append all outputs to `run-log.txt`.
-
-## Rules
-
-* Budget: venv only at `.venv`; no new binary assets > 1 MB; keep total
-  workspace far below 128 MB / 10 k files (currently ~7 MB).
-* Do not modify `src/game/` (upstream must stay pristine).
-* Update `project.md` §4/§7 with what you completed and any NEW pitfalls.
-* Finish by writing `AGENT-2-DONE.md` (one screen: what changed, test counts,
-  run-log deltas) and regenerating the phase zip:
-  `zip -qr asteroid-colony-proto-phase2.zip . -x "*.zip" -x "*/.venv/*" -x "*__pycache__*"`.
+* `.venv/bin/python -m pytest tests/ -q` all green (old 43 + your new tests).
+* `vendor/asteroid-colony-upstream` `test_overall.py` 25/25.
+* `python -m src.main --headless --sim-days 4000` finishes, fleet solvent.
+* One `scripts/capture_frame.py` run under
+  `xvfb-run -a --server-args="-screen 0 1920x1200x24"` writes screenshots.
+* Workspace stays < 128 MB / 10 k files; venv only at `.venv`; prune
+  `__pycache__` before finishing; append a `AGENT-2-DONE.md` summary; update
+  `project.md` §4 with what you completed and new pitfalls in §5.

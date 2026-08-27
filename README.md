@@ -9,6 +9,7 @@ controls, verification numbers, pitfall list, remaining work).
 Hand-off prompts for the next agents: `AGENT-2.md`, `AGENT-3.md`.
 
 ```bash
+git clone https://github.com/jonas050210/asteroid-colony-proto.git && cd asteroid-colony-proto
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # venv ONLY here, see project.md §0
 .venv/bin/python -m pytest tests/ -q                # 43 passed
 .venv/bin/python -m src.main --headless --sim-days 3000

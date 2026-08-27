@@ -1,9 +1,13 @@
 # ASTEROID-COLONY PROTO — PROJECT MD (everything in one file)
 
-Master document for the 3-agent build of **"Asteroid-Colony Tycoon with
-orbital supply chains"**. Read this FIRST, whatever else you do. The two
-follow-up prompts are `AGENT-2.md` and `AGENT-3.md`; the work already done
-(agent 1) is the code in `src/` + `tests/`.
+Master document for the multi-agent build of **"Asteroid-Colony Tycoon with
+orbital supply chains"**. Read this FIRST, whatever else you do.
+
+**Where the code is:** the canonical tree lives at
+https://github.com/jonas050210/asteroid-colony-proto (public). The owner's
+workspace intentionally holds ONLY these markdown files, so every agent
+clones first. Prompts: `AGENT-2.md`, `AGENT-3.md`, and `AGENT-FINAL.md`
+(the closer who tests/fixes/answers everything).
 
 Owner's GitHub: `jonas050210` (repos `asteroid-colony`, `AI-Vision-Lab`).
 Target PC: i7-12700F / 32 GB / RTX 4060 Ti 8 GB.

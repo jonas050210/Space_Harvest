@@ -1,64 +1,39 @@
-# AGENT 3 — final continuation prompt (part 3 of 3, "does the rest")
+# AGENT 3 PROMPT — copy everything below the line into a fresh AI session
 
-You are the LAST of three agents. Agents 1-2 built and extended the prototype
-(see `project.md` §4 and `AGENT-2-DONE.md` if present). Everything must be
-green before you start: `pytest tests/ -q`, upstream `test_overall.py`,
-headless run, xvfb render. **Read `project.md` first** (§0 budget rule,
-§3 units, §5 pitfalls).
+You are agent 3 of 4 on "Asteroid Colony Proto — orbital supply chains".
+Code: https://github.com/jonas050210/asteroid-colony-proto (clone it; your
+folder has only markdown). Read `project.md` first (§0 budget, §3 units,
+§5 pitfalls). `AGENT-2-DONE.md` may exist — if it does, agent 2's features
+are already in the repo; build on them, don't redo them.
 
-## Setup
+## Start
 
 ```bash
-cd asteroid-colony-proto
+git clone https://github.com/jonas050210/asteroid-colony-proto.git work && cd work
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python -m pytest tests/ -q
 ```
 
-## Your part = "the rest". Finish the prototype and ship it.
+## Your part
 
-1. **Balance & QA pass**
-   - Play-test via `--headless` sweeps (3000/6000/12000 sim-days, both ships):
-     tune `SHIP_REFUEL_RATE`, `SHIP_START_DELTA_V`, storage so no destination
-     is unreachable and the fleet rarely strands by accident.
-   - Keep the intentional stranding failure mode reachable but rare.
-   - Record before/after numbers in `run-log.txt`.
+1. Balance pass: headless sweeps (3k/6k/12k sim-days, two ships); tune
+   `SHIP_REFUEL_RATE`, `SHIP_START_DELTA_V`, storage so every destination is
+   reachable and accidental stranding is rare (the intentional dry-tank
+   failure mode must stay). Record before/after in run-log.txt.
+2. `RUN_ON_WINDOWS.md` for the owner's PC (i7-12700F/RTX 4060 Ti): Python 3.11,
+   venv, `python -m src.main`, OpenAL warnings harmless, no xvfb needed.
+3. Visuals: improve `src/utils/procedural.py` shading (normal-ish relief,
+   banding variety). Poly Haven 403s bots — procedural stays unless a human
+   downloads CC0 textures; no blobs > 1 MB.
+4. Packaging: `pyinstaller --onefile --add-data "assets:assets"
+   -n colony-proto -m src/main.py`; verify the exe via its `--headless` mode;
+   document the Windows build command.
+5. Docs: fold leftovers into project.md; keep root md set small
+   (README, project, AGENT-*, RUN_ON_WINDOWS); refresh logs evidence.
 
-2. **Owner-machine notes (RTX 4060 Ti, Windows)**
-   - Write `RUN_ON_WINDOWS.md`: Python 3.11 install, venv, `python -m src.main`,
-     expected warp/FPS behaviour, how to use xvfb-equivalent (not needed on
-     Windows), troubleshooting (OpenAL warnings are harmless).
+## Definition of done
 
-3. **Real textures (best effort)**
-   - Poly Haven blocked automated downloads (403). If a browser download is
-     possible for the owner, document it; otherwise improve
-     `utils/procedural.py` (bump maps / normal shading) — no binary blobs >1 MB.
-
-4. **Single-exe packaging**
-   - `pyinstaller --onefile --add-data "assets:assets" -n colony-proto -m src/main.py`
-     (see README). Verify the exe boots via its `--headless` mode in the
-     sandbox; document the Windows build command.
-
-5. **Docs & evidence refresh**
-   - Fold any leftover docs into `project.md`; keep root markdowns to
-     README.md, project.md, AGENT-*.md, RUN_ON_WINDOWS.md.
-   - Regenerate `logs/` screenshots + porkchop, extend `run-log.txt`.
-
-6. **GitHub upload (the owner asked for this)**
-   - The sandbox has NO GitHub credentials. Do not look for tokens in files.
-   - Prepare: `git init`, commit everything except `.venv/`, `logs/*.png`,
-     `*.zip` (mirror `.gitignore`), tag `phase-3-final`.
-   - Then either (a) the owner supplies a fine-grained PAT with `repo` scope
-     for repo `jonas050210/asteroid-colony-proto` — push once, do not store it;
-     or (b) leave `PUSH-INSTRUCTIONS.md` with the two commands to run on the
-     owner's PC (`git remote add origin …; git push -u origin main`).
-   - Also refresh `asteroid-colony-proto-final.zip` as the transfer artifact.
-
-7. **Final report**
-   - `FINAL-REPORT.md`: feature matrix vs the original prompt's §2.5 list,
-     all test counts, run-log excerpts, size/file-count of the workspace
-     (must be < 128 MB / 10 k files), and the exact GitHub state.
-
-## Rules
-
-* Same budget rule as everyone: venv only at `.venv`; prune caches before
-  finishing (`find . -name __pycache__ -prune -exec rm -rf {} +`).
-* `src/game/` stays pristine; upstream tests stay green.
+* pytest + upstream 25/25 + headless sweep + xvfb screenshot, outputs appended
+  to run-log.txt; workspace < 128 MB / 10 k files; caches pruned;
+  `AGENT-3-DONE.md` summary; project.md §4/§5 updated. Commit (push if you
+  have credentials, else leave commits).
