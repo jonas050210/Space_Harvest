@@ -317,3 +317,76 @@ def test_ops_json_round_trip_and_continued_determinism():
     for live, loaded in zip(sim.ships, restored.ships):
         assert live.r == pytest.approx(loaded.r, abs=1e-12)
         assert live.v == pytest.approx(loaded.v, abs=1e-12)
+
+
+# --------------------------------------------------------------------------
+# The whole vertical slice through the real Game loop
+# --------------------------------------------------------------------------
+
+def test_vertical_slice_mine_deliver_sell_buy():
+    from src.config import START_CREDITS
+    from src.main import Game
+
+    game = Game(headless=True)
+    assert game.credits == START_CREDITS
+    game.sim.dispatch(game.sim.ships[0], "inner_belt")
+    game.sim.dispatch(game.sim.ships[1], "metallic_belt")
+    for _ in range(700):
+        game.update(3.0)
+
+    assert game.deliveries_booked >= 2
+    assert game.colony.summary()["used"] > 100.0
+    assert game.sim.stats["ore_mined_t"] > 0.0
+
+    # Sell the holds: the treasury must respond.
+    treasury_before = game.credits
+    game.sell_all()
+    assert game.credits > treasury_before + 1000.0
+    # Selling drained the marketable stock.
+    resources = game.colony.state["resources"]
+    assert resources["iron"] < 1.0 and resources["silver"] < 1.0
+
+    # Reinvest: a purchased scout joins the fleet and pays the bill.
+    fleet_before = len(game.sim.ships)
+    game.credits = 10_000.0
+    game.buy_ship_class("scout")
+    assert len(game.sim.ships) == fleet_before + 1
+    assert game.credits == pytest.approx(10_000.0 - SHIP_CLASSES["scout"]["price"])
+    assert game.buy_ship_class is not None
+
+
+def test_game_save_and_load_round_trip(monkeypatch, tmp_path):
+    from src.game import savegame as colony_savegame
+    from src.main import Game
+
+    monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
+    game = Game(headless=True)
+    game.sim.dispatch(game.sim.ships[0], "inner_belt")
+    for _ in range(80):
+        game.update(3.0)
+
+    saved_credits = game.credits
+    saved_time = game.sim.time
+    saved_price = game.market.price("iron")
+    saved_ledger = json.loads(json.dumps(game.sim.ledger.to_json()))
+    game.save_game("test")
+
+    # Diverge hard after the save.
+    game.credits = 1.0
+    game.sell_all()
+    game.sim.hull["Kestrel"] = 7.0
+    for _ in range(30):
+        game.update(3.0)
+    assert game.sim.time > saved_time + 30.0 * SIM_SECONDS_PER_DAY
+
+    game.load_game("test")
+    assert game.credits == pytest.approx(saved_credits)
+    assert game.sim.time == pytest.approx(saved_time)
+    assert game.market.price("iron") == pytest.approx(saved_price)
+    assert game.sim.ledger.to_json() == saved_ledger
+
+    # The loaded game keeps flying the mission it was saved in the middle of.
+    deliveries_before = game.deliveries_booked
+    for _ in range(700):
+        game.update(3.0)
+    assert game.deliveries_booked > deliveries_before

@@ -24,18 +24,30 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config import (  # noqa: E402
+    MARKET_BASE_PRICES,
     REDISPATCH_SCAN_DAYS,
+    SHIP_CLASSES,
     SHIP_REFUEL_ENERGY_PER_MS,
+    START_CREDITS,
     WINDOW_SIZE,
     WINDOW_TITLE,
 )
 from src.simulation.bodies import TRADE_TARGETS  # noqa: E402
 from src.config import SIM_SECONDS_PER_DAY  # noqa: E402
+from src.mining import assay_lines  # noqa: E402
+from src.market import Market  # noqa: E402
+from src.operations import OpsSimulation  # noqa: E402
 from src.simulation.orbital_sim import OrbitalSimulation  # noqa: E402
 
-# The vendored upstream game provides the colony economy.
+# The vendored upstream game provides the colony economy -- and its JSON
+# savegame slots are reused verbatim for the orbital layer's saves.
 from src.game import logistics as colony_logistics  # noqa: E402
+from src.game import savegame as colony_savegame  # noqa: E402
 from src.game import state as colony_state  # noqa: E402
+
+BUY_MENU = ("scout", "freighter", "refinery", "hauler")
+CREDITS_HISTORY_POINTS = 240
+CREDITS_HISTORY_SAMPLE_DAYS = 2.0
 
 
 class Colony:
@@ -62,8 +74,14 @@ class Game:
 
     def __init__(self, headless: bool = False, ship_names: tuple[str, ...] = ("Kestrel", "Petrel")):
         self.headless = headless
-        self.sim = OrbitalSimulation(ship_names=ship_names)
+        # OpsSimulation wraps the verified orbital sim with fleet classes,
+        # hull wear and mining; the astrodynamics core is untouched.
+        self.sim = OpsSimulation(ship_names=ship_names)
         self.colony = Colony()
+        self.market = Market()
+        self.credits = START_CREDITS
+        self.auto_repair = True
+        self.credits_history: list[tuple[float, float]] = []
         self.scene = None
         self.hud = None
         self.follow_target: str | None = None
@@ -152,6 +170,9 @@ class Game:
         """
         self.frames += 1
         self.sim.step(dt_days)
+        self.sim.recover_mines(dt_days)
+        self.market.update(dt_days)
+        self._sample_credits_history()
         self._book_deliveries()
         self._refuel_and_redispatch(dt_days)
 
@@ -159,7 +180,16 @@ class Game:
             self.scene.update(self.sim)
             self.update_camera()
         if self.hud is not None:
-            self.hud.update(self.sim, self.colony.summary(), self._current_message())
+            self.hud.update(self.sim, self.colony.summary(), self._current_message(),
+                            extra=self._ops_hud_data())
+
+    def _sample_credits_history(self) -> None:
+        days = self.sim.time / SIM_SECONDS_PER_DAY
+        if self.credits_history and days - self.credits_history[-1][0] < CREDITS_HISTORY_SAMPLE_DAYS:
+            return
+        self.credits_history.append((days, self.credits))
+        if len(self.credits_history) > CREDITS_HISTORY_POINTS:
+            del self.credits_history[: len(self.credits_history) - CREDITS_HISTORY_POINTS]
 
     def _book_deliveries(self) -> None:
         """Drain completed deliveries into the colony economy."""
@@ -177,6 +207,124 @@ class Game:
                 )
 
 
+    # -- market & fleet actions ----------------------------------------------
+    def sell_all(self) -> None:
+        """Sell every marketable ore in colony storage at today's prices."""
+        resources = self.colony.state.get("resources", {})
+        lots = {
+            res: float(amount)
+            for res, amount in resources.items()
+            if res in MARKET_BASE_PRICES and amount >= 1.0
+        }
+        if not lots:
+            self.say("No ore in colony storage worth selling.")
+            return
+        proceeds, sold = self.market.sell(lots)
+        colony_state.add_resources(self.colony.state, {res: -amount for res, amount in sold.items()})
+        self.credits += proceeds
+        detail = ", ".join(f"{res} {amount:,.0f} t" for res, amount in sorted(sold.items()))
+        self.say(f"Sold {detail} to Earth for {proceeds:,.0f} cr.", seconds=8.0)
+
+    def buy_ship_class(self, cls_key: str) -> None:
+        """Commission a new ship class from the treasury."""
+        if cls_key not in SHIP_CLASSES:
+            self.say(f"Unknown ship class '{cls_key}'.")
+            return
+        spec = SHIP_CLASSES[cls_key]
+        if self.credits < spec["price"]:
+            self.say(
+                f"A {spec['name']} costs {spec['price']:,.0f} cr; "
+                f"the treasury holds {self.credits:,.0f} cr."
+            )
+            return
+        ship, message = self.sim.buy_ship(cls_key)
+        if ship is None:
+            self.say(message)
+            return
+        self.credits -= spec["price"]
+        self.say(f"{message} Bill: {spec['price']:,.0f} cr.", seconds=8.0)
+
+    def toggle_drill(self) -> None:
+        self.sim.mining_mode = "drill" if self.sim.mining_mode == "scrape" else "scrape"
+        flavour = (
+            "core drilling: fuller holds, hull wear, incident risk"
+            if self.sim.mining_mode == "drill"
+            else "surface scraping: safe and steady"
+        )
+        self.say(f"Mining policy now {flavour}.", seconds=7.0)
+
+    def toggle_repair(self) -> None:
+        self.auto_repair = not self.auto_repair
+        state = "engaged" if self.auto_repair else "suspended"
+        self.say(f"Automatic hull maintenance {state}.")
+
+    # -- save / load ----------------------------------------------------------
+    def save_game(self, slot: str = "quick") -> None:
+        payload = {
+            "version": 1,
+            "credits": self.credits,
+            "auto_repair": self.auto_repair,
+            "market": self.market.to_json(),
+            "colony": self.colony.state,
+            "sim": self.sim.to_json(),
+        }
+        path = colony_savegame.save_slot(slot, payload)
+        self.say(f"Game saved ({os.path.basename(path)}).")
+
+    def load_game(self, slot: str = "quick") -> None:
+        data = colony_savegame.load_slot(slot)
+        if not data:
+            self.say("No savegame found in saves/.")
+            return
+        self.credits = float(data.get("credits", START_CREDITS))
+        self.auto_repair = bool(data.get("auto_repair", True))
+        self.market = Market.from_json(data["market"])
+        self.colony.state = data["colony"]
+        self.sim = OpsSimulation.from_json(data["sim"])
+        self.credits_history = []
+        if self.scene is not None:
+            # Drop meshes for ships that no longer exist in the loaded fleet.
+            for name, mesh in list(self.scene.ships.items()):
+                if name not in {ship.name for ship in self.sim.ships}:
+                    mesh.enabled = False
+                    del self.scene.ships[name]
+        self.say("Savegame loaded.", seconds=6.0)
+
+    # -- HUD feed --------------------------------------------------------------
+    def _ops_hud_data(self) -> dict:
+        prices = [
+            (res, self.market.price(res), self.market.trend(res))
+            for res in MARKET_BASE_PRICES
+        ]
+        target = self.hud.selected_target() if self.hud is not None else TRADE_TARGETS[0]
+        return {
+            "credits": self.credits,
+            "prices": prices,
+            "credits_spark": self._sparkline(self.credits_history),
+            "mode": self.sim.mining_mode,
+            "auto_repair": self.auto_repair,
+            "assay": assay_lines(target, self.sim.ledger, self.sim.reserved.get(target)),
+            "mined_t": float(self.sim.stats.get("ore_mined_t", 0.0)),
+            "incidents": int(self.sim.stats.get("incidents", 0)),
+            "hull": dict(self.sim.hull),
+        }
+
+    @staticmethod
+    def _sparkline(history: list[tuple[float, float]]) -> str:
+        """ASCII sparkline of the treasury, oldest to newest."""
+        if len(history) < 2:
+            return ""
+        values = [value for _, value in history]
+        low, high = min(values), max(values)
+        if high - low < 1e-9:
+            return "-" * min(len(values), 40)
+        ramps = "_.-=+*#@"
+        step = max(1, len(values) // 40)
+        return "".join(
+            ramps[int((value - low) / (high - low) * (len(ramps) - 1))]
+            for value in values[::step]
+        )
+
     def _refuel_and_redispatch(self, dt_days: float) -> None:
         """Top up docked freighters from colony energy and send them back out.
 
@@ -189,6 +337,11 @@ class Game:
             energy = self.colony.state.get("resources", {})
             cost = granted * SHIP_REFUEL_ENERGY_PER_MS
             energy["energy"] = max(0.0, energy.get("energy", 0.0) - cost)
+
+        # Hull maintenance for docked ships, paid from the treasury.
+        if self.auto_repair:
+            _, repair_cost = self.sim.repair_docked_fleet(dt_days, self.credits)
+            self.credits -= repair_cost
 
         # Re-pricing the network means solving Lambert grids, so the scan is
         # throttled. Ships already flying are unaffected.
@@ -229,7 +382,11 @@ def run_headless(sim_days: float, frames_per_day: int = 4, verbose: bool = True)
     if verbose:
         print(f"[headless] {game.frames} frames over {sim_days:,.0f} sim-days")
         for report in game.sim.fleet_report():
-            print(f"  {report['name']:<8}{report['status']:<9}{report['at']:<22}{report['delta_v_left']:>8,.0f} m/s left")
+            hull = game.sim.hull.get(report["name"], 100.0)
+            print(
+                f"  {report['name']:<8}{report['status']:<9}{report['at']:<22}"
+                f"{report['delta_v_left']:>8,.0f} m/s left   hull {hull:5.1f}%"
+            )
         stats = game.sim.stats
         print(f"  runs completed : {stats['runs_completed']}")
         print(f"  mass delivered : {stats['mass_delivered']:,.0f} t")
@@ -237,6 +394,10 @@ def run_headless(sim_days: float, frames_per_day: int = 4, verbose: bool = True)
         print(f"  deliveries into colony economy: {game.deliveries_booked}")
         print(f"  colony storage : {game.colony.summary()}")
         print(f"  research points: {game.colony.state.get('research_points', 0.0):,.1f}")
+        print(f"  ore mined      : {stats.get('ore_mined_t', 0.0):,.0f} t   incidents: {stats.get('incidents', 0)}")
+        prices = ", ".join(f"{res} {game.market.price(res):.1f}" for res in MARKET_BASE_PRICES)
+        print(f"  market day {game.market.day:,.0f} (cr/t): {prices}")
+        print(f"  treasury       : {game.credits:,.0f} cr")
     return game
 
 
@@ -278,6 +439,18 @@ def run_windowed() -> None:
             game.sim.cycle_warp(-1)
         elif key == "]":
             game.sim.cycle_warp(1)
+        elif key == "s":
+            game.sell_all()
+        elif key == "x":
+            game.toggle_drill()
+        elif key == "m":
+            game.toggle_repair()
+        elif key in ("1", "2", "3", "4"):
+            game.buy_ship_class(BUY_MENU[int(key) - 1])
+        elif key == "f5":
+            game.save_game()
+        elif key == "f9":
+            game.load_game()
         elif key == "scroll up":
             camera.position *= 0.9
         elif key == "scroll down":
