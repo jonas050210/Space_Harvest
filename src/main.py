@@ -555,6 +555,7 @@ class Game:
             "window_line": self.window_line_text,
             "window_open": self.window_is_open,
             "windows_board": self._windows_board,
+            "firsts_count": (sum(1 for v in self.firsts.values() if v), len(FIRSTS)),
             "depot_line": self._depot_hud_line(),
             "parts_hint": self._parts_hint_line(),
             "station_hint": self._station_hint_line(),
@@ -1286,6 +1287,11 @@ def run_headless(sim_days: float, frames_per_day: int = 4, verbose: bool = True,
         depot_level = game.sim.depots["deep_belt"].level if "deep_belt" in game.sim.depots else 0
         if depot_level < 2 and game.credits > depot_cost + 6000.0:
             game.build_depot_selected()
+        # A refinery turns runs into refined stock: free margin every visit.
+        if "inner_belt" not in game.sim.refineries:
+            refinery_cost = game.sim.refinery_upgrade_cost("inner_belt")
+            if game.credits > refinery_cost + 9000.0:
+                game.sim.build_refinery("inner_belt")
 
     if verbose:
         print(f"[headless] {game.frames} frames over {sim_days:,.0f} sim-days")

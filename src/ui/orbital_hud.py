@@ -235,7 +235,9 @@ class OrbitalHUD:
 
     # -- market / ops panel ---------------------------------------------------
     def _update_ops_panel(self, extra: dict) -> None:
-        self.credits.text = f"Treasury  {extra.get('credits', 0.0):,.0f} cr"
+        firsts_done, firsts_total = extra.get("firsts_count", (0, 0))
+        self.credits.text = (f"Treasury  {extra.get('credits', 0.0):,.0f} cr"
+                             f"   Firsts {firsts_done}/{firsts_total}")
         self.spark.text = extra.get("credits_spark", "")[:46]
         for line, (res, price, trend) in zip(self.price_lines, extra.get("prices", [])):
             line.text = f"{res:<11}{price:>7,.1f} cr/t  {trend}"

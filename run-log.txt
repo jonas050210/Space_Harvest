@@ -689,3 +689,71 @@ $ python -m src.main --headless --sim-days 6000
 src/simulation diff vs e2543e3 (must be 0):
 0
 workspace: 6.3M / 356 files
+
+# =============================================================
+# run-log.txt — ores/refinery/firsts session (2026-08-27 14:03 UTC)
+# Branch: arena/01a041a3-asteroid-colony-proto
+# Scope: thorite + aurellium ores, refinery stations (arrival smelting
+#        + drone synergy), 19 Firsts milestones with credit/research
+#        rewards, capture counters, milestone HUD counter.
+# =============================================================
+
+# 1) project tests
+$ python -m pytest tests/ -q
+129 passed in 125.44s (0:02:05)
+
+# 2) upstream asteroid-colony tests
+=== Result: 25 passed, 0 failed ===
+
+# 3) windowed smoke (refinery build, milestone counter)
+:prc(warning): Invalid integer value for ConfigVariable win-size: 576.0
+:prc(warning): Invalid integer value for ConfigVariable win-size: 1024.0
+:device(error): Error adding inotify watch on /dev/input: No such file or directory
+:device(error): Error opening directory /dev/input: No such file or directory
+AL lib: (WW) pulse_load: Failed to load libpulse.so.0
+AL lib: (WW) alc_initconfig: Failed to initialize backend "pulse"
+AL lib: (WW) alsa_load: Failed to load libasound.so.2
+AL lib: (WW) alc_initconfig: Failed to initialize backend "alsa"
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+:audio(error): Couldn't open default OpenAL device
+:audio(error): OpenALAudioManager: No open device or context
+:audio(error):   OpenALAudioManager is not valid, will use NullAudioManager
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+:audio(error): Couldn't open default OpenAL device
+:audio(error): OpenALAudioManager: No open device or context
+:audio(error):   OpenALAudioManager is not valid, will use NullAudioManager
+[93mwarning: No monitors found [0m
+package_folder: /home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/ursina
+asset_folder: .
+[game] Director online. TAB to pick a target -- wait for the window, then go.
+[game] Refinery online at Inner Belt Field. Bill: 4,200 cr. Waiting runs arrive refined.
+[game] MILESTONE: First dispatch -- the fleet is alive  (+250 cr, +2 RP)
+[game] MILESTONE: First refinery smelting  (+600 cr, +6 RP)
+[game] MILESTONE: Treasury passes 25,000 cr  (+0 cr, +10 RP)
+[game] OFFER from Ceres Prospecting Co.: 64 t of silver by day 650 for 3,841 cr. B to accept, V to decline.
+[smoke] refineries ['inner_belt'] | firsts 3/19 | panel 'Treasury  26,650 cr   Firsts 3/19'
+[smoke] FULL PASS OK
+
+# 4) headless 6,000-day arc with the new economy
+$ python -m src.main --headless --sim-days 6000
+  deliveries into colony economy: 56
+  colony storage : {'used': 0.0, 'capacity': 1500, 'delivered': 7352.8321967219745}
+  research points: 2,001.2
+  ore mined      : 9,626 t   incidents: 4
+  market day 6,000 (cr/t): ice 9.6, iron 14.7, silver 50.0, gold 124.3, platinum 205.7, components 52.6, electronics 162.2, thorite 44.2, aurellium 669.4
+  treasury       : 224,014 cr
+
+# 5) economy probe: firsts + refined deliveries at day 6,000
+firsts fired: 15 of 19 | notable: ['first_capture_comet', 'first_refinery', 'thorite_1']
+refined delivered: components 985 t | thorite 77 t | refineries ['inner_belt']
+
+# 6) astrodynamics invariance
+src/simulation diff vs e2543e3 (must be 0):
+0
+workspace: 6.4M / 356 files
