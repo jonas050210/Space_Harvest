@@ -1,0 +1,28 @@
+"achievements"
+{
+    // Mirror of config.FIRSTS + secret achievements.
+    // Wire these ids 1:1 in the Steamworks partner portal.
+    "first_dispatch"              "First dispatch -- the fleet is alive"
+    "first_capture_belt"          "First capture: the inner belt"
+    "first_capture_metallic"      "First capture: the metallic belt"
+    "first_capture_deep"          "First capture: the deep belt"
+    "first_capture_derelict"      "First capture: the Derelict Zone"
+    "first_capture_aurelia"       "First capture: Aurelia orbit"
+    "first_capture_comet"         "FIRST COMET ENCOUNTER -- history made"
+    "first_depot"                 "First refuel depot online"
+    "first_refinery"              "First refinery smelting"
+    "first_drones"                "Drone bay operational"
+    "full_return_1"               "First full-hold return"
+    "full_return_10"              "Ten full-hold returns -- a professional outfit"
+    "mass_2500"                   "2,500 t delivered to the colony"
+    "mass_10000"                  "10,000 t delivered -- the belt industry"
+    "fleet_5"                     "Five ships under command"
+    "rich_25k"                    "Treasury passes 25,000 cr"
+    "rich_100k"                   "Treasury passes 100,000 cr"
+    "thorite_1"                   "First thorite shipment"
+    "aurellium_1"                 "First aurellium shipment -- Earth is stunned"
+    "secret_stranded_rescue"      "Stranded and rescued"
+    "secret_zero_incident_streak" "Ten clean runs"
+    "secret_charter_clear"        "Charter sealed"
+    "secret_ironman_year"         "Ironman year survived"
+}

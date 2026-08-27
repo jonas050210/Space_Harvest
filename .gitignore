@@ -7,3 +7,7 @@ logs/*.jpg
 .env
 saves/
 logs/audio/
+dist/
+build/
+*.spec
+steam/steam_install.json

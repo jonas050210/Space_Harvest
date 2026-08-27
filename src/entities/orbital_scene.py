@@ -49,7 +49,12 @@ class OrbitalScene:
         self.orbits_visible = True
         self._asteroid_scatter: list[Entity] = []
         self.belt_mesh: Entity | None = None
-        self.quality = {"belt": True, "trails": True, "sky": True, "labels": True}
+        self.quality = {
+            "belt": True, "trails": True, "sky": True, "labels": True,
+            "corona": True, "flares": True, "reticle": True, "orbit_alpha": 0.42,
+            "belt_density": 0.55, "ship_lod": "full", "msaa": 2, "vsync": True,
+            "bloom": False, "shadows": False, "particles": False,
+        }
         ring = _tex("select_ring.png")
         self.reticle = Entity(parent=self.parent, model="quad", scale=3.0,
                               texture=ring, billboard=True, unlit=True,
@@ -214,18 +219,49 @@ class OrbitalScene:
                                 color=color.rgb(0.45, 0.45, 0.52), unlit=True)
         self.belt_mesh.double_sided = False
 
-    def apply_quality(self, **flags: bool) -> None:
-        """Toggle expensive eye-candy: belt, trails, skybox, name tags."""
+    def apply_quality(self, **flags) -> None:
+        """Toggle eye-candy for the active graphics preset (low..ultra).
+
+        Boolean flags gate whole features. Numeric ones (orbit_alpha,
+        belt_density, msaa) scale cost. Display flags (vsync/msaa) are
+        applied by the game shell when a real window is up.
+        """
         self.quality.update(flags)
         if self.belt_mesh is not None:
-            self.belt_mesh.enabled = self.quality["belt"]
+            density = float(self.quality.get("belt_density", 1.0) or 0.0)
+            self.belt_mesh.enabled = bool(self.quality.get("belt", True)) and density > 0.01
+            # Soft scale: low density shrinks the merged belt visually.
+            if self.belt_mesh.enabled:
+                self.belt_mesh.scale = 0.55 + 0.45 * density
         if self.sky_dome is not None:
-            self.sky_dome.enabled = self.quality["sky"]
+            self.sky_dome.enabled = bool(self.quality.get("sky", True))
         for label in self.labels.values():
-            label.enabled = self.quality["labels"]
+            label.enabled = bool(self.quality.get("labels", True))
+        for glow in getattr(self, "sun_glow", []) or []:
+            glow.enabled = bool(self.quality.get("corona", True))
+        if hasattr(self, "reticle") and self.reticle is not None:
+            # Reticle visibility still follows selection; quality only arms it.
+            if not self.quality.get("reticle", True):
+                self.reticle.enabled = False
+        # Orbit ring alpha scales with the preset so ultra rings pop and low
+        # stays quiet on the draw budget.
+        alpha = float(self.quality.get("orbit_alpha", 0.42))
+        for line in self.orbit_lines.values():
+            try:
+                c = line.color
+                line.color = color.rgba(c.r, c.g, c.b, alpha)
+            except Exception:
+                pass
         import src.entities.ship as _ship_module
 
-        _ship_module.TRAILS_ENABLED = self.quality["trails"]
+        _ship_module.TRAILS_ENABLED = bool(self.quality.get("trails", True))
+        _ship_module.FLARES_ENABLED = bool(self.quality.get("flares", True))
+        lod = str(self.quality.get("ship_lod", "full"))
+        _ship_module.SHIP_LOD = lod
+        for ship in self.ships.values():
+            ship.apply_lod(lod)
+            # Refresh flare visibility under the new flag.
+            ship.set_thrusting(getattr(ship, "_thrusting", False))
 
     def _update_comet_tail(self, comet_pos) -> None:
         """Point the tail away from the sun; brighten near perihelion."""
@@ -248,7 +284,7 @@ class OrbitalScene:
     def set_reticle(self, key: str | None, sim) -> None:
         """Park the selection ring on the targeted body (or hide it)."""
         entity = self.body_entities.get(key) if key else None
-        if entity is None:
+        if entity is None or not self.quality.get("reticle", True):
             self.reticle.enabled = False
             return
         self.reticle.enabled = True

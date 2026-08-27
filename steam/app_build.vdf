@@ -1,0 +1,15 @@
+"AppBuild"
+{
+    "AppID" "0"          // replace with the real Steam AppID before upload
+    "Desc" "Orbital Supply Chains 0.9.0-steam"
+    "ContentRoot" "..\\dist\\OrbitalSupplyChains\\"
+    "BuildOutput" "..\\dist\\steam_output\\"
+
+    "Depots"
+    {
+        "1"
+        {
+            "FileFilter" "depot_windows.vdf"
+        }
+    }
+}

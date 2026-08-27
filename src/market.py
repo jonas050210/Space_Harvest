@@ -68,6 +68,13 @@ class Market:
         #: (day, {resource: price}) samples for HUD sparklines / trend arrows
         self.history: list[tuple[float, dict[str, float]]] = []
         self._since_sample = float("inf")
+        #: optional per-ore absorption override (difficulty); None = use config
+        self.absorption_override: dict[str, float] | None = None
+
+    def _absorb(self, res: str) -> float:
+        if self.absorption_override and res in self.absorption_override:
+            return float(self.absorption_override[res])
+        return float(MARKET_ABSORPTION_T[res])
 
     # -- simulation ----------------------------------------------------------
     def update(self, dt_days: float) -> None:
@@ -98,7 +105,7 @@ class Market:
         seasonal = 1.0 + MARKET_SEASONAL_AMPLITUDE * math.sin(
             2.0 * math.pi * self.day / MARKET_SEASONAL_PERIOD_DAYS[res] + self.phase[res]
         )
-        absorb = MARKET_ABSORPTION_T[res]
+        absorb = self._absorb(res)
         flood_mult = 1.0 / (1.0 + self.flood[res] / absorb)
         price = base * self.demand[res] * seasonal * flood_mult
         return max(MARKET_PRICE_FLOOR_FRACTION * base, price)
@@ -143,7 +150,7 @@ class Market:
         """
         if tonnes <= 0.0:
             return 0.0
-        absorb = MARKET_ABSORPTION_T[res]
+        absorb = self._absorb(res)
         slices = min(10, max(1, int(tonnes / absorb) + 1))
         per_slice = tonnes / slices
         proceeds = 0.0
@@ -178,6 +185,8 @@ class Market:
             "history": [[day, prices] for day, prices in self.history],
             "since_sample": self._since_sample,
             "rng": rng_to_json(self.rng),
+            "absorption_override": dict(self.absorption_override)
+            if self.absorption_override else None,
         }
 
     @classmethod
@@ -191,6 +200,10 @@ class Market:
         market.history = [[float(day), {res: float(p) for res, p in prices.items()}]
                           for day, prices in data["history"]]
         market._since_sample = float(data["since_sample"])
+        override = data.get("absorption_override")
+        market.absorption_override = (
+            {str(k): float(v) for k, v in override.items()} if override else None
+        )
         return market
 
 

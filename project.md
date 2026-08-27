@@ -386,6 +386,19 @@ that feels off — all balance lives in `src/config.py`.
 * Working tree clean at last verification; every session ended with the full test
   battery green before pushing.
 
+### 10.1 Steam-ready pass (v0.9.0-steam)
+
+CEO session shipped a Steam surface **without touching the orbital core**:
+
+* Graphics presets **low / medium / high / ultra** (belt density, trails, flares,
+  corona, ship LOD, MSAA, orbit alpha, bloom/particles flags).
+* Full settings menu: resolution, fullscreen, VSync, FOV, UI scale, master volume,
+  confirm-dispatch, body dossier, difficulty, victory mode.
+* Campaign: Director / Tight Margins / Ironman; Endless / Charter / Legacy victory;
+  achievement tracker + Steam soft-bridge; year report; dispatch confirm sheet.
+* Packaging: `scripts/build_steam.py`, `STEAM.md`, `steam/*.vdf`.
+* Tests: 144 passed (10 new campaign/Steam cases). See `STEAM.md`.
+
 ---
 
 ## 11. Design history and parked ideas

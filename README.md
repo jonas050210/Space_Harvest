@@ -1,12 +1,12 @@
-# Asteroid-Colony Proto
+# Orbital Supply Chains
 
-**Orbital Supply Chains** is a compact, stylised 3-D launch-window game: real planets on real heliocentric orbits, a glowing sun, a scattered asteroid belt and a starfield sky -- all generated procedurally, no binary assets. Wait for the window (a NEXT WINDOWS board counts down every route; a banner and chime announce GO), click a planet to target it, dispatch, and keep the colony breathing. Deep runs need player-built refuel depots, refineries smelt your runs' ore into high-value components and electronics, the long-period Comet Vigil pays an aurellium jackpot if you catch it, and the Earth parts market sells drop tanks, deep drills, crew quarters and depot drone bays at seasonal prices. Nineteen one-shot Firsts milestones (also shown as live GOALS) pay bonuses as the colony grows from two rusty freighters to an interstellar-scale industry, and research points commission technologies in the colony lab. The astrodynamics underneath is real patched-conic mechanics: launch windows, delta-v budgets, capture burns, layovers, multi-revolution slow routes, and deliveries booked into the upstream colony economy.
+**Orbital Supply Chains** (v0.9.0-steam) is a stylised 3-D launch-window game: real planets on real heliocentric orbits, a glowing sun, a scattered asteroid belt and a starfield sky. Wait for the window (a NEXT WINDOWS board counts down every route; a banner and chime announce GO), click a planet to target it, dispatch, and keep the colony breathing.
 
-The orbital layer runs patched-conic transfers solved with Izzo's universal Lambert algorithm, including its multi-revolution branches (slow, propellant-cheap routes that the planner only picks when they genuinely pay).
+Deep runs need player-built refuel depots; refineries smelt ore into components and electronics; Comet Vigil pays an aurellium jackpot; Earth sells parts at seasonal prices. Nineteen Firsts milestones, research techs, **Director / Tight / Ironman** difficulties, and **Endless / Charter / Legacy** victory modes give the campaign a spine. Achievements mirror Firsts for Steam.
 
-On top of the verified astrodynamics core sits a colony-operations layer: every rock has a procedural ore fingerprint whose veins deplete as you mine them, a dynamic Earth market pays (and crashes) for your ore, named crews fly tired and happy (or bored, or hungry), solar flares and debris seasons threaten ships in flight, Earth factions post orders that move prices with your standing, and the colony's oxygen/food/water loop runs on ice you might rather have sold.
+The astrodynamics core is real patched-conic mechanics (Izzo Lambert, multi-rev branches). Graphics presets **Low / Medium / High / Ultra** target everything from Steam Deck to an RTX 4060 Ti ship PC.
 
-Read `project.md` for the full architecture, units, controls, QA results, known limits, and owner commands.
+Read `project.md` for architecture and `STEAM.md` for depot packaging.
 
 ## Quick start
 
@@ -19,6 +19,24 @@ python3 -m venv .venv
 .venv/bin/python -m src.main --headless --sim-days 6000
 .venv/bin/python -m src.main
 ```
+
+### Steam / Windows package
+
+```bash
+.venv/bin/python scripts/build_steam.py
+# ships dist/OrbitalSupplyChains/  (see STEAM.md)
+```
+
+### Graphics
+
+| Preset | Best for |
+| --- | --- |
+| Low | Deck / iGPU — no belt, no trails, simple ships |
+| Medium | Default |
+| High | Modern discrete GPUs |
+| Ultra | i7-12700F + RTX 4060 Ti class |
+
+Open **Settings** from the title menu (quality, resolution, fullscreen, VSync, FOV, volume, difficulty, victory). **K** cycles quality in-play.
 
 ## Controls
 
@@ -40,14 +58,17 @@ python3 -m venv .venv
 - I: install a Navigation Suite (needs aurellium from Comet Vigil; sharper planning refunds burns)
 - P: install a drone bay at the selected depot (fills waiting ships)
 - L: commission the next colony technology with research points (cheaper parts, faster depots, easier crewing, quicker smelting)
-- K: cycle quality preset (belt, trails, sky) -- N mutes, both persist
+- K: cycle quality preset (low/medium/high/ultra) -- N mutes, both persist
 - G / H: hire a miner / dismiss the unhappiest crew member (Z: botanist)
 - J: jump the warp to the next interesting event (windows, ETAs, deadlines)
 - N: mute audio
-- F5 / F9: quick-save / quick-load (`saves/` JSON)
+- F1: year report (pauses)
+- F5 / F9: quick-save / quick-load (`saves/` JSON; F9 blocked on Ironman mid-run)
+- ENTER: dispatch (second ENTER confirms when confirm-dispatch is on)
 - Title menu: NEW GAME / CONTINUE / LOAD / SETTINGS / HOW TO PLAY / QUIT
+- Settings: graphics, display, difficulty (Director/Tight/Ironman), victory mode
 - Mouse wheel: zoom
-- ESC: pause (Resume / Save / Load / Settings / Quit to title)
+- ESC: pause (Resume / Save / Year Report / Settings / Quit to title) or cancel confirm
 
 ## Artifacts
 

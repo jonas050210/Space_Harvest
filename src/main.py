@@ -46,10 +46,18 @@ from src.config import (  # noqa: E402
     CREW_BOTANIST_SAVING_CAP,
     CREW_BOTANIST_WATER_SAVING,
     CREW_HIRE_COST,
+    DEFAULT_DIFFICULTY,
+    DEFAULT_SETTINGS,
+    DEFAULT_VICTORY,
     DEPOT_BUILD_COST,
+    DIFFICULTY_MODES,
     FIRSTS,
+    GAME_VERSION,
     HULL_CRITICAL_PCT,
     PARTS_CATALOG,
+    QUALITY_ORDER,
+    QUALITY_PRESETS,
+    SAVE_SLOTS,
     TECHS,
     MARKET_BASE_PRICES,
     REDISPATCH_SCAN_DAYS,
@@ -57,15 +65,32 @@ from src.config import (  # noqa: E402
     SHIP_REFUEL_ENERGY_PER_MS,
     START_CREDITS,
     TIME_WARP_STEPS,
+    VICTORY_MODES,
     WINDOW_SIZE,
     WINDOW_TITLE,
 )
 from src.simulation.bodies import TRADE_TARGETS  # noqa: E402
 from src.config import SIM_SECONDS_PER_DAY  # noqa: E402
+from src.campaign import (  # noqa: E402
+    AchievementTracker,
+    apply_difficulty_to_market,
+    apply_difficulty_to_sim,
+    body_dossier,
+    campaign_blob,
+    check_victory,
+    dispatch_preview,
+    is_ironman,
+    restore_campaign_blob,
+    starting_credits,
+    victory_progress,
+    year_report,
+)
+from src.display import apply_window_settings, volume_from_settings  # noqa: E402
 from src.mining import assay_lines, plan_extraction  # noqa: E402
 from src.market import Contracts, Market  # noqa: E402
 from src.operations import OpsSimulation  # noqa: E402
 from src.simulation.orbital_sim import OrbitalSimulation  # noqa: E402
+from src.steam_bridge import SteamClient, cloud_root  # noqa: E402
 
 try:  # windowed-only import; headless keeps working without Ursina
     from ursina import Vec3, lerp  # noqa: E402
@@ -135,9 +160,8 @@ class Game:
         # Screen state: title -> play; ESC toggles pause (windowed only).
         self.screen = "play" if headless else "title"
         self.paused = False
-        # Persistent player settings (quality preset, audio, camera feel).
-        self.settings = self._load_settings() if not headless else {
-            "quality": "medium", "muted": False, "glide": True}
+        # Persistent player settings (graphics, audio, campaign defaults).
+        self.settings = self._load_settings() if not headless else dict(DEFAULT_SETTINGS)
         self.toasts: list[tuple[float, str]] = []
         # KSP-style one-shot milestones (see config.FIRSTS).
         self.firsts: dict[str, bool] = {}
@@ -166,6 +190,17 @@ class Game:
         self.deliveries_booked = 0
         self._message = ""
         self._message_until = 0.0
+        # Campaign layer (difficulty / victory / achievements / Steam).
+        self.difficulty = self.settings.get("difficulty", DEFAULT_DIFFICULTY)
+        self.victory_mode = self.settings.get("victory", DEFAULT_VICTORY)
+        self.victory_achieved: str | None = None
+        self.clean_run_streak = 0
+        self.ironman_days = 0.0
+        self._pending_dispatch: dict | None = None
+        self.achievements = AchievementTracker(
+            path=os.path.join(cloud_root(), "achievements_progress.json"))
+        self.steam = SteamClient()
+        self._apply_campaign_rules()
 
     # -- messaging -----------------------------------------------------------
     def say(self, text: str, seconds: float = 6.0) -> None:
@@ -252,16 +287,58 @@ class Game:
             node = getattr(node, "parent", None)
 
     # -- actions -------------------------------------------------------------
-    def dispatch_selected(self) -> None:
-        if self.hud is None:
+    def dispatch_selected(self, confirm: bool = False) -> None:
+        """Dispatch an idle ship. With confirm_dispatch on, first ENTER previews."""
+        if self.hud is None and not self.headless:
             return
-        target = self.hud.selected_target()
+        target = (self.hud.selected_target() if self.hud is not None
+                  else TRADE_TARGETS[0])
         idle = next((ship for ship in self.sim.ships if ship.name not in self.sim.missions), None)
         if idle is None:
             self.say("Every freighter is already flying a mission.")
+            self._pending_dispatch = None
             return
+        want_confirm = bool(self.settings.get("confirm_dispatch", True)) and not self.headless
+        if want_confirm and not confirm:
+            preview = dispatch_preview(self.sim, idle, target)
+            self._pending_dispatch = {"ship": idle.name, "target": target, "preview": preview}
+            if preview["blocked"]:
+                self.say("HOLD: " + "; ".join(preview["blocked"]), seconds=7.0)
+            else:
+                self.say(
+                    f"CONFIRM {idle.name} -> {preview['target_name']}: "
+                    f"wait {preview['wait_days']:,.0f}d  "
+                    f"dv {preview['total_ms']:,.0f}/{preview['budget_ms']:,.0f} m/s  "
+                    f"(ENTER again / ESC cancel)",
+                    seconds=9.0,
+                )
+            return
+        # Honour a pending confirm only for the same ship/target.
+        if self._pending_dispatch is not None:
+            if (self._pending_dispatch.get("ship") != idle.name
+                    or self._pending_dispatch.get("target") != target):
+                # Selection changed -- treat as a fresh preview next time.
+                self._pending_dispatch = None
+                return self.dispatch_selected(confirm=False)
+        self._pending_dispatch = None
         _, message = self.sim.dispatch(idle, target)
         self.say(message, seconds=8.0)
+
+    def cancel_pending_dispatch(self) -> None:
+        if self._pending_dispatch is not None:
+            self._pending_dispatch = None
+            self.say("Dispatch cancelled.")
+
+    def _apply_campaign_rules(self) -> None:
+        """Push difficulty numbers into market + sim without naming them there."""
+        apply_difficulty_to_market(self.market, self.difficulty)
+        apply_difficulty_to_sim(self.sim, self.difficulty)
+        # Re-apply tech multipliers on top so difficulty does not wipe science.
+        self._apply_techs()
+
+    def _apply_techs_preserve_difficulty(self) -> None:
+        self._apply_techs()
+        apply_difficulty_to_sim(self.sim, self.difficulty)
 
     # -- main loop -----------------------------------------------------------
     def update(self, dt_days: float) -> None:
@@ -293,6 +370,18 @@ class Game:
         self._tick_jump()
         self._tick_window_moments()
         self._tick_firsts()
+        self._tick_victory()
+        if is_ironman(self.difficulty):
+            self.ironman_days += dt_days
+            if self.ironman_days >= 365.0:
+                if self.achievements.unlock("secret_ironman_year"):
+                    self.steam.unlock("secret_ironman_year")
+                    self.say("ACHIEVEMENT: Survived a full year on Ironman.", seconds=8.0)
+        if self.steam is not None:
+            try:
+                self.steam.tick(0.0)  # real-time playtime tracked in windowed loop
+            except Exception:
+                pass
 
         if self.scene is not None:
             self.scene.update(self.sim)
@@ -329,6 +418,7 @@ class Game:
                 self._recent_deliveries[ore] = self.market.day
             for contract in self.contracts.register_delivery(delivery.cargo):
                 reward = self.contracts.complete(contract)
+                reward *= float(self.sim.tech_mults.get("contract_reward", 1.0))
                 self.credits += reward
                 self._play_alert("contract")
                 self.say(
@@ -349,55 +439,89 @@ class Game:
 
     def _load_settings(self) -> dict:
         data = colony_savegame.load_slot(self.SETTINGS_SLOT)
-        settings = {"quality": "medium", "muted": False, "glide": True}
+        settings = dict(DEFAULT_SETTINGS)
         if isinstance(data, dict):
             for key in settings:
                 if key in data:
                     settings[key] = data[key]
+        # Clamp quality to a known preset (older saves may say "high" only).
+        if settings.get("quality") not in QUALITY_ORDER:
+            settings["quality"] = "medium"
         return settings
 
     def save_settings(self) -> None:
         colony_savegame.save_slot(self.SETTINGS_SLOT, dict(self.settings))
 
     def apply_settings(self) -> None:
-        """Push the settings into scene, mixer and camera; persist them."""
-        from src.config import QUALITY_PRESETS
-
+        """Push the settings into scene, mixer, window and camera; persist them."""
         if self.scene is not None:
-            self.scene.apply_quality(**QUALITY_PRESETS.get(self.settings["quality"],
-                                                           QUALITY_PRESETS["medium"]))
+            preset = QUALITY_PRESETS.get(self.settings.get("quality", "medium"),
+                                         QUALITY_PRESETS["medium"])
+            self.scene.apply_quality(**preset)
+        # Display (resolution / fullscreen / vsync / FOV) -- windowed only.
+        if not self.headless:
+            try:
+                apply_window_settings(self.settings)
+            except Exception:
+                pass
+        vol = volume_from_settings(self.settings)
         if self.audio is not None:
             hum = self.audio.get("hum")
             if hum is not None:
                 try:
-                    hum.volume = 0.0 if self.settings["muted"] else hum.volume or 0.3
+                    hum.volume = 0.0 if self.settings.get("muted") else max(0.05, vol * 0.4)
                 except Exception:
                     pass
-        self.muted = bool(self.settings["muted"])
+            for key, sound in self.audio.items():
+                if key == "hum" or sound is None:
+                    continue
+                try:
+                    sound.volume = vol
+                except Exception:
+                    pass
+        self.muted = bool(self.settings.get("muted", False))
+        # Campaign defaults chosen in settings stick for the next NEW GAME.
+        if "difficulty" in self.settings:
+            pass  # applied in new_campaign from settings
         self.save_settings()
 
-    def new_campaign(self) -> None:
+    def new_campaign(self, difficulty: str | None = None, victory: str | None = None) -> None:
         """A fresh director, same solar system."""
+        self.difficulty = difficulty or self.settings.get("difficulty", DEFAULT_DIFFICULTY)
+        self.victory_mode = victory or self.settings.get("victory", DEFAULT_VICTORY)
+        self.victory_achieved = None
+        self.clean_run_streak = 0
+        self.ironman_days = 0.0
+        self._pending_dispatch = None
         self.sim = OpsSimulation(ship_names=("Kestrel", "Petrel"))
         self.colony = Colony()
         self.market = Market()
         self.contracts = Contracts(self.market)
-        self.credits = START_CREDITS
+        self.credits = starting_credits(self.difficulty)
         self.credits_history = []
         self.toasts = []
         self.firsts = {}
         self.techs = set()
-        self._apply_techs()
+        self._apply_campaign_rules()
         self.deliveries_booked = 0
         self.screen = "play"
         self.paused = False
+        self.settings["difficulty"] = self.difficulty
+        self.settings["victory"] = self.victory_mode
+        self.save_settings()
         if self.scene is not None:
             for mesh in self.scene.ships.values():
                 mesh.enabled = False
                 mesh.clear_trail()
             self.scene.ships.clear()
             self.scene.ensure_bodies(self.sim)
-        self.say("New campaign. The belt is yours, director.", seconds=8.0)
+            self.apply_settings()
+        diff_label = DIFFICULTY_MODES.get(self.difficulty, {}).get("label", self.difficulty)
+        vic_label = VICTORY_MODES.get(self.victory_mode, {}).get("label", self.victory_mode)
+        self.say(
+            f"New campaign -- {diff_label} / {vic_label}. The belt is yours, director.",
+            seconds=8.0,
+        )
 
     def to_title(self) -> None:
         self.screen = "title"
@@ -501,7 +625,7 @@ class Game:
     # -- save / load ----------------------------------------------------------
     def save_game(self, slot: str = "quick") -> None:
         payload = {
-            "version": 2,
+            "version": 3,
             "credits": self.credits,
             "auto_repair": self.auto_repair,
             "market": self.market.to_json(),
@@ -510,12 +634,18 @@ class Game:
             "techs": sorted(self.techs),
             "colony": self.colony.state,
             "sim": self.sim.to_json(),
+            "campaign": campaign_blob(self),
+            "game_version": GAME_VERSION,
         }
         path = colony_savegame.save_slot(slot, payload)
         self._tut["saved"] = True
         self.say(f"Game saved ({os.path.basename(path)}).")
 
     def load_game(self, slot: str = "quick") -> None:
+        if is_ironman(self.difficulty) and slot != "quick" and self.screen == "play":
+            # Ironman still allows loading the single quick slot on boot, but
+            # refuses mid-run "rewind" loads from the pause menu path.
+            pass
         data = colony_savegame.load_slot(slot)
         if not data:
             self.say("No savegame found in saves/.")
@@ -526,10 +656,12 @@ class Game:
         self.contracts = Contracts.from_json(data.get("contracts", {}), self.market)
         self.firsts = {k: bool(v) for k, v in data.get("firsts", {}).items()}
         self.techs = set(data.get("techs", []))
-        self._apply_techs()
         self.colony.state = data["colony"]
         self.sim = OpsSimulation.from_json(data["sim"])
+        restore_campaign_blob(self, data.get("campaign"))
+        self._apply_campaign_rules()
         self.credits_history = []
+        self._pending_dispatch = None
         if self.scene is not None:
             # Drop meshes for ships that no longer exist in the loaded fleet.
             for name, mesh in list(self.scene.ships.items()):
@@ -537,6 +669,18 @@ class Game:
                     mesh.enabled = False
                     del self.scene.ships[name]
         self.say("Savegame loaded.", seconds=6.0)
+
+    def try_load(self, slot: str = "quick") -> None:
+        """Load with Ironman guard: no mid-run F9 on Ironman campaigns."""
+        if is_ironman(self.difficulty) and self.screen == "play" and not self.paused:
+            self.say("Ironman: no mid-flight loads. Pause and Quit to Title to abandon.")
+            return
+        if is_ironman(getattr(self, "difficulty", DEFAULT_DIFFICULTY)):
+            # Allow load only from title (continue) -- pause menu blocks F9.
+            if self.screen == "play" and self.paused:
+                self.say("Ironman: loading disabled. Survive or quit to title.")
+                return
+        self.load_game(slot)
 
     # -- HUD feed --------------------------------------------------------------
     def _ops_hud_data(self) -> dict:
@@ -572,6 +716,14 @@ class Game:
             "depot_hint": self._depot_hint_line(),
             "tutorial": self.tutorial_text,
             "power_load": self.power_load,
+            "toasts": [text for _until, text in self.toasts],
+            "dossier": body_dossier(self.sim, target, self.market)
+            if self.settings.get("show_dossier", True) else [],
+            "pending_dispatch": self._pending_dispatch,
+            "victory": victory_progress(self),
+            "difficulty": self.difficulty,
+            "quality": self.settings.get("quality", "medium"),
+            "version": GAME_VERSION,
         }
 
     # -- "Firsts": one-shot milestones ------------------------------------------
@@ -618,10 +770,44 @@ class Game:
                 self._play_alert("contract")
                 self.say(f"MILESTONE: {label}  (+{credits:,.0f} cr, +{research:.0f} RP)",
                          seconds=9.0)
+                if self.achievements.unlock(key):
+                    self.steam.unlock(key)
+        # Secret: zero-incident professional streak.
+        incidents = int(self.sim.stats.get("incidents", 0))
+        runs = int(self.sim.stats.get("runs_completed", 0))
+        if runs >= 10 and incidents == 0:
+            if self.achievements.unlock("secret_zero_incident_streak"):
+                self.steam.unlock("secret_zero_incident_streak")
+                self.say("ACHIEVEMENT: Ten clean runs -- no incidents.", seconds=8.0)
+
+    def _tick_victory(self) -> None:
+        if self.victory_achieved:
+            return
+        key = check_victory(self)
+        if key is None:
+            return
+        self.victory_achieved = key
+        label = VICTORY_MODES.get(key, {}).get("label", key)
+        self._play_alert("contract")
+        self.say(f"VICTORY -- {label}. The charter is sealed.", seconds=12.0)
+        if self.achievements.unlock("secret_charter_clear"):
+            self.steam.unlock("secret_charter_clear")
 
     def _quest_goals(self) -> list[str]:
         """Labels of the next few un-earned milestones: the active quest log."""
         goals = []
+        progress = victory_progress(self)
+        if progress["mode"] != "endless" and not progress["achieved"]:
+            bits = []
+            if progress["credits_goal"]:
+                bits.append(f"cr {progress['credits']:,.0f}/{progress['credits_goal']:,.0f}")
+            if progress["tonnage_goal"]:
+                bits.append(f"t {progress['tonnage']:,.0f}/{progress['tonnage_goal']:,.0f}")
+            if progress["firsts_goal"]:
+                bits.append(f"firsts {progress['firsts']}/{progress['firsts_goal']}")
+            if progress["needs_aurellium"]:
+                bits.append("aurellium" + (" OK" if progress["aurellium"] > 0 else " --"))
+            goals.append(f"GOAL {progress['label']}: " + " | ".join(bits))
         for key, label, _credits, _research in FIRSTS:
             if not self.firsts.get(key):
                 goals.append(label)
@@ -774,9 +960,10 @@ class Game:
         if crew_count == 0:
             return
 
-        # The colony's solar array keeps the lights on.
+        # The colony's solar array keeps the lights on (difficulty can dim it).
         max_energy = state.get("max_energy", 30)
-        resources["energy"] = min(max_energy, resources.get("energy", 0.0) + LIFE_SOLAR_ENERGY_PER_DAY * dt_days)
+        solar = LIFE_SOLAR_ENERGY_PER_DAY * float(self.sim.tech_mults.get("life_solar", 1.0))
+        resources["energy"] = min(max_energy, resources.get("energy", 0.0) + solar * dt_days)
         energy_used = 0.0
 
         # Ice refinery: top the water tank up when it runs low.
@@ -918,7 +1105,11 @@ class Game:
 
     # -- science -------------------------------------------------------------------
     def _apply_techs(self) -> None:
-        """Translate owned techs into generic sim multipliers + a price break."""
+        """Translate owned techs into generic sim multipliers + a price break.
+
+        Difficulty multipliers (hull_wear, refuel_rate, ...) are re-applied
+        afterwards so science never wipes the campaign rules.
+        """
         mults: dict[str, float] = {}
         discount = 0.0
         for key in self.techs:
@@ -930,8 +1121,13 @@ class Game:
                         discount = max(discount, value)
                     else:
                         mults[name] = mults.get(name, 1.0) * value
+        # Preserve difficulty-only keys if already set.
+        for key in ("hull_wear", "refuel_rate", "life_solar", "contract_reward"):
+            if key in getattr(self.sim, "tech_mults", {}):
+                mults.setdefault(key, self.sim.tech_mults[key])
         self.sim.tech_mults = mults
         self._parts_discount = discount
+        apply_difficulty_to_sim(self.sim, getattr(self, "difficulty", DEFAULT_DIFFICULTY))
 
     def buy_tech(self) -> None:
         """Commission the cheapest affordable unowned technology."""
@@ -1416,30 +1612,38 @@ def run_windowed() -> None:
 
     # Ursina is a singleton and ``run`` is an *instance* method, so the
     # application object has to be kept; ``application.run()`` does not exist.
-    app = Ursina(title=WINDOW_TITLE, size=WINDOW_SIZE, borderless=False)
+    from src.display import parse_resolution
+    res = parse_resolution(str(DEFAULT_SETTINGS.get("resolution", "1440x900")))
+    app = Ursina(title=f"{WINDOW_TITLE}  v{GAME_VERSION}", size=res, borderless=False)
     window.color = color.black
 
     game = Game(headless=False)
     game.build_scene(ursina_scene)
     _setup_audio(game)
     from src.game import savegame as colony_savegame
+    from src.ui.orbital_hud import MenuOverlay
 
     menus = MenuOverlay(continue_available=bool(colony_savegame.list_saves()))
+    menus.on_settings_changed = lambda s: (game.settings.update(s), game.apply_settings())
     game.apply_settings()
     menus.show_main(continue_available=bool(colony_savegame.list_saves()))
     camera.orthographic = False
-    camera.fov = 55
+    camera.fov = float(game.settings.get("fov", 55))
 
     def _latest_slot() -> str | None:
         files = colony_savegame.list_saves()
         for name in files:
-            if name != "_settings.json":
-                return name[:-5]
+            if name not in ("_settings.json", "achievements_progress.json", "steam_stats.json"):
+                return name[:-5] if name.endswith(".json") else name
         return None
 
     def _menu_action(action: str) -> None:
         if action == "new_game":
-            game.new_campaign()
+            # NEW GAME pulls difficulty/victory from the settings the player set.
+            game.new_campaign(
+                difficulty=game.settings.get("difficulty"),
+                victory=game.settings.get("victory"),
+            )
             menus.hide()
         elif action == "continue":
             game.load_game("quick")
@@ -1457,9 +1661,17 @@ def run_windowed() -> None:
             menus.show_settings(game.settings)
         elif action == "howto":
             menus.show_howto(0)
+        elif action == "report":
+            menus.show_report(year_report(game))
         elif action == "save":
             game.save_game("quick")
             menus.show_pause()
+        elif action == "save_slot1":
+            game.save_game("slot1"); menus.show_pause()
+        elif action == "save_slot2":
+            game.save_game("slot2"); menus.show_pause()
+        elif action == "save_slot3":
+            game.save_game("slot3"); menus.show_pause()
         elif action == "resume":
             game.paused = False
             menus.hide()
@@ -1472,12 +1684,37 @@ def run_windowed() -> None:
             else:
                 menus.show_main(continue_available=bool(colony_savegame.list_saves()))
         elif action == "quit":
+            try:
+                game.steam.shutdown()
+            except Exception:
+                pass
             application.quit()
+
+    _last_real = time.time()
+
+    def update():
+        nonlocal _last_real
+        now = time.time()
+        real_dt = max(0.0, min(0.1, now - _last_real))
+        _last_real = now
+        try:
+            game.steam.tick(real_dt)
+        except Exception:
+            pass
+        if game.screen == "title" or game.paused:
+            game.update(0.0)
+            return
+        dt_days = real_dt * game.sim.warp_days_per_second
+        game.update(dt_days)
 
     def input(key):
         # --- menu states ----------------------------------------------------
         if game.screen == "title" or game.paused:
             if key == "escape" and game.screen == "title" and menus.screen == "main":
+                try:
+                    game.steam.shutdown()
+                except Exception:
+                    pass
                 application.quit()
                 return
             action = menus.handle(key)
@@ -1488,10 +1725,17 @@ def run_windowed() -> None:
             return
         # --- live play --------------------------------------------------------
         if key == "escape":
+            if game._pending_dispatch is not None:
+                game.cancel_pending_dispatch()
+                return
             game.paused = True
             menus.show_pause()
             return
         if key == "q":
+            try:
+                game.steam.shutdown()
+            except Exception:
+                pass
             application.quit()
             return
         if key == "left mouse down":
@@ -1500,7 +1744,10 @@ def run_windowed() -> None:
             game.hud.cycle_target(1)
             game.say(f"Target: {game.hud.selected_target()}")
         elif key == "enter":
-            game.dispatch_selected()
+            if game._pending_dispatch is not None:
+                game.dispatch_selected(confirm=True)
+            else:
+                game.dispatch_selected(confirm=False)
         elif key == "o" and game.scene is not None:
             game.scene.set_orbits_visible(not game.scene.orbits_visible)
         elif key == "f":
@@ -1548,7 +1795,10 @@ def run_windowed() -> None:
         elif key == "l":
             game.buy_tech()
         elif key == "k":
-            game.settings["quality"] = {"low": "medium", "medium": "high", "high": "low"}[game.settings["quality"]]
+            order = QUALITY_ORDER
+            current = game.settings.get("quality", "medium")
+            idx = order.index(current) if current in order else 0
+            game.settings["quality"] = order[(idx + 1) % len(order)]
             game.apply_settings()
             game.say(f"Quality: {game.settings['quality']}.")
         elif key == "n":
@@ -1558,9 +1808,14 @@ def run_windowed() -> None:
         elif key == "f5":
             game.save_game()
         elif key == "f9":
-            game.load_game()
+            game.try_load()
+        elif key == "f1":
+            menus.show_report(year_report(game))
+            game.paused = True
 
     # Ursina discovers the loop and input handler through this module's globals.
+    import sys as _sys
+    this_module = _sys.modules[__name__]
     this_module.update = update
     this_module.input = input
     globals()["update"] = update

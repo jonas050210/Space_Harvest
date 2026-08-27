@@ -384,15 +384,157 @@ TECHS = (
     ("plasma_lances", "Plasma Smelting Lances", 70, {"refinery": 1.5}),
 )
 
-# --- quality presets -----------------------------------------------------------
-# Flags feed OrbitalScene.apply_quality; "high" is everything on.
-QUALITY_PRESETS = {
-    "low": {"belt": False, "trails": False, "sky": True, "labels": True},
-    "medium": {"belt": True, "trails": True, "sky": True, "labels": True},
-    "high": {"belt": True, "trails": True, "sky": True, "labels": True},
+# --- campaign difficulty -------------------------------------------------------
+# Applied only in the game layer (credits, market absorption, wear, contracts).
+# The orbital core never sees difficulty names -- only the resulting numbers.
+DIFFICULTY_ORDER = ("director", "tight", "ironman")
+DIFFICULTY_MODES = {
+    "director": {
+        "label": "Director",
+        "blurb": "Default balance. Learn the windows, build the industry.",
+        "start_credits_mult": 1.0,
+        "market_absorption_mult": 1.0,
+        "hull_wear_mult": 1.0,
+        "contract_reward_mult": 1.0,
+        "refuel_rate_mult": 1.0,
+        "life_solar_mult": 1.0,
+        "ironman": False,
+        "permadeath_hull": False,
+    },
+    "tight": {
+        "label": "Tight Margins",
+        "blurb": "Lean treasury, harsher floods, slower refuel. No mercy pricing.",
+        "start_credits_mult": 0.70,
+        "market_absorption_mult": 0.70,
+        "hull_wear_mult": 1.15,
+        "contract_reward_mult": 0.95,
+        "refuel_rate_mult": 0.80,
+        "life_solar_mult": 0.90,
+        "ironman": False,
+        "permadeath_hull": False,
+    },
+    "ironman": {
+        "label": "Ironman",
+        "blurb": "One save. Critical hulls can wreck. No F9. The belt remembers.",
+        "start_credits_mult": 0.85,
+        "market_absorption_mult": 0.85,
+        "hull_wear_mult": 1.25,
+        "contract_reward_mult": 1.05,
+        "refuel_rate_mult": 0.85,
+        "life_solar_mult": 0.85,
+        "ironman": True,
+        "permadeath_hull": True,
+    },
 }
-QUALITY_ORDER = ("low", "medium", "high")
+DEFAULT_DIFFICULTY = "director"
+
+# --- victory / campaign goals --------------------------------------------------
+# Player picks one at NEW GAME. Endless never ends; charter is the Steam clear.
+VICTORY_ORDER = ("endless", "charter", "legacy")
+VICTORY_MODES = {
+    "endless": {
+        "label": "Endless Director",
+        "blurb": "No win screen. Seasonal Firsts forever.",
+        "credits": 0.0,
+        "tonnage": 0.0,
+        "aurellium": False,
+        "firsts_needed": 0,
+    },
+    "charter": {
+        "label": "Charter Complete",
+        "blurb": "100k cr, 10,000 t delivered, first aurellium shipment.",
+        "credits": 100_000.0,
+        "tonnage": 10_000.0,
+        "aurellium": True,
+        "firsts_needed": 0,
+    },
+    "legacy": {
+        "label": "Colony Legacy",
+        "blurb": "Hit 15 Firsts and keep the pantry alive -- a lasting charter.",
+        "credits": 50_000.0,
+        "tonnage": 5_000.0,
+        "aurellium": False,
+        "firsts_needed": 15,
+    },
+}
+DEFAULT_VICTORY = "endless"
+
+# Steam achievement ids mirror Firsts keys plus a few secrets. The runtime
+# writes steam/achievements_progress.json; a Steamworks wrapper can poll it.
+ACHIEVEMENTS = tuple(key for key, _label, _c, _r in FIRSTS) + (
+    "secret_stranded_rescue",
+    "secret_zero_incident_streak",
+    "secret_charter_clear",
+    "secret_ironman_year",
+)
+
+# --- quality presets -----------------------------------------------------------
+# Flags feed OrbitalScene.apply_quality. Tuned for the target PC
+# (i7-12700F / RTX 4060 Ti 8 GB): ultra is the showcase preset; low keeps
+# Steam Deck / integrated fallback playable. medium is the default ship.
+QUALITY_PRESETS = {
+    "low": {
+        "belt": False, "trails": False, "sky": True, "labels": True,
+        "corona": False, "flares": False, "reticle": True, "orbit_alpha": 0.25,
+        "belt_density": 0.0, "ship_lod": "simple", "msaa": 0, "vsync": True,
+        "bloom": False, "shadows": False, "particles": False,
+    },
+    "medium": {
+        "belt": True, "trails": True, "sky": True, "labels": True,
+        "corona": True, "flares": True, "reticle": True, "orbit_alpha": 0.42,
+        "belt_density": 0.55, "ship_lod": "full", "msaa": 2, "vsync": True,
+        "bloom": False, "shadows": False, "particles": False,
+    },
+    "high": {
+        "belt": True, "trails": True, "sky": True, "labels": True,
+        "corona": True, "flares": True, "reticle": True, "orbit_alpha": 0.55,
+        "belt_density": 0.85, "ship_lod": "full", "msaa": 4, "vsync": True,
+        "bloom": True, "shadows": False, "particles": True,
+    },
+    "ultra": {
+        "belt": True, "trails": True, "sky": True, "labels": True,
+        "corona": True, "flares": True, "reticle": True, "orbit_alpha": 0.70,
+        "belt_density": 1.0, "ship_lod": "full", "msaa": 8, "vsync": True,
+        "bloom": True, "shadows": True, "particles": True,
+    },
+}
+QUALITY_ORDER = ("low", "medium", "high", "ultra")
+
+# Display resolution presets (settings menu). windowed sizes; fullscreen uses
+# the desktop mode when the host supports it.
+RESOLUTION_ORDER = ("1280x720", "1440x900", "1600x900", "1920x1080", "2560x1440")
+DEFAULT_RESOLUTION = "1440x900"
+FOV_ORDER = (50, 55, 60, 70)
+DEFAULT_FOV = 55
+UI_SCALE_ORDER = (0.85, 1.0, 1.15, 1.30)
+DEFAULT_UI_SCALE = 1.0
+MASTER_VOLUME_STEPS = (0.0, 0.25, 0.5, 0.75, 1.0)
+DEFAULT_MASTER_VOLUME = 0.75
+
+# Default settings blob persisted in saves/_settings.json
+DEFAULT_SETTINGS = {
+    "quality": "medium",
+    "muted": False,
+    "glide": True,
+    "resolution": DEFAULT_RESOLUTION,
+    "fullscreen": False,
+    "vsync": True,
+    "fov": DEFAULT_FOV,
+    "ui_scale": DEFAULT_UI_SCALE,
+    "master_volume": DEFAULT_MASTER_VOLUME,
+    "difficulty": DEFAULT_DIFFICULTY,
+    "victory": DEFAULT_VICTORY,
+    "show_dossier": True,
+    "confirm_dispatch": True,
+}
+
+# Named save slots exposed in the pause menu (plus "quick" for F5).
+SAVE_SLOTS = ("quick", "slot1", "slot2", "slot3")
 
 # --- window / UI ------------------------------------------------------------
-WINDOW_TITLE = "Asteroid Colony Proto - Orbital Supply Chains"
+WINDOW_TITLE = "Orbital Supply Chains"
 WINDOW_SIZE = (1440, 900)
+# Steamworks app id placeholder (replace before store launch). Zero means
+# "no Steam"; steam_appid.txt is written beside the executable by the packager.
+STEAM_APP_ID = 0
+GAME_VERSION = "0.9.0-steam"

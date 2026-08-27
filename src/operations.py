@@ -228,8 +228,11 @@ class OpsSimulation(OrbitalSimulation):
         #: ship name -> installed parts {"tank": n, "drill": n, "quarters": n}
         self.upgrades: dict[str, dict[str, int]] = {}
         #: generic tech multipliers set by the game layer (depot_generation,
-        #: refinery, fatigue) -- the sim never knows tech names.
+        #: refinery, fatigue, hull_wear, refuel_rate) -- the sim never knows
+        #: tech or difficulty names, only numbers.
         self.tech_mults: dict[str, float] = {}
+        #: hull never drops below this (Ironman can set 0.0 for wrecks)
+        self.hull_floor = HULL_MIN_PCT
         #: body key -> refuel depot (player-built)
         self.depots: dict[str, Depot] = {}
         #: body key -> refinery station (player-built)
@@ -385,8 +388,11 @@ class OpsSimulation(OrbitalSimulation):
         if dv_ms <= 0.0:
             return
         factor = self.class_spec(ship.name)["wear_factor"]
+        # Difficulty (and future techs) scale wear via a generic multiplier.
+        factor *= float(self.tech_mults.get("hull_wear", 1.0))
         current = self.hull.get(ship.name, HULL_MAX_PCT)
-        self.hull[ship.name] = max(HULL_MIN_PCT, current - dv_ms * HULL_WEAR_PCT_PER_MS * factor)
+        floor = float(getattr(self, "hull_floor", HULL_MIN_PCT))
+        self.hull[ship.name] = max(floor, current - dv_ms * HULL_WEAR_PCT_PER_MS * factor)
 
     def affordable_targets(self, ship: Ship, margin: float = 1.15) -> list[tuple[str, float]]:
         """Campaign-network override of the base affordability scan."""
@@ -410,7 +416,9 @@ class OpsSimulation(OrbitalSimulation):
             headroom = full - ship.delta_v
             if headroom <= 0.0:
                 continue
-            amount = min(headroom, self.class_spec(ship.name)["refuel_rate"] * dt_days)
+            rate = self.class_spec(ship.name)["refuel_rate"] * float(
+                self.tech_mults.get("refuel_rate", 1.0))
+            amount = min(headroom, rate * dt_days)
             ship.delta_v += amount
             granted += amount
         return granted
@@ -645,8 +653,9 @@ class OpsSimulation(OrbitalSimulation):
             headroom = self.class_spec(ship.name)["delta_v"] - ship.delta_v
             if headroom <= 0.0:
                 continue
-            draw = min(headroom, depot.fuel_ms,
-                       self.class_spec(ship.name)["refuel_rate"] * dt_days)
+            rate = self.class_spec(ship.name)["refuel_rate"] * float(
+                self.tech_mults.get("refuel_rate", 1.0))
+            draw = min(headroom, depot.fuel_ms, rate * dt_days)
             if draw <= 0.0:
                 continue
             ship.delta_v += draw
@@ -868,7 +877,8 @@ class OpsSimulation(OrbitalSimulation):
             if mission is None or mission.leg not in (Leg.OUTBOUND, Leg.INBOUND):
                 continue
             current = self.hull.get(ship.name, HULL_MAX_PCT)
-            self.hull[ship.name] = max(HULL_MIN_PCT, current - wear * dt_days)
+            floor = float(getattr(self, "hull_floor", HULL_MIN_PCT))
+            self.hull[ship.name] = max(floor, current - wear * dt_days)
 
     # -- gravitational perturbations ------------------------------------------
     def tick_perturbations(self, dt_days: float) -> None:
@@ -1221,6 +1231,7 @@ class OpsSimulation(OrbitalSimulation):
                      for name, roster in self.crew.items()},
             "depots": [depot.to_json() for depot in self.depots.values()],
             "tech_mults": dict(self.tech_mults),
+            "hull_floor": float(getattr(self, "hull_floor", HULL_MIN_PCT)),
             "refineries": [r.to_json() for r in self.refineries.values()],
             "botanists": self.botanists,
             "perturb_timer": self._perturb_timer,
@@ -1281,6 +1292,7 @@ class OpsSimulation(OrbitalSimulation):
         sim._install_comet()
         sim.depots = {d["body_key"]: Depot.from_json(d) for d in data.get("depots", [])}
         sim.tech_mults = {k: float(v) for k, v in data.get("tech_mults", {}).items()}
+        sim.hull_floor = float(data.get("hull_floor", HULL_MIN_PCT))
         sim.refineries = {r["body_key"]: Refinery.from_json(r) for r in data.get("refineries", [])}
         sim.botanists = int(data.get("botanists", 0))
         sim._perturb_timer = float(data.get("perturb_timer",
