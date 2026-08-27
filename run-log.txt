@@ -28,3 +28,383 @@ $ (upstream) python vendor/asteroid-colony-upstream/test_overall.py
 
 # 4) porkchop plot
 wrote logs/porkchop.png
+===== Thu Aug 27 04:50:49 UTC 2026 pytest tests =====
+...........................................                              [100%]
+43 passed in 8.56s
+===== Thu Aug 27 04:51:02 UTC 2026 upstream asteroid-colony test_overall.py =====
+E                                                                        [100%]
+==================================== ERRORS ====================================
+____________________________ ERROR at setup of test ____________________________
+file /home/user/asteroid-colony-proto/vendor/asteroid-colony-upstream/test_overall.py, line 9
+  def test(name, cond):
+E       fixture 'name' not found
+>       available fixtures: cache, capfd, capfdbinary, caplog, capsys, capsysbinary, capteesys, doctest_namespace, monkeypatch, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory
+>       use 'pytest --fixtures [testpath]' for help on them.
+
+/home/user/asteroid-colony-proto/vendor/asteroid-colony-upstream/test_overall.py:9
+=========================== short test summary info ============================
+ERROR vendor/asteroid-colony-upstream/test_overall.py::test
+1 error in 0.01s
+===== Thu Aug 27 04:51:08 UTC 2026 upstream asteroid-colony test_overall.py (script) =====
+:prc(warning): Invalid integer value for ConfigVariable win-size: 576.0
+:prc(warning): Invalid integer value for ConfigVariable win-size: 1024.0
+:device(error): Error adding inotify watch on /dev/input: No such file or directory
+:device(error): Error opening directory /dev/input: No such file or directory
+AL lib: (WW) pulse_load: Failed to load libpulse.so.0
+AL lib: (WW) alc_initconfig: Failed to initialize backend "pulse"
+AL lib: (WW) alsa_load: Failed to load libasound.so.2
+AL lib: (WW) alc_initconfig: Failed to initialize backend "alsa"
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+:audio(error): Couldn't open default OpenAL device
+:audio(error): OpenALAudioManager: No open device or context
+:audio(error):   OpenALAudioManager is not valid, will use NullAudioManager
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+:audio(error): Couldn't open default OpenAL device
+:audio(error): OpenALAudioManager: No open device or context
+:audio(error):   OpenALAudioManager is not valid, will use NullAudioManager
+=== Asteroid Colony Tests ===
+✓ Import game.config
+✓ Import game.i18n
+✓ English translations available
+✓ Translation catalog is English-only
+✓ Load settings
+✓ Save settings
+✓ Savegame save/load
+✓ Initialize state
+✓ State resources
+✓ Add state resources
+✓ Economy: drone_cost
+✓ Economy: upgrade_cost
+✓ Research unlock
+✓ Drone role assignment
+✓ Logistics storage
+✓ Station placement
+✓ Contract offer
+✓ Event decision
+✓ Multiplayer session model
+✓ Derelict exploration
+✓ Milestone reward
+✓ Colony Director guidance
+✓ Entities import
+[93mwarning: No monitors found [0m
+package_folder: /home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/ursina
+asset_folder: vendor/asteroid-colony-upstream
+✓ Headless visual systems
+✓ Headless Ursina Boot
+
+=== Result: 25 passed, 0 failed ===
+===== Thu Aug 27 04:51:10 UTC 2026 headless sim 6000 days =====
+[game] Petrel delivered 240 t from metallic_belt
+[game] Kestrel delivered 220 t from inner_belt (20 t lost to full storage)
+[game] Petrel delivered 150 t from inner_belt (90 t lost to full storage)
+[game] Kestrel delivered 120 t from metallic_belt (120 t lost to full storage)
+[game] Kestrel delivered 120 t from inner_belt (120 t lost to full storage)
+[headless] 24000 frames over 6,000 sim-days
+  Kestrel pending  Inner Belt Field         6,974 m/s left
+  Petrel  pending  Inner Belt Field         6,986 m/s left
+  runs completed : 18
+  mass delivered : 4,320 t
+  delta-v spent  : 112,790 m/s
+  deliveries into colony economy: 18
+  colony storage : {'used': 615.0, 'capacity': 1500, 'delivered': 850.0}
+  research points: 212.5
+===== Thu Aug 27 04:51:38 UTC 2026 install headless GL packages =====
+Ign:1 http://deb.debian.org/debian bookworm InRelease
+Ign:2 http://deb.debian.org/debian bookworm-updates InRelease
+Ign:3 http://deb.debian.org/debian-security bookworm-security InRelease
+Ign:1 http://deb.debian.org/debian bookworm InRelease
+Ign:2 http://deb.debian.org/debian bookworm-updates InRelease
+Ign:3 http://deb.debian.org/debian-security bookworm-security InRelease
+Ign:1 http://deb.debian.org/debian bookworm InRelease
+Ign:2 http://deb.debian.org/debian bookworm-updates InRelease
+Ign:3 http://deb.debian.org/debian-security bookworm-security InRelease
+Err:1 http://deb.debian.org/debian bookworm InRelease
+  Connection failed [IP: 151.101.66.132 80]
+Err:2 http://deb.debian.org/debian bookworm-updates InRelease
+  Connection failed [IP: 151.101.130.132 80]
+Err:3 http://deb.debian.org/debian-security bookworm-security InRelease
+  Connection failed [IP: 151.101.66.132 80]
+Reading package lists...
+W: Failed to fetch http://deb.debian.org/debian/dists/bookworm/InRelease  Connection failed [IP: 151.101.66.132 80]
+W: Failed to fetch http://deb.debian.org/debian/dists/bookworm-updates/InRelease  Connection failed [IP: 151.101.130.132 80]
+W: Failed to fetch http://deb.debian.org/debian-security/dists/bookworm-security/InRelease  Connection failed [IP: 151.101.66.132 80]
+W: Some index files failed to download. They have been ignored, or old ones used instead.
+Reading package lists...
+Building dependency tree...
+Reading state information...
+E: Unable to locate package xvfb
+E: Unable to locate package libgl1
+E: Unable to locate package libglx-mesa0
+===== Thu Aug 27 04:51:50 UTC 2026 capture_frame without xvfb fallback =====
+:display(warning): Unable to load libpandagl.so: libGL.so.1: cannot open shared object file: No such file or directory
+:display(warning): Unable to load libtinydisplay.so: No error.
+:display(warning): Unable to load libpandadx8.so: No error.
+:display(warning): Unable to load libpandadx9.so: No error.
+:display(warning): Unable to load libp3headlessgl.so: libGL.so.1: cannot open shared object file: No such file or directory
+Known pipe types:
+(all display modules loaded.)
+[93mwarning: No monitors found [0m
+Traceback (most recent call last):
+  File "/home/user/asteroid-colony-proto/scripts/capture_frame.py", line 80, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/user/asteroid-colony-proto/scripts/capture_frame.py", line 29, in main
+    app = Ursina(title=WINDOW_TITLE, size=WINDOW_SIZE, borderless=False)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/ursina/scripts/singleton_decorator.py", line 4, in getinstance
+    cls._instance = cls(**kwargs)
+                    ^^^^^^^^^^^^^
+  File "/home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/ursina/main.py", line 65, in __init__
+    super().__init__(windowType=application.window_type)
+  File "/home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/direct/showbase/ShowBase.py", line 341, in __init__
+    self.openDefaultWindow(startDirect = False, props=props)
+  File "/home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/direct/showbase/ShowBase.py", line 1026, in openDefaultWindow
+    self.openMainWindow(*args, **kw)
+  File "/home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/direct/showbase/ShowBase.py", line 1061, in openMainWindow
+    self.openWindow(*args, **kw)
+  File "/home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/direct/showbase/ShowBase.py", line 771, in openWindow
+    win = func()
+          ^^^^^^
+  File "/home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/direct/showbase/ShowBase.py", line 751, in <lambda>
+    func = lambda : self._doOpenWindow(
+                    ^^^^^^^^^^^^^^^^^^^
+  File "/home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/direct/showbase/ShowBase.py", line 823, in _doOpenWindow
+    self.makeDefaultPipe()
+  File "/home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/direct/showbase/ShowBase.py", line 652, in makeDefaultPipe
+    self.notify.error(
+  File "/home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/direct/directnotify/Notifier.py", line 130, in error
+    raise exception(errorString)
+Exception: No graphics pipe is available!
+Your Config.prc file must name at least one valid panda display
+library via load-display or aux-display.
+===== Thu Aug 27 04:51:57 UTC 2026 retry apt via https mirrors =====
+Ign:1 https://deb.debian.org/debian bookworm InRelease
+Ign:2 https://deb.debian.org/debian bookworm-updates InRelease
+Ign:3 https://deb.debian.org/debian-security bookworm-security InRelease
+Ign:1 https://deb.debian.org/debian bookworm InRelease
+Ign:2 https://deb.debian.org/debian bookworm-updates InRelease
+Ign:3 https://deb.debian.org/debian-security bookworm-security InRelease
+Ign:1 https://deb.debian.org/debian bookworm InRelease
+Ign:2 https://deb.debian.org/debian bookworm-updates InRelease
+Ign:3 https://deb.debian.org/debian-security bookworm-security InRelease
+Err:1 https://deb.debian.org/debian bookworm InRelease
+  Could not handshake: The TLS connection was non-properly terminated. [IP: 151.101.2.132 443]
+Err:2 https://deb.debian.org/debian bookworm-updates InRelease
+  Could not handshake: The TLS connection was non-properly terminated. [IP: 151.101.2.132 443]
+Err:3 https://deb.debian.org/debian-security bookworm-security InRelease
+  Could not handshake: The TLS connection was non-properly terminated. [IP: 151.101.2.132 443]
+Reading package lists...
+W: Failed to fetch https://deb.debian.org/debian/dists/bookworm/InRelease  Could not handshake: The TLS connection was non-properly terminated. [IP: 151.101.2.132 443]
+W: Failed to fetch https://deb.debian.org/debian/dists/bookworm-updates/InRelease  Could not handshake: The TLS connection was non-properly terminated. [IP: 151.101.2.132 443]
+W: Failed to fetch https://deb.debian.org/debian-security/dists/bookworm-security/InRelease  Could not handshake: The TLS connection was non-properly terminated. [IP: 151.101.2.132 443]
+W: Some index files failed to download. They have been ignored, or old ones used instead.
+Reading package lists...
+Building dependency tree...
+Reading state information...
+E: Unable to locate package xvfb
+E: Unable to locate package libgl1
+E: Unable to locate package libglx-mesa0
+===== Thu Aug 27 04:52:09 UTC 2026 plot porkchop =====
+wrote logs/porkchop.png
+-rw-r--r-- 1 user user 89K Aug 27 04:52 logs/porkchop.png
+===== Thu Aug 27 04:52:46 UTC 2026 capture_frame requested xvfb command or documented fallback =====
+xvfb-run unavailable in sandbox after apt network failure; running capture_frame fallback
+[capture] windowed GL capture unavailable; using Pillow fallback
+[capture] GL error: RuntimeError('CAPTURE_FORCE_FALLBACK=1')
+Traceback (most recent call last):
+  File "/home/user/asteroid-colony-proto/scripts/capture_frame.py", line 209, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/user/asteroid-colony-proto/scripts/capture_frame.py", line 200, in main
+    return _fallback_capture(RuntimeError("CAPTURE_FORCE_FALLBACK=1"))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/asteroid-colony-proto/scripts/capture_frame.py", line 114, in _fallback_capture
+    trails[ship.name].append((float(ship.position[0]), float(ship.position[1])))
+                                    ^^^^^^^^^^^^^
+AttributeError: 'Ship' object has no attribute 'position'
+ls: cannot access 'logs/screenshot*.png': No such file or directory
+===== Thu Aug 27 04:53:03 UTC 2026 capture_frame fallback retry =====
+[capture] windowed GL capture unavailable; using Pillow fallback
+[capture] GL error: RuntimeError('CAPTURE_FORCE_FALLBACK=1')
+Traceback (most recent call last):
+  File "/home/user/asteroid-colony-proto/scripts/capture_frame.py", line 212, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/user/asteroid-colony-proto/scripts/capture_frame.py", line 203, in main
+    return _fallback_capture(RuntimeError("CAPTURE_FORCE_FALLBACK=1"))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/asteroid-colony-proto/scripts/capture_frame.py", line 148, in _fallback_capture
+    state = body.state_at(i / 239 * period)
+            ^^^^^^^^^^^^^
+AttributeError: 'Body' object has no attribute 'state_at'
+ls: cannot access 'logs/screenshot*.png': No such file or directory
+===== Thu Aug 27 04:53:15 UTC 2026 capture_frame fallback retry 2 =====
+[capture] windowed GL capture unavailable; using Pillow fallback
+[capture] GL error: RuntimeError('CAPTURE_FORCE_FALLBACK=1')
+[capture] wrote /home/user/asteroid-colony-proto/logs/screenshot.png (58442 bytes)
+[capture] frames=700 shots=1 runs=0 delivered=0t fallback=1
+-rw-r--r-- 1 user user 58K Aug 27 04:53 logs/screenshot.png
+===== Thu Aug 27 04:53:23 UTC 2026 capture_frame fallback final =====
+[capture] windowed GL capture unavailable; using Pillow fallback
+[capture] GL error: RuntimeError('CAPTURE_FORCE_FALLBACK=1')
+[game] Kestrel delivered 240 t from metallic_belt
+[game] Petrel delivered 220 t from inner_belt (20 t lost to full storage)
+[game] Kestrel delivered 150 t from inner_belt (90 t lost to full storage)
+[game] Petrel delivered 120 t from metallic_belt (120 t lost to full storage)
+[game] Kestrel delivered 120 t from inner_belt (120 t lost to full storage)
+[capture] wrote /home/user/asteroid-colony-proto/logs/screenshot.png (91782 bytes)
+[capture] frames=700 shots=1 runs=34 delivered=8160t fallback=1
+-rw-r--r-- 1 user user 90K Aug 27 04:54 logs/screenshot.png
+===== Thu Aug 27 04:54:08 UTC 2026 pytest tests final =====
+...........................................                              [100%]
+43 passed in 8.05s
+===== Thu Aug 27 04:54:16 UTC 2026 upstream asteroid-colony test_overall.py final =====
+:prc(warning): Invalid integer value for ConfigVariable win-size: 576.0
+:prc(warning): Invalid integer value for ConfigVariable win-size: 1024.0
+:device(error): Error adding inotify watch on /dev/input: No such file or directory
+:device(error): Error opening directory /dev/input: No such file or directory
+AL lib: (WW) pulse_load: Failed to load libpulse.so.0
+AL lib: (WW) alc_initconfig: Failed to initialize backend "pulse"
+AL lib: (WW) alsa_load: Failed to load libasound.so.2
+AL lib: (WW) alc_initconfig: Failed to initialize backend "alsa"
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+:audio(error): Couldn't open default OpenAL device
+:audio(error): OpenALAudioManager: No open device or context
+:audio(error):   OpenALAudioManager is not valid, will use NullAudioManager
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+:audio(error): Couldn't open default OpenAL device
+:audio(error): OpenALAudioManager: No open device or context
+:audio(error):   OpenALAudioManager is not valid, will use NullAudioManager
+=== Asteroid Colony Tests ===
+✓ Import game.config
+✓ Import game.i18n
+✓ English translations available
+✓ Translation catalog is English-only
+✓ Load settings
+✓ Save settings
+✓ Savegame save/load
+✓ Initialize state
+✓ State resources
+✓ Add state resources
+✓ Economy: drone_cost
+✓ Economy: upgrade_cost
+✓ Research unlock
+✓ Drone role assignment
+✓ Logistics storage
+✓ Station placement
+✓ Contract offer
+✓ Event decision
+✓ Multiplayer session model
+✓ Derelict exploration
+✓ Milestone reward
+✓ Colony Director guidance
+✓ Entities import
+[93mwarning: No monitors found [0m
+package_folder: /home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/ursina
+asset_folder: vendor/asteroid-colony-upstream
+✓ Headless visual systems
+✓ Headless Ursina Boot
+
+=== Result: 25 passed, 0 failed ===
+===== Thu Aug 27 04:54:16 UTC 2026 headless sim 6000 days final =====
+[game] Petrel delivered 240 t from metallic_belt
+[game] Kestrel delivered 220 t from inner_belt (20 t lost to full storage)
+[game] Petrel delivered 150 t from inner_belt (90 t lost to full storage)
+[game] Kestrel delivered 120 t from metallic_belt (120 t lost to full storage)
+[game] Kestrel delivered 120 t from inner_belt (120 t lost to full storage)
+[headless] 24000 frames over 6,000 sim-days
+  Kestrel pending  Inner Belt Field         6,974 m/s left
+  Petrel  pending  Inner Belt Field         6,986 m/s left
+  runs completed : 18
+  mass delivered : 4,320 t
+  delta-v spent  : 112,790 m/s
+  deliveries into colony economy: 18
+  colony storage : {'used': 615.0, 'capacity': 1500, 'delivered': 850.0}
+  research points: 212.5
+===== Thu Aug 27 04:54:39 UTC 2026 plot porkchop final =====
+wrote logs/porkchop.png
+===== Thu Aug 27 04:55:37 UTC 2026 workspace size / prune check =====
+du excluding .venv: 6.1M
+file count excluding .venv: 314
+remaining project caches: 0
+src/game diff vs upstream excluding caches:
+===== Thu Aug 27 05:06:37 UTC 2026 post-md-prune pytest =====
+...........................................                              [100%]
+43 passed in 8.88s
+===== Thu Aug 27 05:06:46 UTC 2026 post-md-prune upstream script =====
+:prc(warning): Invalid integer value for ConfigVariable win-size: 576.0
+:prc(warning): Invalid integer value for ConfigVariable win-size: 1024.0
+:device(error): Error adding inotify watch on /dev/input: No such file or directory
+:device(error): Error opening directory /dev/input: No such file or directory
+AL lib: (WW) pulse_load: Failed to load libpulse.so.0
+AL lib: (WW) alc_initconfig: Failed to initialize backend "pulse"
+AL lib: (WW) alsa_load: Failed to load libasound.so.2
+AL lib: (WW) alc_initconfig: Failed to initialize backend "alsa"
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+:audio(error): Couldn't open default OpenAL device
+:audio(error): OpenALAudioManager: No open device or context
+:audio(error):   OpenALAudioManager is not valid, will use NullAudioManager
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+:audio(error): Couldn't open default OpenAL device
+:audio(error): OpenALAudioManager: No open device or context
+:audio(error):   OpenALAudioManager is not valid, will use NullAudioManager
+=== Asteroid Colony Tests ===
+✓ Import game.config
+✓ Import game.i18n
+✓ English translations available
+✓ Translation catalog is English-only
+✓ Load settings
+✓ Save settings
+✓ Savegame save/load
+✓ Initialize state
+✓ State resources
+✓ Add state resources
+✓ Economy: drone_cost
+✓ Economy: upgrade_cost
+✓ Research unlock
+✓ Drone role assignment
+✓ Logistics storage
+✓ Station placement
+✓ Contract offer
+✓ Event decision
+✓ Multiplayer session model
+✓ Derelict exploration
+✓ Milestone reward
+✓ Colony Director guidance
+✓ Entities import
+[93mwarning: No monitors found [0m
+package_folder: /home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/ursina
+asset_folder: vendor/asteroid-colony-upstream
+✓ Headless visual systems
+✓ Headless Ursina Boot
+
+=== Result: 25 passed, 0 failed ===
+===== Thu Aug 27 05:06:47 UTC 2026 post-md-prune workspace check =====
+README.md
+project.md
+du excluding .venv: 6.8M
+file count excluding .venv: 355
+===== Thu Aug 27 05:06:50 UTC 2026 final md prune + cache prune =====
+README.md
+project.md
+remaining project caches: 0
+du excluding .venv: 6.3M
+file count excluding .venv: 322

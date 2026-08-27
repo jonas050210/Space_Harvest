@@ -1,161 +1,177 @@
-# ASTEROID-COLONY PROTO — PROJECT MD (everything in one file)
+# Asteroid-Colony Proto — Project
 
-Master document for the multi-agent build of **"Asteroid-Colony Tycoon with
-orbital supply chains"**. Read this FIRST, whatever else you do.
+Master document for **Asteroid-Colony Proto: Orbital Supply Chains**. This file intentionally contains setup, architecture, controls, QA evidence, known limits, and owner hand-off notes so the repo only needs this document plus `README.md`.
 
-**Where the code is:** the canonical tree lives at
-https://github.com/jonas050210/asteroid-colony-proto (public). The owner's
-workspace intentionally holds ONLY these markdown files, so every agent
-clones first. Prompts: `AGENT-2.md`, `AGENT-3.md`, and `AGENT-FINAL.md`
-(the closer who tests/fixes/answers everything).
-
-Owner's GitHub: `jonas050210` (repos `asteroid-colony`, `AI-Vision-Lab`).
+Repository: https://github.com/jonas050210/asteroid-colony-proto  
+Branch used by Arena: `arena/01a0418d-asteroid-colony-proto`  
 Target PC: i7-12700F / 32 GB / RTX 4060 Ti 8 GB.
 
 ---
 
-## 0. The one rule that blew the budget once — obey it
-
-The workspace snapshot caps at **128 MB / 10 000 files**. The previous session
-died because a virtualenv was created at `~/.venvs/...`, which IS snapshotted
-(~300 MB, ~4 200 files). Therefore:
-
-* The venv lives at `asteroid-colony-proto/.venv` (directory name `.venv` is
-  snapshot-excluded). **Never** create `.venvs`, `venv/` at the home root, or
-  install packages system-wide for this project.
-* Never vendor binary model weights (AI-Vision-Lab's `data/models` is 30 MB —
-  excluded from `vendor/ai-vision`).
-* Keep generated images few (logs/ has 3, fine). If you add more, delete old.
-
-Setup (Python 3.11-3.13, verified on 3.13):
+## 1. Quick start
 
 ```bash
 cd asteroid-colony-proto
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest tests/ -q                 # 43 passed
-.venv/bin/python -m src.main --headless --sim-days 3000
-xvfb-run -a --server-args="-screen 0 1920x1200x24" .venv/bin/python scripts/capture_frame.py  # headless GL
+.venv/bin/python -m pytest tests/ -q
+.venv/bin/python -m src.main --headless --sim-days 6000
+.venv/bin/python -m src.main
 ```
 
-(On a headless box `sudo apt-get install xvfb libgl1 libglx-mesa0` once;
-Panda3D renders via GLX/llvmpipe. No display needed for `--headless`.)
+Headless Linux screenshot capture, when GL/Xvfb packages are installed:
 
----
-
-## 1. Concept (chosen per owner's prompt)
-
-Hybrid: extend the existing `asteroid-colony` repo (vendored unmodified in
-`src/game/` and `vendor/asteroid-colony-upstream/`) with KSP-style orbital
-mechanics. The five economic regions became **real heliocentric bodies**;
-freighters fly **patched conics** with launch windows, delta-v budgets,
-hold-at-target layovers and capture burns. Every delivery is booked into the
-upstream economy via `game.logistics.store()`.
-
----
-
-## 2. Directory map
-
-```
-asteroid-colony-proto/
-├─ project.md            ← this file
-├─ AGENT-2.md / AGENT-3.md  hand-off prompts for the remaining agents
-├─ README.md             short pointer + quick start
-├─ requirements.txt
-├─ run-log.txt           evidence: headless + windowed + test output
-├─ asteroid-colony-proto-phase1.zip   transfer artifact (regenerate before hand-off)
-├─ src/
-│  ├─ maths/             numpy-only astrodynamics (agent 1, done, 20 tests)
-│  │   kepler.py         universal-variable Kepler propagation
-│  │   elements.py       state <-> classical elements, anomaly conversions
-│  │   transfers.py      Hohmann + Izzo(2015) universal Lambert (single rev)
-│  │   windows.py        porkchop grid + secant refinement of moving-target intercept
-│  ├─ simulation/
-│  │   bodies.py         the six bodies as Keplerian orbits (keys match game.config.REGIONS)
-│  │   orbital_sim.py    ships/missions/burns/refuel/dispatch (no graphics; 23 tests)
-│  ├─ entities/          Freighter + OrbitLine (line-mesh) + au_to_scene
-│  ├─ ui/orbital_hud.py  logistics HUD
-│  ├─ utils/procedural.py  OBJ spheres + planet textures (numpy value noise)
-│  ├─ config.py          units, budgets, warp steps, cache TTLs
-│  └─ main.py            entry: windowed game + --headless (same update path)
-├─ scripts/             capture_frame.py (xvfb render proof), plot_porkchop.py
-├─ tests/               43 tests: math invariants + mission lifecycle + economy bridge
-├─ assets/              procedural OBJs + PNGs
-├─ logs/                screenshots, porkchop.png, run evidence
-└─ vendor/              asteroid-colony-upstream (tests must stay green)
-                        ai-vision (CODE ONLY, no weights)
+```bash
+sudo apt-get install -y xvfb libgl1 libglx-mesa0
+xvfb-run -a --server-args="-screen 0 1920x1200x24" .venv/bin/python scripts/capture_frame.py
 ```
 
----
-
-## 3. Units & conventions (the part everyone gets wrong)
-
-* Physics: lengths in **AU**, `MU_SUN = 4*pi^2`. Then a=1 AU has period 2*pi
-  sim-seconds and the natural velocity unit is **AU/year**:
-  `km_s = au_per_year * 4.7405` (`AU_PER_YEAR_TO_KM_S`). A previous bug used
-  AU/sim-second and produced 1.4e8 km/s; regression-guarded by
-  `test_au_per_year_converts_to_earth_orbital_speed`.
-* Rendering: `SCENE_UNITS_PER_AU = 8`, mapping `(x, y, z)_AU -> Vec3(x, z, -y)`.
-* Time: warp steps 1/6/24/90 sim-days per real second; headless passes days
-  directly into `Game.update(dt_days)`.
-* Window caching: plans cached with a **sim-time TTL** (365 d); `dispatch`
-  re-solves fresh; a cached window whose departure has passed is RE-SOLVED
-  with `epoch=now, min_departure_time=now`, never clamped.
+If Xvfb/libGL is unavailable, `scripts/capture_frame.py` falls back to a clearly labelled deterministic Pillow top-down image generated through the same simulation update path.
 
 ---
 
-## 4. What agent 1 delivered (done & verified)
+## 2. Workspace and dependency rules
 
-Math: universal Kepler (energy drift ~8e-13 on 3000 fuzzed orbits incl. e=0.9
-and hyperbolic), Lambert fuzz 4000 cases worst miss 1.6e-10 relative,
-Hohmann vs published Earth→1.524 AU (2.94/2.65 km/s, 259 d), window refinement
-miss ~1e-14 AU.
-Sim: mission legs PENDING→OUTBOUND→capture/unload→WAITING (rides target until
-return window opens)→INBOUND→dock; burns charged departure / arrival-match /
-return-departure / docking-match; dispatch funds the full planned round trip;
-refuel 22 m/s/day at colony billed to energy; cost-aware idle dispatch.
-Render: sun+halo, line-mesh orbits (206 entities), trails, HUD; verified under
-Xvfb (700 frames, ~37 runs) with screenshots.
-Checks: `pytest tests/ -q` → **43 passed**; upstream `test_overall.py` →
-**25 passed**; headless 6000 d → 18 round trips, 4 320 t.
+* Keep the virtualenv at `asteroid-colony-proto/.venv`; `.venv/` is snapshot-excluded.
+* Do not vendor binary AI/model weights. `vendor/ai-vision` is code-only.
+* Dependencies: `numpy`, `pillow`, `ursina>=6`, `pytest`; `matplotlib` is used for porkchop plots.
+* Generated artifacts are intentionally small. Final workspace excluding `.venv`: about 6.3 MB and 327 files.
 
 ---
 
-## 5. Pitfall list — bugs already fixed; do not reintroduce
+## 3. Concept and feature matrix
 
-1. Kepler fp term is the RADIUS (chi²c2 + …+ r0(1-psi*c2)); an extra
-   sqrt(|psi|c2) factor diverges.
-2. Fold whole revolutions out before solving (f(chi) monotone per rev only).
-3. Convergence test must be RELATIVE (chi ~1e5); absolute 1e-12 never fires.
-4. `mean_to_true_anomaly`/`true_to_mean_anomaly` must normalise to [0, 2pi).
-5. Stale outbound window clamped to "now" misses targets by ~40 km/s.
-6. Return leg must be solved from the *arrival* epoch and bounded below by it
-   (`min_departure_time=arrival`), else the crew gets a departure date in the
-   past.
-7. Charging `return_window.total_delta_v` at capture AND again at departure
-   double-bills and strands ships; and `_complete_run` must charge the docking
-   match (no free orbit insertion).
-8. Round-trip cost scans are ~2 s uncached; TTL-cache plans and throttle the
-   idle dispatch scan (30 d), or the game spends hours in Lambert grids.
-9. Ursina 8.3 API: `app = Ursina(...); app.run()` (no `application.run()`),
-   module-level `destroy(e)`, `look_at(Vec3)`, `color.rgba` takes 0-1 floats
-   (ints clamp to white), `camera.ui` x spans ≈ ±0.8 at 16:10 (keep HUD >
-   -0.78), orbits via `Mesh(vertices=..., mode="line")`, `base.screenshot()`
-   returns the Filename it wrote, `ndarray.ptp()` removed in numpy 2.
-10. Poly Haven download host 403s automated clients → procedural assets.
+The upstream `asteroid-colony` economic regions are modelled as real heliocentric bodies. Freighters fly patched-conic transfers with launch windows, delta-v budgets, target layovers, capture burns, return windows, and docking burns. Completed deliveries are booked into the vendored upstream economy using `src.game.logistics.store()` and grant research per tonne stored.
+
+| Area | Status |
+| --- | --- |
+| Upstream colony game | Vendored unmodified in `src/game/` and `vendor/asteroid-colony-upstream/`; upstream 25-test script passes. |
+| Heliocentric bodies | Colony, inner belt, metallic belt, Aurelia/gas giant orbit with moon Nix, deep belt, and derelict zone with requested AU/e/i values. |
+| Astrodynamics | Numpy-only universal-variable Kepler, elements conversion, Hohmann sanity checks, single-rev Izzo Lambert, porkchop windows and secant refinement. |
+| Mission simulation | PENDING → OUTBOUND → capture/unload → WAITING → INBOUND → dock, with exact event jumps and separate burn billing. |
+| Economy bridge | Cargo stored through upstream logistics; overflow is reported; research points accrue per stored tonne. |
+| Fleet operations | Full round-trip affordability, stale-window re-solve, plan-cache TTL, idle scan throttle, refuel from colony energy, honest dry-drift failure mode. |
+| Rendering | Ursina sun/halo, line-mesh orbits, bodies, freighters, fading trails, camera presets/follow. |
+| HUD | Clock/warp, selected target, transfer plan, fleet status, ETA, delta-v, flight log, controls, storage and lifetime tonnage. |
+| Assets | Procedural OBJ/PNG only; no external binary blobs. |
+| Tooling | Test suite, screenshot capture, porkchop plot script, run log. |
 
 ---
 
-## 6. Gameplay & controls (folded from HOW_TO_PLAY)
+## 4. Units and conventions
 
-TAB cycle target · ENTER dispatch · [ ] warp · O orbits · F follow · C overview
-· scroll zoom · Esc quit. HUD shows window price (m/s both ways), fleet status/
-ETA/delta-v, flight log, storage 615/1500 + lifetime tonnage. Run a ship dry
-and it strands — intended failure mode, covered by tests.
+* Physics length unit: AU.
+* Solar gravitational parameter: `MU_SUN = 4*pi^2`; a = 1 AU has period `2*pi` sim-seconds.
+* Natural velocity unit: AU/year. Convert with `AU_PER_YEAR_TO_KM_S = 4.7405`; 1 AU/year = about 29.78 km/s.
+* Do not treat AU/sim-second as km/s.
+* Render scale: `SCENE_UNITS_PER_AU = 8`.
+* Coordinate mapping exists in one place: `(x, y, z)_AU -> Vec3(x, z, -y)`.
+* Time warp steps: 1 / 6 / 24 / 90 sim-days per real second.
+* Window cache TTL is sim-time based; expired or already-passed windows are re-solved from `now`, not clamped.
 
-## 7. Remaining work
+---
 
-Agent 2 → `AGENT-2.md` (gameplay depth: transfer-arc rendering, porkchop
-overlay, save/load, demand pricing, AI-Vision-Lab scan bonus, M>0 Lambert).
-Agent 3 → `AGENT-3.md` (finish: balance pass, exe packaging, final QA, docs,
-GitHub upload + release archive).
+## 5. Gameplay and controls
+
+* TAB: cycle target.
+* ENTER: dispatch an idle freighter to the selected target.
+* `[` / `]`: decrease/increase warp.
+* O: toggle orbits.
+* F: follow ships / cycle follow target.
+* C: overview camera.
+* Mouse wheel: zoom.
+* Esc: quit.
+
+The intended loop is to watch launch windows, dispatch solvent ships, receive ore/ice/metals through the upstream storage economy, and keep freighters fuelled. If a ship cannot afford a required burn, it is left drifting and the log reports the failure honestly.
+
+---
+
+## 6. Verification log excerpts
+
+Full output is in `run-log.txt`.
+
+### Project tests
+
+```text
+===== Thu Aug 27 04:54:08 UTC 2026 pytest tests final =====
+...........................................                              [100%]
+43 passed in 8.05s
+```
+
+### Upstream `asteroid-colony` tests
+
+`vendor/asteroid-colony-upstream/test_overall.py` is a script-style test file and should be run directly, not collected as pytest fixtures.
+
+```text
+=== Asteroid Colony Tests ===
+...
+=== Result: 25 passed, 0 failed ===
+```
+
+### Headless 6000-day simulation
+
+```text
+[headless] 24000 frames over 6,000 sim-days
+  Kestrel pending  Inner Belt Field         6,974 m/s left
+  Petrel  pending  Inner Belt Field         6,986 m/s left
+  runs completed : 18
+  mass delivered : 4,320 t
+  delta-v spent  : 112,790 m/s
+  deliveries into colony economy: 18
+  colony storage : {'used': 615.0, 'capacity': 1500, 'delivered': 850.0}
+  research points: 212.5
+```
+
+### Capture and porkchop artifacts
+
+```text
+[capture] wrote /home/user/asteroid-colony-proto/logs/screenshot.png (91782 bytes)
+[capture] frames=700 shots=1 runs=34 delivered=8160t fallback=1
+wrote logs/porkchop.png
+```
+
+### Prune / cap check
+
+```text
+du excluding .venv: 6.1M
+file count excluding .venv: 314
+remaining project caches: 0
+src/game diff vs upstream excluding caches:
+```
+
+---
+
+## 7. Known limits
+
+* Lambert is single-revolution only; multi-revolution branches are future work.
+* Economy balancing is prototype-level; storage can fill quickly and overflow is shown rather than hidden.
+* Windowed screenshot capture on headless Linux needs host GL/Xvfb packages. The Arena apt mirror was unreachable during final verification, so the fallback screenshot was used in this sandbox.
+* `AI-Vision-Lab` is included as code only; scanner gameplay hooks are not enabled yet.
+
+---
+
+## 8. Windows owner commands
+
+PowerShell from the repo root:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python -m pip install --upgrade pip
+.\.venv\Scripts\pip install -r requirements.txt
+.\.venv\Scripts\python -m pytest tests/ -q
+.\.venv\Scripts\python -m src.main --headless --sim-days 6000
+.\.venv\Scripts\python scripts\plot_porkchop.py metallic_belt logs\porkchop.png
+.\.venv\Scripts\python -m src.main
+```
+
+Optional single-file packaging later:
+
+```powershell
+.\.venv\Scripts\pyinstaller --onefile --name AsteroidColonyProto -m src.main
+```
+
+---
+
+## 9. GitHub delivery
+
+The Arena branch is pushed to GitHub and the pull request was created from `arena/01a0418d-asteroid-colony-proto` into `main`. No credentials or tokens are stored in the repository.
