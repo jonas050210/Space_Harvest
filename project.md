@@ -310,7 +310,7 @@ workspace     : ~6.5 MB / ~357 files excluding .venv and .git
 ### Full-economy self-test (latest session)
 
 The 6,000-day self-test sells every 90 days, grows the fleet, builds the deep-belt
-depot (to level 2) and an inner-belt refinery:
+depot (to level 2), an inner-belt refinery, and commissions every technology:
 
 ```text
 runs completed : 56        mass delivered : 8,382 t

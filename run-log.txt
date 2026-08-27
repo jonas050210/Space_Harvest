@@ -777,3 +777,17 @@ $ python -m pytest tests/ -q
 runs 27 | credits 158533 | firsts 15
 src/simulation + src/game diff vs e2543e3 (must be 0):
 0
+
+# =============================================================
+date: extra operand '%H:%M'
+Try 'date --help' for more information.
+# run-log.txt — CEO session: science in the self-test ()
+# =============================================================
+
+134 passed in 189.96s (0:03:09)
+=== Result: 25 passed, 0 failed ===
+6,000-day arc: runs 59 | credits 284907 | firsts 16/19
+techs owned by the autopilot: ['crew_rotation', 'isru_catalysts', 'plasma_lances', 'standard_contracts']
+tech mults: {'depot_generation': 1.5, 'refinery': 1.5, 'fatigue': 0.75}
+src/simulation + src/game diff vs e2543e3 (must be 0):
+0

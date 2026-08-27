@@ -1361,6 +1361,10 @@ def run_headless(sim_days: float, frames_per_day: int = 4, verbose: bool = True,
             refinery_cost = game.sim.refinery_upgrade_cost("inner_belt")
             if game.credits > refinery_cost + 9000.0:
                 game.sim.build_refinery("inner_belt")
+        # Science: spend research as it accumulates so the self-test
+        # exercises the tech path end to end (multipliers, discounts).
+        if game.colony.state.get("research_points", 0.0) > 80.0:
+            game.buy_tech()
 
     if verbose:
         print(f"[headless] {game.frames} frames over {sim_days:,.0f} sim-days")
