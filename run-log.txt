@@ -340,3 +340,71 @@ du excluding .venv: 6.1M
 file count excluding .venv: 314
 remaining project caches: 0
 src/game diff vs upstream excluding caches:
+===== Thu Aug 27 05:06:37 UTC 2026 post-md-prune pytest =====
+...........................................                              [100%]
+43 passed in 8.88s
+===== Thu Aug 27 05:06:46 UTC 2026 post-md-prune upstream script =====
+:prc(warning): Invalid integer value for ConfigVariable win-size: 576.0
+:prc(warning): Invalid integer value for ConfigVariable win-size: 1024.0
+:device(error): Error adding inotify watch on /dev/input: No such file or directory
+:device(error): Error opening directory /dev/input: No such file or directory
+AL lib: (WW) pulse_load: Failed to load libpulse.so.0
+AL lib: (WW) alc_initconfig: Failed to initialize backend "pulse"
+AL lib: (WW) alsa_load: Failed to load libasound.so.2
+AL lib: (WW) alc_initconfig: Failed to initialize backend "alsa"
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+:audio(error): Couldn't open default OpenAL device
+:audio(error): OpenALAudioManager: No open device or context
+:audio(error):   OpenALAudioManager is not valid, will use NullAudioManager
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+AL lib: (EE) ALCplaybackOSS_open: Could not open /dev/dsp: No such file or directory
+AL lib: (WW) alcSetError: Error generated on device (nil), code 0xa004
+:audio(error): Couldn't open default OpenAL device
+:audio(error): OpenALAudioManager: No open device or context
+:audio(error):   OpenALAudioManager is not valid, will use NullAudioManager
+=== Asteroid Colony Tests ===
+✓ Import game.config
+✓ Import game.i18n
+✓ English translations available
+✓ Translation catalog is English-only
+✓ Load settings
+✓ Save settings
+✓ Savegame save/load
+✓ Initialize state
+✓ State resources
+✓ Add state resources
+✓ Economy: drone_cost
+✓ Economy: upgrade_cost
+✓ Research unlock
+✓ Drone role assignment
+✓ Logistics storage
+✓ Station placement
+✓ Contract offer
+✓ Event decision
+✓ Multiplayer session model
+✓ Derelict exploration
+✓ Milestone reward
+✓ Colony Director guidance
+✓ Entities import
+[93mwarning: No monitors found [0m
+package_folder: /home/user/asteroid-colony-proto/.venv/lib/python3.11/site-packages/ursina
+asset_folder: vendor/asteroid-colony-upstream
+✓ Headless visual systems
+✓ Headless Ursina Boot
+
+=== Result: 25 passed, 0 failed ===
+===== Thu Aug 27 05:06:47 UTC 2026 post-md-prune workspace check =====
+README.md
+project.md
+du excluding .venv: 6.8M
+file count excluding .venv: 355
+===== Thu Aug 27 05:06:50 UTC 2026 final md prune + cache prune =====
+README.md
+project.md
+remaining project caches: 0
+du excluding .venv: 6.3M
+file count excluding .venv: 322
