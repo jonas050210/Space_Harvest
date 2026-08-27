@@ -103,6 +103,21 @@ class Market:
         price = base * self.demand[res] * seasonal * flood_mult
         return max(MARKET_PRICE_FLOOR_FRACTION * base, price)
 
+    def part_price(self, part_key: str, already_owned: int = 0) -> float:
+        """Credits for an upgrade part: seasonal swing + count escalation.
+
+        Each part has its own season (see ``PARTS_SEASON_DAYS``) so there is
+        a real buy-low window; every installed unit raises the next price.
+        """
+        from .config import PARTS_CATALOG, PARTS_PRICE_ESCALATION, PARTS_SEASON_DAYS
+
+        info = PARTS_CATALOG[part_key]
+        season = 1.0 + MARKET_SEASONAL_AMPLITUDE * math.sin(
+            2.0 * math.pi * self.day / PARTS_SEASON_DAYS[part_key]
+            + 0.7 * (list(PARTS_CATALOG).index(part_key) + 1)
+        )
+        return info["base_price"] * season * PARTS_PRICE_ESCALATION ** already_owned
+
     def trend(self, res: str, lookback_days: float = 20.0) -> str:
         """'^' rising, 'v' falling, '=' flat versus ``lookback_days`` ago."""
         target_day = self.day - lookback_days

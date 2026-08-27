@@ -48,6 +48,7 @@ from src.config import (  # noqa: E402
     CREW_HIRE_COST,
     DEPOT_BUILD_COST,
     HULL_CRITICAL_PCT,
+    PARTS_CATALOG,
     MARKET_BASE_PRICES,
     REDISPATCH_SCAN_DAYS,
     SHIP_CLASSES,
@@ -486,6 +487,7 @@ class Game:
             "window_open": self.window_is_open,
             "windows_board": self._windows_board,
             "depot_line": self._depot_hud_line(),
+            "parts_hint": self._parts_hint_line(),
             "depot_hint": self._depot_hint_line(),
             "tutorial": self.tutorial_text,
             "power_load": self.power_load,
@@ -533,13 +535,21 @@ class Game:
         return (f"Order: {contract.resource} {pct:.0f}% by {days_left:,.0f} d "
                 f"({contract.faction})")
 
+    def _parts_hint_line(self) -> str:
+        ship = self._best_part_ship()
+        if ship is None:
+            return ""
+        return "Parts [T]ank [Y]drill [U]arters [P]drones"
+
     def _depot_hud_line(self) -> str:
         if not self.sim.depots:
             return "No depots (R builds one: 3,500 cr)"
         parts = []
         for key, depot in sorted(self.sim.depots.items()):
-            parts.append(f"{self.sim.bodies[key].name} L{depot.level} "
-                         f"{depot.fuel_ms / 1000:.1f}k/{depot.capacity / 1000:.0f}k")
+            drones = depot.upgrades.get("drones", 0)
+            parts.append(f"{self.sim.bodies[key].name} L{depot.level}"
+                         + (f" D{drones}" if drones else "")
+                         + f" {depot.fuel_ms / 1000:.1f}k/{depot.capacity / 1000:.0f}k")
         return "Depots: " + "  ".join(parts)
 
     def _depot_hint_line(self) -> str:
@@ -711,6 +721,58 @@ class Game:
                     f"-- standing {self.contracts.reputation[contract.faction]:+.0f}.",
                     seconds=8.0,
                 )
+
+    def _best_part_ship(self):
+        """Docked-at-colony ship with the fewest upgrades: spread the love."""
+        candidates = [s for s in self.sim.ships
+                      if s.name not in self.sim.missions and s.origin == "colony"]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda s: sum(self.sim.upgrades.get(s.name, {}).values()))
+
+    def buy_part(self, part_key: str) -> None:
+        """Buy an upgrade part from the Earth parts market."""
+        info = PARTS_CATALOG.get(part_key)
+        if info is None or part_key == "drones":
+            self.say("Unknown part.")
+            return
+        ship = self._best_part_ship()
+        if ship is None:
+            self.say("No ship is docked at the colony for a refit.")
+            return
+        owned = sum(self.sim.upgrades.get(s.name, {}).get(part_key, 0)
+                    for s in self.sim.ships)
+        price = self.market.part_price(part_key, owned)
+        if self.credits < price:
+            self.say(f"{info['name']} costs {price:,.0f} cr; treasury {self.credits:,.0f} cr.")
+            return
+        ok, message = self.sim.install_part(ship.name, part_key)
+        if not ok:
+            self.say(message)
+            return
+        self.credits -= price
+        self._play_alert("build")
+        self.say(f"{message} Bill {price:,.0f} cr.", seconds=7.0)
+
+    def buy_drone_bay(self) -> None:
+        """Install a drone bay at the selected target's depot."""
+        target = self.hud.selected_target() if self.hud is not None else "deep_belt"
+        depot = self.sim.depots.get(target)
+        if depot is None:
+            self.say("Build a depot there first (R).")
+            return
+        owned = depot.upgrades.get("drones", 0)
+        price = self.market.part_price("drones", owned)
+        if self.credits < price:
+            self.say(f"A drone bay costs {price:,.0f} cr; treasury {self.credits:,.0f} cr.")
+            return
+        ok, message = self.sim.install_depot_part(target, "drones")
+        if not ok:
+            self.say(message)
+            return
+        self.credits -= price
+        self._play_alert("build")
+        self.say(f"{message} Bill {price:,.0f} cr.", seconds=7.0)
 
     def build_depot_selected(self) -> None:
         """Build (or upgrade) a refuel depot at the selected body.
@@ -1221,6 +1283,14 @@ def run_windowed() -> None:
             game.hire("botanist")
         elif key == "r":
             game.build_depot_selected()
+        elif key == "t":
+            game.buy_part("tank")
+        elif key == "y":
+            game.buy_part("drill")
+        elif key == "u":
+            game.buy_part("quarters")
+        elif key == "p":
+            game.buy_drone_bay()
         elif key == "n":
             game.toggle_mute()
         elif key == "scroll up":

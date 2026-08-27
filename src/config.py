@@ -259,6 +259,19 @@ LIFE_SHORTAGE_MORALE_DRAIN_PER_DAY = 3.0
 LIFE_SOLAR_ENERGY_PER_DAY = 1.5
 
 
+# --- upgrade parts (Earth parts market) ---------------------------------------
+# Buy with T (tank) / Y (drill) / U (quarters) for a docked ship, P for a
+# depot drone bay. Prices ride the same seasonal/noise economy as ore: buy
+# tanks when the parts market is cheap. Escalating counts keep it a decision.
+PARTS_CATALOG = {
+    "tank": {"name": "Drop Tanks", "base_price": 1800.0, "delta_v": 3500.0, "max_per_ship": 2},
+    "drill": {"name": "Deep Drill", "base_price": 2400.0, "mine_bonus": 0.25, "max_per_ship": 2},
+    "quarters": {"name": "Crew Quarters", "base_price": 1500.0, "rest_bonus": 0.5, "max_per_ship": 1},
+    "drones": {"name": "Depot Drone Bay", "base_price": 3200.0, "mine_per_day": 5.0, "max_per_depot": 2},
+}
+PARTS_PRICE_ESCALATION = 1.25
+PARTS_SEASON_DAYS = {"tank": 300.0, "drill": 340.0, "quarters": 260.0, "drones": 400.0}
+
 # --- the comet ----------------------------------------------------------------
 # "Vigil" is a long-period comet: perihelion inside the inner belt, aphelion
 # deep beyond Aurelia. Its windows are rare and its arrival moves FAST, so

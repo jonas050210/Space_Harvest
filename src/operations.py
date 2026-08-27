@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -95,6 +95,7 @@ from .config import (
     MINING_LOW_HULL_YIELD_PCT,
     MINING_RECOVERY_TAU_DAYS,
     MU_SUN,
+    PARTS_CATALOG,
     PLANNING_MAX_REVS,
     PLANNING_MULTI_REV_MIN_SAVING,
     PERTURB_DA_FRACTION,
@@ -124,6 +125,8 @@ class Depot:
     body_key: str
     level: int = 1
     fuel_ms: float = DEPOT_START_FUEL
+    #: installed parts: {"drones": n}
+    upgrades: dict = field(default_factory=dict)
 
     @property
     def capacity(self) -> float:
@@ -139,12 +142,13 @@ class Depot:
 
     def to_json(self) -> dict:
         return {"body_key": self.body_key, "level": self.level,
-                "fuel_ms": self.fuel_ms}
+                "fuel_ms": self.fuel_ms, "upgrades": dict(self.upgrades)}
 
     @classmethod
     def from_json(cls, data: dict) -> "Depot":
         return cls(body_key=data["body_key"], level=int(data.get("level", 1)),
-                   fuel_ms=float(data.get("fuel_ms", 0.0)))
+                   fuel_ms=float(data.get("fuel_ms", 0.0)),
+                   upgrades={k: int(v) for k, v in data.get("upgrades", {}).items()})
 
 
 @dataclass
@@ -193,6 +197,8 @@ class OpsSimulation(OrbitalSimulation):
         self.rng = random.Random(seed ^ 0x5EED)
         #: ship name -> roster of CrewMember
         self.crew: dict[str, list[CrewMember]] = {}
+        #: ship name -> installed parts {"tank": n, "drill": n, "quarters": n}
+        self.upgrades: dict[str, dict[str, int]] = {}
         #: body key -> refuel depot (player-built)
         self.depots: dict[str, Depot] = {}
         #: the network this campaign flies (extra bodies, e.g. a comet)
@@ -263,6 +269,7 @@ class OpsSimulation(OrbitalSimulation):
         ship.delta_v = spec["delta_v"]
         self.ship_class[name] = cls
         self.hull[name] = HULL_MAX_PCT
+        self.upgrades[name] = {}
         self._hire_crew(name)
         self.last_active[name] = self.time
         return ship
@@ -300,6 +307,43 @@ class OpsSimulation(OrbitalSimulation):
     def mining_hull(self, ship: Ship) -> float:
         return self.hull.get(ship.name, HULL_MAX_PCT)
 
+    # -- upgrade parts ---------------------------------------------------------
+    def effective_delta_v(self, ship_name: str) -> float:
+        """Class budget plus drop tanks."""
+        tanks = self.upgrades.get(ship_name, {}).get("tank", 0)
+        return self.class_spec(ship_name)["delta_v"] + tanks * PARTS_CATALOG["tank"]["delta_v"]
+
+    def ship_mine_bonus(self, ship_name: str) -> float:
+        drills = self.upgrades.get(ship_name, {}).get("drill", 0)
+        return 1.0 + drills * PARTS_CATALOG["drill"]["mine_bonus"]
+
+    def crew_rest_factor(self, ship_name: str) -> float:
+        quarters = self.upgrades.get(ship_name, {}).get("quarters", 0)
+        return 1.0 + quarters * PARTS_CATALOG["quarters"]["rest_bonus"]
+
+    def install_part(self, ship_name: str, part_key: str) -> tuple[bool, str]:
+        info = PARTS_CATALOG.get(part_key)
+        if info is None or part_key == "drones":
+            return False, "That is not a ship part."
+        owned = self.upgrades.setdefault(ship_name, {})
+        if owned.get(part_key, 0) >= info["max_per_ship"]:
+            return False, f"{ship_name} already carries the maximum {info['name']}s."
+        owned[part_key] = owned.get(part_key, 0) + 1
+        return True, f"{info['name']} installed on {ship_name}."
+
+    def install_depot_part(self, body_key: str, part_key: str) -> tuple[bool, str]:
+        depot = self.depots.get(body_key)
+        if depot is None:
+            return False, "Build a depot there first."
+        info = PARTS_CATALOG.get(part_key)
+        if info is None or part_key != "drones":
+            return False, "That is not a depot part."
+        owned = depot.upgrades.setdefault(part_key, 0)
+        if owned >= info["max_per_depot"]:
+            return False, f"The {self.bodies[body_key].name} depot is at its drone-bay limit."
+        depot.upgrades[part_key] = owned + 1
+        return True, f"Drone bay online at the {self.bodies[body_key].name} depot."
+
     # -- wear & maintenance --------------------------------------------------
     def _apply_wear(self, ship: Ship, dv_ms: float) -> None:
         if dv_ms <= 0.0:
@@ -326,7 +370,7 @@ class OpsSimulation(OrbitalSimulation):
         for ship in self.ships:
             if ship.name in self.missions or ship.origin != "colony":
                 continue
-            full = self.class_spec(ship.name)["delta_v"]
+            full = self.effective_delta_v(ship.name)
             headroom = full - ship.delta_v
             if headroom <= 0.0:
                 continue
@@ -414,7 +458,8 @@ class OpsSimulation(OrbitalSimulation):
                 self.reserved.get(target_key),
                 capacity_t=ship.capacity,
                 mode=self.mining_mode,
-                mine_bonus=spec["mine_bonus"] * self.crew_yield_factor(ship.name),
+                mine_bonus=spec["mine_bonus"] * self.crew_yield_factor(ship.name)
+                * self.ship_mine_bonus(ship.name),
                 hull_pct=self.mining_hull(ship),
             )
             if sum(payload.values()) < 1.0:
@@ -524,6 +569,40 @@ class OpsSimulation(OrbitalSimulation):
             granted += draw
         return granted
 
+    def _depot_drones_load(self, dt_days: float) -> None:
+        """Drone bays mine the local field into a waiting ship's hold.
+
+        Physically coherent idle income: while the crew holds for the return
+        window, the depot's drones keep hauling ore up, so the ship leaves
+        FULL instead of empty. Ore comes from the same depletion ledgers as
+        everything else -- strong, but not free.
+        """
+        if dt_days <= 0.0:
+            return
+        for ship in self.ships:
+            mission = self.missions.get(ship.name)
+            if mission is None or mission.leg is not Leg.WAITING:
+                continue
+            depot = self.depots.get(mission.target)
+            drone_levels = depot.upgrades.get("drones", 0) if depot else 0
+            if drone_levels <= 0:
+                continue
+            free = ship.capacity - ship.cargo_load
+            if free <= 0.5:
+                continue
+            tonnes = min(free, PARTS_CATALOG["drones"]["mine_per_day"] * drone_levels * dt_days)
+            payload = plan_extraction(
+                mission.target, self.ledger, None,
+                capacity_t=tonnes, mode="scrape",
+                mine_bonus=self.ship_mine_bonus(ship.name),
+                hull_pct=self.mining_hull(ship),
+            )
+            if sum(payload.values()) <= 0.05:
+                continue
+            self.ledger.commit(mission.target, payload)
+            for ore, amount in payload.items():
+                ship.cargo[ore] = ship.cargo.get(ore, 0.0) + amount
+
     # -- crew ----------------------------------------------------------------
     def crew_stats(self, ship_name: str) -> tuple[float, float]:
         """``(average morale, max fatigue)`` across a ship's roster."""
@@ -563,8 +642,9 @@ class OpsSimulation(OrbitalSimulation):
                     self.time - self.last_active.get(ship.name, self.time)
                     > CREW_IDLE_BOREDOM_DAYS * SIM_SECONDS_PER_DAY
                 )
+                rest_rate = CREW_FATIGUE_RECOVERY_PER_DAY * self.crew_rest_factor(ship.name)
                 for member in roster:
-                    member.fatigue = max(0.0, member.fatigue - CREW_FATIGUE_RECOVERY_PER_DAY * dt_days)
+                    member.fatigue = max(0.0, member.fatigue - rest_rate * dt_days)
                     if bored and member.fatigue < 30.0:
                         member.morale = max(
                             CREW_MORALE_BOREDOM_FLOOR,
@@ -827,6 +907,7 @@ class OpsSimulation(OrbitalSimulation):
         self.tick_perturbations(dt_days)
         self.tick_depots(dt_days)
         self._depot_refuel_waiting(dt_days)
+        self._depot_drones_load(dt_days)
         return entries
 
     # -- mission hooks (wear, depletion, incidents) --------------------------
@@ -941,7 +1022,8 @@ class OpsSimulation(OrbitalSimulation):
         report["class"] = self.ship_class.get(ship.name, DEFAULT_SHIP_CLASS)
         report["hull"] = self.hull.get(ship.name, HULL_MAX_PCT)
         report["capacity"] = ship.capacity
-        report["dv_max"] = self.class_spec(ship.name)["delta_v"]
+        report["dv_max"] = self.effective_delta_v(ship.name)
+        report["parts"] = dict(self.upgrades.get(ship.name, {}))
         return report
 
     # -- persistence ---------------------------------------------------------
@@ -959,6 +1041,7 @@ class OpsSimulation(OrbitalSimulation):
                 "delta_v": ship.delta_v,
                 "cargo": dict(ship.cargo),
                 "capacity": ship.capacity,
+                "upgrades": dict(self.upgrades.get(ship.name, {})),
             })
 
         def window_json(window) -> dict | None:
@@ -1065,6 +1148,7 @@ class OpsSimulation(OrbitalSimulation):
         sim._max_revs = PLANNING_MAX_REVS
         sim._multi_rev_min_saving = PLANNING_MULTI_REV_MIN_SAVING
         sim.crew = {}
+        sim.upgrades = {}
         sim.last_active = {}
         sim.trade_targets = tuple(TRADE_TARGETS)
         sim.bodies = dict(sim.bodies)
@@ -1100,6 +1184,7 @@ class OpsSimulation(OrbitalSimulation):
             sim.ships.append(ship)
             sim.ship_class[ship.name] = ship_data["class"]
             sim.hull[ship.name] = float(ship_data["hull"])
+            sim.upgrades[ship.name] = {k: int(v) for k, v in ship_data.get("upgrades", {}).items()}
 
         # Crew rosters; falls back to fresh hires for saves from older
         # versions that predate the crew system.

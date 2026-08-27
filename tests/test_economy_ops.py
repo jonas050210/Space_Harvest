@@ -1037,6 +1037,103 @@ def test_windows_board_lists_every_campaign_target():
 
 
 # --------------------------------------------------------------------------
+# Parts market, ship upgrades and depot drone bays
+# --------------------------------------------------------------------------
+
+def test_part_prices_scale_with_season_and_count():
+    early, late = Market(seed=3), Market(seed=3)
+    p0 = early.part_price("tank")
+    for _ in range(150):
+        late.update(1.0)
+    p1 = late.part_price("tank")
+    assert p0 > 0.0 and p1 > 0.0
+    assert late.part_price("tank", already_owned=1) > late.part_price("tank", already_owned=0)
+
+
+def test_ship_upgrades_change_the_numbers_they_claim_to():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    base_dv = sim.effective_delta_v("Kestrel")
+    sim.install_part("Kestrel", "tank")
+    assert sim.effective_delta_v("Kestrel") == base_dv + 3500.0
+    sim.install_part("Kestrel", "drill")
+    assert sim.ship_mine_bonus("Kestrel") > 1.0
+    sim.install_part("Kestrel", "quarters")
+    assert sim.crew_rest_factor("Kestrel") > 1.0
+    # Caps: two tanks, two drills, one quarters.
+    sim.install_part("Kestrel", "tank")
+    assert sim.effective_delta_v("Kestrel") == base_dv + 7000.0
+    ok, _ = sim.install_part("Kestrel", "tank")
+    assert not ok
+    ok, _ = sim.install_part("Kestrel", "quarters")
+    assert not ok
+
+
+def test_refuel_fills_drop_tanks_too():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim.install_part("Kestrel", "tank")
+    sim.ships[0].delta_v = 0.0
+    sim.refuel_docked_fleet(400.0)
+    assert sim.ships[0].delta_v == pytest.approx(sim.effective_delta_v("Kestrel"), abs=1.0)
+
+
+def test_game_buy_part_bills_and_installs():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.credits = 20000.0
+    game.buy_part("tank")  # buy while the fleet is still docked
+    assert sum(game.sim.upgrades.get("Kestrel", {}).values()) == 1
+    assert game.credits < 20000.0
+    game.update(1.0)  # the dispatcher may now fly a bigger tank outward
+
+
+def test_depot_drones_fill_a_waiting_ship():
+    from src.config import SIM_SECONDS_PER_DAY
+
+    sim = OpsSimulation(ship_names=("Hauler",), ship_classes={"Hauler": "hauler"})
+    ship = sim.ships[0]
+    sim.build_depot("inner_belt")
+    sim.install_depot_part("inner_belt", "drones")
+    assert sim.depots["inner_belt"].upgrades.get("drones") == 1
+    ok, _ = sim.dispatch(ship, "inner_belt")
+    assert ok
+    peak = 0.0
+    for _ in range(4000):
+        sim.step(3.0)
+        peak = max(peak, ship.cargo_load)
+        if not sim.missions:
+            break
+    # The ship held at the depot long enough for the drones to work it full.
+    assert peak > ship.capacity * 0.5
+    assert sim.ledger.extracted.get("inner_belt")  # veins drawn honestly
+    report = sim.ship_report(ship)
+    assert report["at_key"] == "colony"  # and it made it home
+
+
+def test_drone_bay_requires_a_depot_and_respects_its_cap():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    ok, _ = sim.install_depot_part("inner_belt", "drones")
+    assert not ok
+    sim.build_depot("inner_belt")
+    sim.install_depot_part("inner_belt", "drones")
+    sim.install_depot_part("inner_belt", "drones")
+    ok, _ = sim.install_depot_part("inner_belt", "drones")
+    assert not ok  # max_per_depot = 2
+
+
+def test_upgrades_survive_a_json_round_trip():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    sim.install_part("Kestrel", "tank")
+    sim.install_part("Kestrel", "drill")
+    sim.build_depot("deep_belt")
+    sim.install_depot_part("deep_belt", "drones")
+    restored = OpsSimulation.from_json(json.loads(json.dumps(sim.to_json())))
+    assert restored.upgrades["Kestrel"] == {"tank": 1, "drill": 1}
+    assert restored.depots["deep_belt"].upgrades == {"drones": 1}
+    assert restored.effective_delta_v("Kestrel") == sim.effective_delta_v("Kestrel")
+
+
+# --------------------------------------------------------------------------
 # The whole vertical slice through the real Game loop
 # --------------------------------------------------------------------------
 

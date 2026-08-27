@@ -179,6 +179,11 @@ class OrbitalHUD:
             line.text = ""
         for line, report in zip(self.fleet_lines, sim.fleet_report()):
             eta = f"  ETA {report['eta_days']:,.0f}d" if report["status"] in ("outbound", "inbound", "pending") else ""
+            parts = report.get("parts") or {}
+            tag = "".join(code * count for code, count in
+                          (("T", parts.get("tank", 0)), ("D", parts.get("drill", 0)),
+                           ("Q", parts.get("quarters", 0))))
+            tag = f" [{tag}]" if tag else ""
             hull = f"  H{report['hull']:3.0f}%" if "hull" in report else ""
             bar = ""
             if "dv_max" in report:
@@ -186,7 +191,7 @@ class OrbitalHUD:
                 bar = " " + "#" * filled + "." * (5 - filled)
             line.text = (
                 f"{report['name']:<8}{report['status']:<9}{report['at']:<18}"
-                f"{report['delta_v_left']:>6,.0f}{bar}{eta}{hull}"
+                f"{report['delta_v_left']:>6,.0f}{bar}{eta}{hull}{tag}"
             )
             line.color = (
                 color.orange if report["status"] in ("outbound", "inbound")
@@ -284,7 +289,8 @@ class OrbitalHUD:
             line.text = ""
 
         depot_line = extra.get("depot_line", "")
-        lines[7].text = "  ".join(filter(None, (depot_line, extra.get("depot_hint", ""))))
+        parts_hint = extra.get("parts_hint", "")
+        lines[7].text = "  ".join(filter(None, (depot_line, extra.get("depot_hint", ""), parts_hint)))
         lines[7].color = color.cyan if "No depots" not in depot_line else color.white
         summary = "  ".join(filter(None, (extra.get("rep_line", ""), extra.get("life_line", ""))))
         lines[6].text = summary
