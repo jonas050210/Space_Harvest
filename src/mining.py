@@ -34,10 +34,26 @@ _POSITION_WEIGHTS = (1.0, 0.6, 0.35, 0.2)
 _JITTER = 0.45  # fingerprint variation applied to each weight
 
 _fingerprint_cache: dict[str, dict[str, float]] = {}
+#: ores for campaign-only bodies that live outside the module body table
+_EXTRA_BODY_ORES: dict[str, tuple[str, ...]] = {}
+
+
+def register_body_ores(body_key: str, ores: tuple[str, ...]) -> None:
+    """Declare the minable ores of a campaign-only body (e.g. the comet).
+
+    Deterministic fingerprints need a resource list; bodies that only exist
+    inside a campaign's own body table register theirs here.
+    """
+    clean = tuple(ore for ore in ores if ore in MINING_ORES) or ("iron",)
+    _EXTRA_BODY_ORES[body_key] = clean
+    _fingerprint_cache.pop(body_key, None)
 
 
 def _body_ores(body_key: str) -> tuple[str, ...]:
     """The minable ores a body offers, filtered to known upstream resources."""
+    extra = _EXTRA_BODY_ORES.get(body_key)
+    if extra is not None:
+        return extra
     body = BODIES[body_key]
     ores = tuple(ore for ore in body.resources if ore in MINING_ORES)
     return ores or ("iron",)

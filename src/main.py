@@ -174,7 +174,7 @@ class Game:
         from src.ui.orbital_hud import OrbitalHUD
 
         self.scene = OrbitalScene(parent=ursina_scene)
-        self.hud = OrbitalHUD(TRADE_TARGETS)
+        self.hud = OrbitalHUD(self.sim.trade_targets)
         self.set_camera_preset("network")
 
     def set_camera_preset(self, preset: str) -> None:

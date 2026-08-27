@@ -259,6 +259,17 @@ LIFE_SHORTAGE_MORALE_DRAIN_PER_DAY = 3.0
 LIFE_SOLAR_ENERGY_PER_DAY = 1.5
 
 
+# --- the comet ----------------------------------------------------------------
+# "Vigil" is a long-period comet: perihelion inside the inner belt, aphelion
+# deep beyond Aurelia. Its windows are rare and its arrival moves FAST, so
+# captures there are brutally expensive -- depot-assisted runs shine. The ore
+# is the jackpot: primordial ices and platinum-group metal from the slag crust.
+COMET_KEY = "comet_vigil"
+COMET_ELEMENTS = {"a": 4.45, "e": 0.80, "i_deg": 12.0, "raan_deg": 210.0,
+                  "argp_deg": 15.0, "nu_deg": 170.0}
+COMET_VEIN_BONUS = 1.0     # multiplier on its per-ore vein sizes
+COMET_TAIL_AU = 0.55       # tail sprite length at perihelion (scene-side)
+
 # --- refuel depots -----------------------------------------------------------
 # Player-built stations at trade bodies. A depot makes its own propellant from
 # local ice (ISRU flavour), so ships can top up far from home and fly deep

@@ -980,6 +980,63 @@ def test_game_build_depot_pays_and_reports():
 
 
 # --------------------------------------------------------------------------
+# The comet
+# --------------------------------------------------------------------------
+
+def test_comet_lives_in_the_campaign_not_the_module_table():
+    from src.simulation.bodies import BODIES as MODULE_BODIES
+
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    assert "comet_vigil" in sim.bodies and "comet_vigil" in sim.trade_targets
+    assert "comet_vigil" not in MODULE_BODIES  # the verified table is pristine
+    assert sim.bodies["comet_vigil"].elements.e > 0.7  # genuinely eccentric
+
+
+def test_comet_windows_are_rare_and_expensive_but_real():
+    from src.config import SIM_SECONDS_PER_DAY
+
+    sim = OpsSimulation(ship_names=("Scout",), ship_classes={"Scout": "scout"})
+    window = sim.launch_window("colony", "comet_vigil")
+    assert window is not None
+    assert window.tof / SIM_SECONDS_PER_DAY > 120.0  # a long arc
+    rt = sim.round_trip_cost_ms("colony", "comet_vigil")
+    assert rt is not None and rt > SHIP_CLASSES["freighter"]["delta_v"]
+    assert rt < SHIP_CLASSES["scout"]["delta_v"] * 1.15  # a scout can do it
+
+
+def test_comet_ore_is_primordial_ice_and_platinum():
+    from src.mining import body_fingerprint, plan_extraction, vein_size
+
+    fingerprint = body_fingerprint("comet_vigil")
+    assert set(fingerprint) == {"ice", "platinum"}
+    assert vein_size("comet_vigil", "platinum") > 0
+    ledger = YieldLedger()
+    payload = plan_extraction("comet_vigil", ledger, None, 240.0)
+    assert sum(payload.values()) == pytest.approx(240.0)
+
+
+def test_comet_survives_a_json_round_trip():
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    restored = OpsSimulation.from_json(json.loads(json.dumps(sim.to_json())))
+    assert "comet_vigil" in restored.bodies
+    assert restored.bodies["comet_vigil"].elements.a == pytest.approx(
+        sim.bodies["comet_vigil"].elements.a)
+
+
+def test_windows_board_lists_every_campaign_target():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.update(1.0)
+    game._update_windows_board()
+    names = {name for name, _, _ in game._windows_board}
+    for key in game.sim.trade_targets:
+        assert game.sim.bodies[key].name in names
+    days = [days for _, days, _ in game._windows_board]
+    assert days == sorted(days)  # soonest first
+
+
+# --------------------------------------------------------------------------
 # The whole vertical slice through the real Game loop
 # --------------------------------------------------------------------------
 

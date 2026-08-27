@@ -37,6 +37,9 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from .config import (
+    COMET_ELEMENTS,
+    COMET_KEY,
+    COMET_VEIN_BONUS,
     CREW_BOTANIST_SAVING_CAP,
     CREW_BOTANIST_WATER_SAVING,
     DEPOT_BUILD_COST,
@@ -104,9 +107,9 @@ from .config import (
 from .market import rng_from_json, rng_to_json
 from .maths.elements import OrbitalElements
 from .maths import windows as window_solver
-from .mining import YieldLedger, plan_extraction
+from .mining import YieldLedger, plan_extraction, register_body_ores
 from .simulation.bodies import BODIES
-from .simulation.bodies import BODIES, TRADE_TARGETS
+from .simulation.bodies import BODIES, Body, TRADE_TARGETS
 from .simulation.orbital_sim import Delivery, Leg, LogEntry, Mission, OrbitalSimulation, Ship
 
 
@@ -194,6 +197,7 @@ class OpsSimulation(OrbitalSimulation):
         self.depots: dict[str, Depot] = {}
         #: the network this campaign flies (extra bodies, e.g. a comet)
         self.trade_targets: tuple[str, ...] = tuple(TRADE_TARGETS)
+
         #: colony-side botanists (they work the hydroponics racks, not ships)
         self.botanists = 0
         # Gravitational perturbation clock: this sim owns its own body table,
@@ -221,6 +225,32 @@ class OpsSimulation(OrbitalSimulation):
         # Own the body table: perturbations replace entries here instead of
         # mutating the shared module-level BODIES the verified tests read.
         self.bodies = dict(self.bodies)
+        self._install_comet()
+
+    def _install_comet(self) -> None:
+        """Add "Vigil", a long-period comet only this campaign can see.
+
+        It lives in the campaign body table; the verified module table stays
+        pristine. Called from both ``__init__`` and ``from_json``.
+        """
+        if COMET_KEY in self.bodies:
+            return
+        el = OrbitalElements(a=COMET_ELEMENTS["a"], e=COMET_ELEMENTS["e"],
+                             i=math.radians(COMET_ELEMENTS["i_deg"]),
+                             raan=math.radians(COMET_ELEMENTS["raan_deg"]),
+                             argp=math.radians(COMET_ELEMENTS["argp_deg"]),
+                             nu=math.radians(COMET_ELEMENTS["nu_deg"]))
+        self.bodies[COMET_KEY] = Body(
+            key=COMET_KEY, name="Comet Vigil", elements=el,
+            radius_km=6.0, soi_km=9000.0,
+            palette=(0.72, 0.86, 1.0),
+            resources=("ice", "platinum"),
+            description="A long-period comet. Rare windows, fast arrival, primordial wealth.",
+            render_scale=0.45,
+        )
+        register_body_ores(COMET_KEY, ("ice", "platinum"))
+        if COMET_KEY not in self.trade_targets:
+            self.trade_targets = tuple(self.trade_targets) + (COMET_KEY,)
         self.stats.setdefault("incidents", 0)
         self.stats.setdefault("ore_mined_t", 0.0)
 
@@ -1037,6 +1067,8 @@ class OpsSimulation(OrbitalSimulation):
         sim.crew = {}
         sim.last_active = {}
         sim.trade_targets = tuple(TRADE_TARGETS)
+        sim.bodies = dict(sim.bodies)
+        sim._install_comet()
         sim.depots = {d["body_key"]: Depot.from_json(d) for d in data.get("depots", [])}
         sim.botanists = int(data.get("botanists", 0))
         sim._perturb_timer = float(data.get("perturb_timer",

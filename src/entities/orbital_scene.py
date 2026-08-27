@@ -67,6 +67,14 @@ class OrbitalScene:
             self._build_body(key, body)
         self._build_asteroid_belt()
 
+    def ensure_bodies(self, sim) -> None:
+        """Create entities for campaign-only bodies (the comet) on demand,
+        and leave existing ones alone."""
+        for key, body in sim.bodies.items():
+            if key == "nix" or key in self.body_entities:
+                continue
+            self._build_body(key, body)
+
     def _build_sky(self) -> None:
         """An inverted textured dome so the whole sky is a starfield."""
         stars = _tex("skybox_stars.png")
@@ -94,6 +102,20 @@ class OrbitalScene:
                 glow.texture = glow_texture
             self.sun_glow.append(glow)
 
+    def _orbit_points_from_elements(self, elements, samples: int = 192):
+        """Sample one full period of an orbit in AU (works for campaign
+        bodies and perturbed orbits alike -- rings always match the physics)."""
+        from ..config import MU_SUN
+        from ..maths import windows as window_solver
+
+        period = 2.0 * math.pi * math.sqrt(abs(elements.a) ** 3 / MU_SUN)
+        pts = []
+        for i in range(samples):
+            _, r = window_solver.body_state(elements, MU_SUN, period * i / samples)
+            pts.append(r)
+        pts.append(pts[0])
+        return pts
+
     def _build_body(self, key: str, body) -> None:
         rgb = body.palette
         entity = Entity(
@@ -115,19 +137,37 @@ class OrbitalScene:
                               rotation_x=78, unlit=True, double_sided=True)
         self.body_entities[key] = entity
 
-        pts = orbit_points(key, samples=192)
-        scene_pts = [au_to_scene(p) for p in pts]
+        scene_pts = [au_to_scene(p) for p in self._orbit_points_from_elements(body.elements)]
         line_color = color.rgba(min(1.0, rgb[0] * 1.1), min(1.0, rgb[1] * 1.1),
                                 min(1.0, rgb[2] * 1.1), 0.42)
         self.orbit_lines[key] = OrbitLine(scene_pts, line_color, parent=self.parent)
 
         # Billboard name tag floating above the body.
         tag = _tex(f"label_{key}.png")
+        if tag is None:
+            from src.utils.procedural import label_texture
+
+            tag_path = os.path.join(_TEX_ROOT, f"label_{key}.png")
+            if not os.path.isfile(tag_path):
+                from src.utils.procedural import write_png
+
+                write_png(tag_path, label_texture(body.name))
+            tag = tag_path
         if tag is not None:
             label = Entity(parent=entity, model="quad",
                            scale=(2.3, 0.41), position=(0, 1.35, 0),
                            texture=tag, billboard=True, unlit=True)
             self.labels[key] = label
+        if key == "comet_vigil":
+            self._build_comet_tail(entity)
+
+    def _build_comet_tail(self, comet_entity: Entity) -> None:
+        """A soft anti-sunward tail; alpha follows the inverse-square glow."""
+        tail = Entity(parent=comet_entity, model="quad",
+                      scale=(0.9, 7.0, 1.0), position=(0, 0, 0),
+                      color=color.rgba(0.55, 0.85, 1.0, 0.0),
+                      double_sided=True, unlit=True)
+        self.comet_tail = tail
 
     def _build_asteroid_belt(self) -> None:
         """A few hundred cheap rocks between the belt bodies, for depth.
@@ -187,6 +227,24 @@ class OrbitalScene:
 
         _ship_module.TRAILS_ENABLED = self.quality["trails"]
 
+    def _update_comet_tail(self, comet_pos) -> None:
+        """Point the tail away from the sun; brighten near perihelion."""
+        tail = getattr(self, "comet_tail", None)
+        if tail is None or comet_pos is None:
+            return
+        distance = comet_pos.length()
+        if distance < 1e-6:
+            return
+        away = comet_pos.normalized()
+        yaw = math.degrees(math.atan2(away.z, away.x)) - 90.0
+        tail.rotation_y = yaw
+        # Alpha follows the classic inverse-square comet glow.
+        strength = max(0.0, min(1.0, 1.6 / max(0.9, distance) ** 1.6 - 0.05))
+        tail.color = color.rgba(0.55, 0.85, 1.0, 0.55 * strength)
+        tail.scale = (0.9, 2.0 + 9.0 * strength, 1.0)
+        # Slide the sprite outward so it streams behind the nucleus.
+        tail.position = Vec3(0, -tail.scale_y / 2.0, 0)
+
     def set_reticle(self, key: str | None, sim) -> None:
         """Park the selection ring on the targeted body (or hide it)."""
         entity = self.body_entities.get(key) if key else None
@@ -216,11 +274,16 @@ class OrbitalScene:
         from ..config import MU_SUN
         from ..maths import windows as window_solver
 
+        self.ensure_bodies(sim)
+        comet_pos = None
         for key, entity in self.body_entities.items():
-            body = sim.bodies.get(key, BODIES[key])
+            body = sim.bodies[key] if key in sim.bodies else BODIES[key]
             r, _ = window_solver.body_state(body.elements, MU_SUN, sim.time)
             entity.position = au_to_scene(r)
             entity.rotation_y += 0.15
+            if key == "comet_vigil":
+                comet_pos = entity.position
+        self._update_comet_tail(comet_pos)
         for report in sim.fleet_report():
             ship_mesh = self.ships.get(report["name"])
             if ship_mesh is None:
