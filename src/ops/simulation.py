@@ -1233,7 +1233,7 @@ class OpsSimulation(OrbitalSimulation):
         """Hire a specialist. Botanists join the colony, others a ship."""
         if role == "botanist":
             self.botanists += 1
-            self.note(f"A botanist joins the colony hydroponics roster.")
+            self.note("A botanist joins the colony hydroponics roster.")
             return True, "Botanist hired for the colony."
         if ship_name is None or ship_name not in self.crew:
             return False, "Pick a ship for the new hire."

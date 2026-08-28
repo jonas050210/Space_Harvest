@@ -158,7 +158,7 @@ def _fallback_capture(reason: BaseException) -> int:
     if os.path.isfile(glow_path):
         for glow_px, opacity in ((340, 0.85), (720, 0.45)):
             sprite = Image.open(glow_path).convert("RGBA").resize((glow_px, glow_px))
-            alpha = sprite.split()[3].point(lambda a: int(a * opacity))
+            alpha = sprite.split()[3].point(lambda a, o=opacity: int(a * o))
             sprite.putalpha(alpha)
             img.paste(sprite, (cx - glow_px // 2, cy - glow_px // 2), sprite)
         draw = ImageDraw.Draw(img)

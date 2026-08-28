@@ -238,12 +238,12 @@ class OrbitalHUD:
                     ("Round-trip cost", f"{sim.delta_v_km_s(window.total_delta_v) * 1000.0 * 2:,.0f} m/s (est.)"),
                     ("Cargo", f"{SHIP_CARGO_CAPACITY:.0f} t hold"),
                 ]
-            for line, (label, value) in zip(self.plan_lines, rows):
+            for line, (label, value) in zip(self.plan_lines, rows, strict=False):
                 line.text = f"{label:<17}{value}"
 
         for line in self.fleet_lines:
             line.text = ""
-        for line, report in zip(self.fleet_lines, sim.fleet_report()):
+        for line, report in zip(self.fleet_lines, sim.fleet_report(), strict=False):
             eta = f"  ETA {report['eta_days']:,.0f}d" if report["status"] in ("outbound", "inbound", "pending") else ""
             parts = report.get("parts") or {}
             tag = "".join(code * count for code, count in
@@ -275,7 +275,7 @@ class OrbitalHUD:
         for line in self.log_lines:
             line.text = ""
         recent = sim.log[-len(self.log_lines):]
-        for line, entry in zip(self.log_lines, recent):
+        for line, entry in zip(self.log_lines, recent, strict=False):
             line.text = f"d{entry.time / SIM_SECONDS_PER_DAY:>6,.0f}  {entry.text}"
 
         if colony_state is not None:
@@ -289,7 +289,7 @@ class OrbitalHUD:
 
     # -- toasts and the launch banner -----------------------------------------
     def _update_toasts(self, toasts: list[str]) -> None:
-        for line, text in zip(self.toast_lines, toasts[-3:]):
+        for line, text in zip(self.toast_lines, toasts[-3:], strict=False):
             line.text = text
         for line in self.toast_lines[len(toasts[-3:]):]:
             line.text = ""
@@ -318,7 +318,7 @@ class OrbitalHUD:
             if ore in by_res:
                 ordered.append(by_res.pop(ore))
         ordered.extend(sorted(by_res.values(), key=lambda row: -float(row[1])))
-        for line, (res, price, trend) in zip(self.price_lines, ordered):
+        for line, (res, price, trend) in zip(self.price_lines, ordered, strict=False):
             line.text = f"{res:<11}{price:>7,.1f} cr/t  {trend}"
             line.color = (
                 color.yellow if trend == "^"
@@ -358,7 +358,7 @@ class OrbitalHUD:
             lines[5].color = color.orange
 
         board = extra.get("windows_board") or []
-        for line, (name, days, is_open) in zip(self.board_lines, board):
+        for line, (name, days, is_open) in zip(self.board_lines, board, strict=False):
             if is_open:
                 line.text = f"GO  {name}"
                 line.color = color.rgb(0.45, 1.0, 0.55)
@@ -396,7 +396,7 @@ class OrbitalHUD:
             lines[6].color = color.white
         self.tutorial.text = extra.get("tutorial", "")
         dossier = extra.get("dossier") or []
-        for line, text in zip(self.dossier_lines, dossier):
+        for line, text in zip(self.dossier_lines, dossier, strict=False):
             line.text = text[:72]
         for line in self.dossier_lines[len(dossier):]:
             line.text = ""

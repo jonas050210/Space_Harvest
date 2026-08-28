@@ -99,7 +99,7 @@ def body_fingerprint(body_key: str, seed: int = MINING_SEED) -> dict[str, float]
         for i in range(len(ores))
     ]
     total = sum(weights)
-    fingerprint = {ore: weight / total for ore, weight in zip(ores, weights)}
+    fingerprint = {ore: weight / total for ore, weight in zip(ores, weights, strict=True)}
     if seed == MINING_SEED:
         _fingerprint_cache[body_key] = dict(fingerprint)
     return fingerprint

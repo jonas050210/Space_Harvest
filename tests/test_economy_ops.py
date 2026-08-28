@@ -317,7 +317,7 @@ def test_ops_json_round_trip_and_continued_determinism():
     for _ in range(40):
         sim.step(2.0)
         restored.step(2.0)
-    for live, loaded in zip(sim.ships, restored.ships):
+    for live, loaded in zip(sim.ships, restored.ships, strict=True):
         assert live.r == pytest.approx(loaded.r, abs=1e-12)
         assert live.v == pytest.approx(loaded.v, abs=1e-12)
 
@@ -552,6 +552,7 @@ def test_sell_all_holds_back_the_life_support_ice_reserve():
 # Colony life support
 # --------------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_life_support_keeps_oxygen_and_food_up_while_ice_remains():
     from src.main import Game
 
@@ -569,6 +570,7 @@ def test_life_support_keeps_oxygen_and_food_up_while_ice_remains():
     assert not getattr(game, "_life_shortage_flag", False)
 
 
+@pytest.mark.slow
 def test_life_support_shortage_grinds_morale():
     from src.main import Game
 
@@ -586,6 +588,7 @@ def test_life_support_shortage_grinds_morale():
 # Value-aware auto-dispatch and the orientation checklist
 # --------------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_auto_dispatch_chooses_a_target_and_skips_worked_out_veins():
     from src.main import Game
     from src.mining import body_fingerprint, vein_size
@@ -605,6 +608,7 @@ def test_auto_dispatch_chooses_a_target_and_skips_worked_out_veins():
     assert game._choose_auto_target(ship) is None
 
 
+@pytest.mark.slow
 def test_tutorial_walks_the_whole_checklist(monkeypatch, tmp_path):
     from src.colony import savegame as colony_savegame
     from src.main import Game
@@ -657,6 +661,7 @@ def test_procedural_alerts_and_hum_are_valid_wav_files(tmp_path):
         assert 2.0 < seconds < 6.0  # a short seamless loop
 
 
+@pytest.mark.slow
 def test_audio_tick_is_a_noop_without_audio_objects():
     from src.main import Game
 
@@ -963,6 +968,7 @@ def test_depots_survive_a_json_round_trip():
     assert restored.depots["deep_belt"].level == 2
 
 
+@pytest.mark.slow
 def test_game_build_depot_pays_and_reports():
     from src.main import Game
 
@@ -1024,6 +1030,7 @@ def test_comet_survives_a_json_round_trip():
         sim.bodies["comet_vigil"].elements.a)
 
 
+@pytest.mark.slow
 def test_windows_board_lists_every_campaign_target():
     from src.main import Game
 
@@ -1077,6 +1084,7 @@ def test_refuel_fills_drop_tanks_too():
     assert sim.ships[0].delta_v == pytest.approx(sim.effective_delta_v("Kestrel"), abs=1.0)
 
 
+@pytest.mark.slow
 def test_game_buy_part_bills_and_installs():
     from src.main import Game
 
@@ -1159,7 +1167,9 @@ def test_menu_navigation_is_self_consistent(ursina_app):
 
     menus = MenuOverlay(continue_available=False)
     assert menus.screen == "main"
-    menus.handle("s"); menus.handle("s"); menus.handle("s")
+    menus.handle("s")
+    menus.handle("s")
+    menus.handle("s")
     assert menus.handle("enter") == "settings" and menus.screen == "settings"
     assert menus.handle("escape") == "back" and menus.screen == "main"
     for _ in range(4):
@@ -1381,6 +1391,7 @@ def test_navsuite_needs_aurellium_and_sharpens_planning():
     assert game.sim.pilots_discount("Kestrel") > base
 
 
+@pytest.mark.slow
 def test_goals_log_lists_the_next_unfired_milestones():
     from src.main import Game
 
@@ -1402,6 +1413,7 @@ def test_goals_log_lists_the_next_unfired_milestones():
 # The whole vertical slice through the real Game loop
 # --------------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_vertical_slice_mine_deliver_sell_buy():
     from src.config import START_CREDITS
     from src.main import Game
@@ -1433,6 +1445,7 @@ def test_vertical_slice_mine_deliver_sell_buy():
     assert game.credits == pytest.approx(10_000.0 - SHIP_CLASSES["scout"]["price"])
 
 
+@pytest.mark.slow
 def test_game_save_and_load_round_trip(monkeypatch, tmp_path):
     from src.colony import savegame as colony_savegame
     from src.main import Game
@@ -1764,6 +1777,7 @@ def test_swarm_capacity_scales_with_drone_bays():
     assert sim.swarm_capacity() <= SWARM_MAX_DRONES
 
 
+@pytest.mark.slow
 def test_swarm_launches_only_on_open_window_and_harvests():
     from src.main import Game
 
@@ -2083,6 +2097,18 @@ def test_game_version_is_current():
     assert GAME_VERSION.startswith("1.6")
 
 
+def test_pyproject_version_matches_game_version():
+    """The version lives in config and pyproject; keep them from drifting."""
+    import tomllib
+
+    from src.config import GAME_VERSION
+
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    with open(os.path.join(root, "pyproject.toml"), "rb") as handle:
+        data = tomllib.load(handle)
+    assert data["project"]["version"] == GAME_VERSION
+
+
 # --------------------------------------------------------------------------
 # v1.5 Far Charter: new fields, clipper, garden, worldseed
 # --------------------------------------------------------------------------
@@ -2296,6 +2322,7 @@ def test_flare_exposure_bites_harder_at_the_sungrazer():
     assert wear_sun == pytest.approx(FLARE_WEAR_PCT_PER_DAY * 10.0 * FLARE_EXPOSURE_BY_BODY["sungrazer"])
 
 
+@pytest.mark.slow
 def test_far_charter_firsts_fire():
     from src.main import Game
 
@@ -2315,6 +2342,7 @@ def test_far_charter_firsts_fire():
     assert game.firsts.get("first_argosy") is True
 
 
+@pytest.mark.slow
 def test_every_first_has_a_condition():
     from src.config import FIRSTS
     from src.main import Game

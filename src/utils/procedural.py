@@ -97,7 +97,7 @@ def planet_texture(size: int = 512, seed: int = 20260826,
     height = np.zeros((size, size), dtype=float)
     amplitude = 1.0
     total = 0.0
-    for octave, cells in enumerate((6, 12, 24, 48)):
+    for _octave, cells in enumerate((6, 12, 24, 48)):
         height += amplitude * _value_noise(size, cells, rng)
         total += amplitude
         amplitude *= 0.5

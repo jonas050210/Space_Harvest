@@ -17,6 +17,14 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python setup.py --build      # PyInstaller → dist/SpaceHarvest/
 ```
 
+Fast dev loop — lint plus the quick tests, skipping the long integration
+ones (CI runs everything on every push):
+
+```bash
+.venv/bin/ruff check .
+.venv/bin/python -m pytest tests/ -q -m "not slow"
+```
+
 Windows:
 
 ```powershell

@@ -2220,11 +2220,14 @@ def run_windowed() -> None:
             game.save_game("quick")
             menus.show_pause()
         elif action == "save_slot1":
-            game.save_game("slot1"); menus.show_pause()
+            game.save_game("slot1")
+            menus.show_pause()
         elif action == "save_slot2":
-            game.save_game("slot2"); menus.show_pause()
+            game.save_game("slot2")
+            menus.show_pause()
         elif action == "save_slot3":
-            game.save_game("slot3"); menus.show_pause()
+            game.save_game("slot3")
+            menus.show_pause()
         elif action == "resume":
             game.paused = False
             menus.hide()

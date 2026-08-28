@@ -33,6 +33,9 @@ Before store launch: set `STEAM_APP_ID` in `src/config/__init__.py`, wire
 ## Verification
 
 ```text
+ruff check .
 pytest tests/ -q
 python -m src.main --headless --sim-days 900
 ```
+
+CI runs all three (plus a rendering smoke) on every push.
