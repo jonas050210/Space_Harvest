@@ -1,13 +1,14 @@
-# Asteroid-Colony Proto — Project
+# Space Harvest — Project
 
-Master document for **Asteroid-Colony Proto: Orbital Supply Chains** — a stylised 3-D
-launch-window game with real astrodynamics underneath. This file intentionally contains
-the architecture, setup, units, every system, controls, QA evidence, known limits and
-owner hand-off notes, so the repo only needs this document plus `README.md`.
+Master document for **Space Harvest** — orbital farming on real launch windows,
+with patched-conic astrodynamics underneath. Architecture, setup, units, systems,
+controls, QA, known limits and hand-off notes live here alongside `README.md`
+and `STEAM.md`.
 
 Repository: https://github.com/jonas050210/asteroid-colony-proto
-Arena branch: `arena/01a041a3-asteroid-colony-proto` (all sessions pushed here)
+Arena branch: `arena/01a0449e-asteroid-colony-proto`
 Target PC: i7-12700F / 32 GB / RTX 4060 Ti 8 GB. Python 3.11–3.13, Ursina 8.3.
+Product name: **Space Harvest** (v1.0.0). Executable: `SpaceHarvest`.
 
 ---
 
@@ -49,6 +50,10 @@ Without GL, `scripts/capture_frame.py` falls back to a clearly labelled Pillow "
 art" render driven by the same `Game.update` path and the same committed textures.
 
 ---
+
+## 2. Architecture
+
+Product entry is **``setup.py``** only (play / shortcut / EXE). Package layout: ``src/ops`` (fleet), ``src/colony`` (economy bridge), ``src/config`` (knobs), sealed ``src/maths`` + ``src/simulation``, ``packaging/`` for PyInstaller. Shims: ``operations.py`` → ops, ``game/`` → colony.
 
 ## 2. Architecture
 
@@ -385,6 +390,19 @@ that feels off — all balance lives in `src/config.py`.
   verified delivery `e2543e3` (empty diff, re-checked this session).
 * Working tree clean at last verification; every session ended with the full test
   battery green before pushing.
+
+### 10.1 Steam-ready pass (v0.9.0-steam)
+
+CEO session shipped a Steam surface **without touching the orbital core**:
+
+* Graphics presets **low / medium / high / ultra** (belt density, trails, flares,
+  corona, ship LOD, MSAA, orbit alpha, bloom/particles flags).
+* Full settings menu: resolution, fullscreen, VSync, FOV, UI scale, master volume,
+  confirm-dispatch, body dossier, difficulty, victory mode.
+* Campaign: Director / Tight Margins / Ironman; Endless / Charter / Legacy victory;
+  achievement tracker + Steam soft-bridge; year report; dispatch confirm sheet.
+* Packaging: `scripts/build_steam.py`, `STEAM.md`, `steam/*.vdf`.
+* Tests: 144 passed (10 new campaign/Steam cases). See `STEAM.md`.
 
 ---
 

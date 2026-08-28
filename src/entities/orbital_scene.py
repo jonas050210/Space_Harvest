@@ -21,6 +21,8 @@ from ursina import Entity, Mesh, Texture, Vec3, color
 from ..config import SCENE_UNITS_PER_AU
 from ..simulation.bodies import BODIES, orbit_points
 from .ship import Freighter, OrbitLine
+from .drone import DroneSwarm
+import src.entities.drone as _drone_module
 
 _TEX_ROOT = os.path.join("assets", "textures", "game")
 
@@ -49,12 +51,26 @@ class OrbitalScene:
         self.orbits_visible = True
         self._asteroid_scatter: list[Entity] = []
         self.belt_mesh: Entity | None = None
-        self.quality = {"belt": True, "trails": True, "sky": True, "labels": True}
+        self.quality = {
+            "belt": True, "trails": True, "sky": True, "labels": True,
+            "corona": True, "flares": True, "reticle": True, "orbit_alpha": 0.42,
+            "belt_density": 0.55, "ship_lod": "full", "msaa": 2, "vsync": True,
+            "bloom": False, "shadows": False, "particles": False,
+        }
         ring = _tex("select_ring.png")
         self.reticle = Entity(parent=self.parent, model="quad", scale=3.0,
                               texture=ring, billboard=True, unlit=True,
                               color=color.rgba(0.45, 0.92, 1.0, 0.9),
                               enabled=False)
+        self.view_mode = "network"  # network | map | surface
+        self.surface_key: str | None = None
+        self.surface_props: list = []
+        self.map_grid_lines: list = []
+        self.atmospheres: dict = {}
+        self.swarms: dict = {}  # body_key -> DroneSwarm
+        self.route_overlay_lines: list = []
+        self._route_keys: list = []
+        self._map_grid_root = None
         self.build()
 
     # -- construction --------------------------------------------------------
@@ -136,6 +152,11 @@ class OrbitalScene:
                               color=color.rgba(0.88, 0.76, 0.96, ring_opacity),
                               rotation_x=78, unlit=True, double_sided=True)
         self.body_entities[key] = entity
+        # Soft atmosphere shell (readable on high/ultra).
+        atmo = Entity(parent=entity, model="sphere",
+                      scale=1.18, color=color.rgba(rgb[0], rgb[1], rgb[2], 0.18),
+                      unlit=True, double_sided=True)
+        self.atmospheres[key] = atmo
 
         scene_pts = [au_to_scene(p) for p in self._orbit_points_from_elements(body.elements)]
         line_color = color.rgba(min(1.0, rgb[0] * 1.1), min(1.0, rgb[1] * 1.1),
@@ -214,18 +235,62 @@ class OrbitalScene:
                                 color=color.rgb(0.45, 0.45, 0.52), unlit=True)
         self.belt_mesh.double_sided = False
 
-    def apply_quality(self, **flags: bool) -> None:
-        """Toggle expensive eye-candy: belt, trails, skybox, name tags."""
+    def apply_quality(self, **flags) -> None:
+        """Toggle eye-candy for the active graphics preset (low..ultra).
+
+        Boolean flags gate whole features. Numeric ones (orbit_alpha,
+        belt_density, msaa) scale cost. Display flags (vsync/msaa) are
+        applied by the game shell when a real window is up.
+        """
         self.quality.update(flags)
         if self.belt_mesh is not None:
-            self.belt_mesh.enabled = self.quality["belt"]
+            density = float(self.quality.get("belt_density", 1.0) or 0.0)
+            self.belt_mesh.enabled = bool(self.quality.get("belt", True)) and density > 0.01
+            # Soft scale: low density shrinks the merged belt visually.
+            if self.belt_mesh.enabled:
+                self.belt_mesh.scale = 0.55 + 0.45 * density
         if self.sky_dome is not None:
-            self.sky_dome.enabled = self.quality["sky"]
+            self.sky_dome.enabled = bool(self.quality.get("sky", True))
         for label in self.labels.values():
-            label.enabled = self.quality["labels"]
+            label.enabled = bool(self.quality.get("labels", True))
+        for glow in getattr(self, "sun_glow", []) or []:
+            glow.enabled = bool(self.quality.get("corona", True))
+        if hasattr(self, "reticle") and self.reticle is not None:
+            # Reticle visibility still follows selection; quality only arms it.
+            if not self.quality.get("reticle", True):
+                self.reticle.enabled = False
+        # Orbit ring alpha scales with the preset so ultra rings pop and low
+        # stays quiet on the draw budget.
+        alpha = float(self.quality.get("orbit_alpha", 0.42))
+        for line in self.orbit_lines.values():
+            try:
+                c = line.color
+                line.color = color.rgba(c.r, c.g, c.b, alpha)
+            except Exception:
+                pass
         import src.entities.ship as _ship_module
 
-        _ship_module.TRAILS_ENABLED = self.quality["trails"]
+        _ship_module.TRAILS_ENABLED = bool(self.quality.get("trails", True))
+        _ship_module.FLARES_ENABLED = bool(self.quality.get("flares", True))
+        lod = str(self.quality.get("ship_lod", "full"))
+        _ship_module.SHIP_LOD = lod
+        for ship in self.ships.values():
+            ship.apply_lod(lod)
+            # Refresh flare visibility under the new flag.
+            ship.set_thrusting(getattr(ship, "_thrusting", False))
+        _drone_module.DRONES_FX_ENABLED = bool(self.quality.get("drones_fx", True))
+        # Atmosphere shells.
+        show_atmo = bool(self.quality.get("atmosphere", True))
+        for atmo in self.atmospheres.values():
+            atmo.enabled = show_atmo and self.view_mode != "map"
+        # Map grid.
+        show_grid = bool(self.quality.get("map_grid", True)) and self.view_mode == "map"
+        for line in self.map_grid_lines:
+            line.enabled = show_grid
+        # Surface props detail.
+        show_surf = bool(self.quality.get("surface_detail", True)) and self.view_mode == "surface"
+        for prop in self.surface_props:
+            prop.enabled = show_surf
 
     def _update_comet_tail(self, comet_pos) -> None:
         """Point the tail away from the sun; brighten near perihelion."""
@@ -248,7 +313,7 @@ class OrbitalScene:
     def set_reticle(self, key: str | None, sim) -> None:
         """Park the selection ring on the targeted body (or hide it)."""
         entity = self.body_entities.get(key) if key else None
-        if entity is None:
+        if entity is None or not self.quality.get("reticle", True):
             self.reticle.enabled = False
             return
         self.reticle.enabled = True
@@ -267,6 +332,200 @@ class OrbitalScene:
         self.orbits_visible = visible
         for line in self.orbit_lines.values():
             line.enabled = visible
+
+
+    # -- view modes: network / system map / surface ---------------------------
+    def set_view_mode(self, mode: str, body_key: str | None = None, sim=None) -> str:
+        """Switch camera presentation mode. Returns the active mode."""
+        if mode not in ("network", "map", "surface"):
+            mode = "network"
+        self.view_mode = mode
+        self.surface_key = body_key if mode == "surface" else None
+        self._clear_surface_props()
+        self._clear_map_grid()
+        if mode == "map":
+            self._build_map_grid()
+            # Flatten-ish: hide surface clutter, keep orbits loud.
+            for line in self.orbit_lines.values():
+                line.enabled = True
+            if self.belt_mesh is not None:
+                self.belt_mesh.enabled = bool(self.quality.get("belt", True))
+        elif mode == "surface" and body_key:
+            self._build_surface_props(body_key, sim)
+            for line in self.orbit_lines.values():
+                line.enabled = False
+            if self.belt_mesh is not None:
+                self.belt_mesh.enabled = False
+        else:
+            for line in self.orbit_lines.values():
+                line.enabled = self.orbits_visible
+            if self.belt_mesh is not None:
+                density = float(self.quality.get("belt_density", 1.0) or 0.0)
+                self.belt_mesh.enabled = bool(self.quality.get("belt", True)) and density > 0.01
+        # Atmosphere visibility follows mode + quality.
+        show_atmo = bool(self.quality.get("atmosphere", True)) and mode != "map"
+        for key, atmo in self.atmospheres.items():
+            atmo.enabled = show_atmo and (mode != "surface" or key == body_key)
+        return mode
+
+    def _clear_surface_props(self) -> None:
+        from ursina import destroy
+        for prop in self.surface_props:
+            try:
+                destroy(prop)
+            except Exception:
+                pass
+        self.surface_props.clear()
+
+    def _clear_map_grid(self) -> None:
+        from ursina import destroy
+        for line in self.map_grid_lines:
+            try:
+                destroy(line)
+            except Exception:
+                pass
+        self.map_grid_lines.clear()
+
+    def _build_map_grid(self) -> None:
+        """AU ring grid for the system chart (top-down map mode)."""
+        if not self.quality.get("map_grid", True):
+            return
+        from ursina import Mesh
+        for au in (1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0):
+            pts = []
+            r = au * SCENE_UNITS_PER_AU
+            for i in range(65):
+                th = 2.0 * math.pi * i / 64
+                pts.append(Vec3(r * math.cos(th), 0.02, -r * math.sin(th)))
+            mesh = Mesh(vertices=pts, mode="line", thickness=1.0)
+            line = Entity(parent=self.parent, model=mesh,
+                          color=color.rgba(0.35, 0.55, 0.75, 0.35), unlit=True)
+            self.map_grid_lines.append(line)
+        # Sun marker cross.
+        for axis in (Vec3(2, 0, 0), Vec3(0, 0, 2)):
+            mesh = Mesh(vertices=[-axis, axis], mode="line", thickness=2.0)
+            line = Entity(parent=self.parent, model=mesh,
+                          color=color.rgba(1.0, 0.85, 0.4, 0.7), unlit=True)
+            self.map_grid_lines.append(line)
+
+    def _build_surface_props(self, body_key: str, sim=None) -> None:
+        """Scatter rocks, vein markers, and a lander pad on the selected body."""
+        entity = self.body_entities.get(body_key)
+        if entity is None or not self.quality.get("surface_detail", True):
+            return
+        rng = random.Random(hash(body_key) & 0xFFFFFFFF)
+        base = float(entity.scale_x)
+        # Ground disc (local "horizon").
+        ground = Entity(parent=entity, model="circle", scale=8.0,
+                        color=color.rgba(0.15, 0.14, 0.16, 0.95),
+                        rotation_x=90, unlit=True, double_sided=True)
+        self.surface_props.append(ground)
+        # Craggy rocks.
+        for _ in range(28):
+            ang = rng.uniform(0, math.tau)
+            rad = rng.uniform(1.2, 5.5)
+            rock = Entity(parent=entity, model="cube",
+                          scale=Vec3(rng.uniform(0.15, 0.45),
+                                     rng.uniform(0.1, 0.35),
+                                     rng.uniform(0.15, 0.45)),
+                          position=(rad * math.cos(ang), rng.uniform(0.05, 0.2), rad * math.sin(ang)),
+                          rotation=(rng.uniform(0, 40), rng.uniform(0, 360), rng.uniform(0, 40)),
+                          color=color.rgb(0.35 + rng.random() * 0.25,
+                                         0.32 + rng.random() * 0.2,
+                                         0.30 + rng.random() * 0.2),
+                          unlit=True)
+            self.surface_props.append(rock)
+        # Vein beacons (ore colours).
+        palette = {
+            "ice": (0.6, 0.9, 1.0), "iron": (0.7, 0.45, 0.3), "gold": (0.95, 0.85, 0.2),
+            "silver": (0.85, 0.85, 0.9), "platinum": (0.9, 0.9, 0.95),
+            "thorite": (0.4, 0.9, 0.35), "aurellium": (1.0, 0.55, 0.15),
+            "silicates": (0.75, 0.7, 0.55), "obsidian": (0.2, 0.15, 0.25),
+            "helium3": (0.4, 0.85, 1.0), "components": (0.55, 0.6, 0.68),
+            "electronics": (0.3, 0.95, 0.8),
+            "cobalt": (0.25, 0.45, 0.95), "magnetite": (0.45, 0.35, 0.40),
+            "xenonite": (0.75, 0.35, 1.0),
+        }
+        resources = ()
+        if sim is not None and body_key in sim.bodies:
+            resources = getattr(sim.bodies[body_key], "resources", ()) or ()
+        for i, ore in enumerate(resources[:6]):
+            rgb = palette.get(ore, (0.8, 0.8, 0.8))
+            ang = i * (math.tau / max(1, len(resources))) + 0.4
+            beacon = Entity(parent=entity, model="sphere", scale=0.22,
+                            position=(2.4 * math.cos(ang), 0.35, 2.4 * math.sin(ang)),
+                            color=color.rgb(*rgb), unlit=True)
+            beam = Entity(parent=beacon, model="cube", scale=Vec3(0.15, 2.2, 0.15),
+                          position=(0, 1.0, 0), color=color.rgba(rgb[0], rgb[1], rgb[2], 0.45), unlit=True)
+            self.surface_props.append(beacon)
+        # Landing pad.
+        pad = Entity(parent=entity, model="cube", scale=Vec3(1.4, 0.08, 1.4),
+                     position=(0, 0.06, 0), color=color.rgb(0.25, 0.28, 0.35), unlit=True)
+        ring = Entity(parent=pad, model="circle", scale=1.3, position=(0, 0.6, 0),
+                      rotation_x=90, color=color.rgba(0.4, 0.9, 1.0, 0.5), unlit=True)
+        self.surface_props.append(pad)
+
+    def set_route_overlay(self, body_keys: list[str], sim=None) -> None:
+        """Draw polyline hops on the system map / network view."""
+        from ursina import destroy, Mesh
+        for line in self.route_overlay_lines:
+            try:
+                destroy(line)
+            except Exception:
+                pass
+        self.route_overlay_lines.clear()
+        self._route_keys = list(body_keys)
+        if not body_keys or len(body_keys) < 2:
+            return
+        pts = []
+        for key in body_keys:
+            ent = self.body_entities.get(key)
+            if ent is not None:
+                pts.append(ent.position + Vec3(0, 0.4, 0))
+        if len(pts) < 2:
+            return
+        mesh = Mesh(vertices=pts, mode="line", thickness=3.0)
+        line = Entity(parent=self.parent, model=mesh,
+                      color=color.rgba(0.35, 1.0, 0.65, 0.85), unlit=True)
+        self.route_overlay_lines.append(line)
+        # Nodes
+        for pt in pts:
+            node = Entity(parent=self.parent, model="sphere", scale=0.35,
+                          position=pt, color=color.rgb(0.4, 1.0, 0.7), unlit=True)
+            self.route_overlay_lines.append(node)
+
+    def spawn_swarm(self, body_key: str, count: int, seed: int = 0) -> None:
+        """Start or refresh a harvest drone swarm around ``body_key``."""
+        entity = self.body_entities.get(body_key)
+        if entity is None:
+            return
+        existing = self.swarms.get(body_key)
+        if existing is not None:
+            existing.set_count(count)
+            return
+        self.swarms[body_key] = DroneSwarm(self.parent, entity, count=count, seed=seed)
+
+    def clear_swarm(self, body_key: str | None = None) -> None:
+        if body_key is None:
+            for key in list(self.swarms):
+                self.swarms[key].clear()
+                del self.swarms[key]
+            return
+        swarm = self.swarms.pop(body_key, None)
+        if swarm is not None:
+            swarm.clear()
+
+    def camera_for_view(self, mode: str, body_key: str | None = None):
+        """Return (position, look_at) suggestions for the game camera."""
+        if mode == "map":
+            return Vec3(0, 95, -1), Vec3(0, 0, 0)
+        if mode == "surface" and body_key and body_key in self.body_entities:
+            body = self.body_entities[body_key]
+            # Sit just above the surface pad looking across the field.
+            offset = Vec3(3.5, 2.2, -4.5) * max(0.6, float(body.scale_x))
+            return body.position + offset, body.position + Vec3(0, 0.3, 0)
+        return Vec3(0, 46, -52), Vec3(0, 0, 0)
+
 
     # -- per-frame -----------------------------------------------------------
     def update(self, sim) -> None:
@@ -294,3 +553,15 @@ class OrbitalScene:
             ship_mesh.set_loaded(report["cargo"] > 0.0,
                                  report["cargo"] / max(1.0, sim_ship.capacity))
             ship_mesh.set_thrusting(report["status"] in ("pending", "outbound", "inbound"))
+        # Drone swarms (window harvest).
+        # Keep route overlay glued to moving bodies.
+        if self._route_keys and self.route_overlay_lines:
+            self.set_route_overlay(self._route_keys, sim)
+        for key, swarm in list(self.swarms.items()):
+            ent = self.body_entities.get(key)
+            if ent is not None:
+                swarm.body_entity = ent
+            swarm.update(0.016)
+        # Surface mode: keep surface body large/centred feel via slow spin only.
+        if self.view_mode == "surface" and self.surface_key in self.body_entities:
+            self.body_entities[self.surface_key].rotation_y += 0.05

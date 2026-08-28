@@ -14,6 +14,10 @@ from ursina import Entity, Mesh, Vec3, color, destroy
 TRAIL_LENGTH = 90
 #: class-level trail switch (quality preset drives it)
 TRAILS_ENABLED = True
+#: engine flare billboards (quality preset drives it)
+FLARES_ENABLED = True
+#: "simple" drops extra silhouette parts for low presets
+SHIP_LOD = "full"
 _ENGINE_FLARE = os.path.join("assets", "textures", "game", "engine_glow.png")
 
 #: hull accent tint per ship class, so the fleet reads at a glance
@@ -22,6 +26,7 @@ CLASS_TINTS = {
     "freighter": (1.00, 1.00, 1.00),
     "refinery": (1.00, 0.92, 0.72),
     "hauler": (1.00, 0.85, 0.85),
+    "tanker": (0.55, 0.85, 1.00),
 }
 
 
@@ -40,6 +45,8 @@ class Freighter(Entity):
             hull_s = Vec3(0.30, 0.30, 0.40)
         elif class_key == "refinery":
             hull_s = Vec3(0.24, 0.24, 0.46)
+        elif class_key == "tanker":
+            hull_s, nose_s, nose_z = Vec3(0.18, 0.18, 0.70), Vec3(0.16, 0.16, 0.20), 0.48
         self.hull = Entity(parent=self, model="cube", scale=hull_s,
                            color=color.rgb(0.95, 0.97, 1.0))
         self.nose = Entity(parent=self, model="sphere", scale=nose_s,
@@ -59,6 +66,10 @@ class Freighter(Entity):
             self.extra_parts.append(Entity(
                 parent=self, model="cube", scale=Vec3(0.16, 0.24, 0.36),
                 position=(0.26, 0, 0.0), color=color.rgb(0.85, 0.88, 0.95)))
+        if class_key == "tanker":  # long cryo tank
+            self.extra_parts.append(Entity(
+                parent=self, model="sphere", scale=Vec3(0.22, 0.22, 0.50),
+                position=(0, 0.14, -0.05), color=color.rgb(0.45, 0.75, 0.95)))
         if class_key == "refinery":  # processing drum
             self.extra_parts.append(Entity(
                 parent=self, model="sphere", scale=Vec3(0.20, 0.20, 0.34),
@@ -70,11 +81,22 @@ class Freighter(Entity):
             self.engine_glow.texture = _ENGINE_FLARE
         self._trail: list[Entity] = []
         self._since_trail = 0.0
+        self._thrusting = False
+        self.apply_lod(SHIP_LOD)
 
     def apply_class_tint(self, class_key: str) -> None:
         """Tint the hull spine by ship class."""
         rgb = CLASS_TINTS.get(class_key, (1.0, 1.0, 1.0))
         self.hull.color = color.rgb(*rgb)
+
+    def apply_lod(self, lod: str = "full") -> None:
+        """Drop silhouette extras on the low preset to keep draw calls down."""
+        show = lod != "simple"
+        for part in self.extra_parts:
+            part.enabled = show
+        if not show and hasattr(self, "engine_glow"):
+            # simple LOD still allows a tiny flare if FLARES_ENABLED
+            pass
 
     def set_loaded(self, loaded: bool, fraction: float = 1.0) -> None:
         """Show or hide the cargo pod, sized by how full the hold is."""
@@ -82,7 +104,8 @@ class Freighter(Entity):
         self.pod.scale = Vec3(0.26, 0.26, 0.16 + 0.30 * max(0.0, min(1.0, fraction)))
 
     def set_thrusting(self, thrusting: bool) -> None:
-        self.engine_glow.enabled = thrusting
+        self._thrusting = thrusting
+        self.engine_glow.enabled = bool(thrusting and FLARES_ENABLED)
         self.engine_glow.scale = 0.42 if thrusting else 0.26
 
     def follow(self, world_position: Vec3, heading: Vec3 | None = None) -> None:
