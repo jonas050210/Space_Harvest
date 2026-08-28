@@ -77,7 +77,6 @@ def build(onefile: bool = False) -> str:
         "--hidden-import=src.app",
 
         "--hidden-import=src.config",
-        "--hidden-import=src.operations",
         "--hidden-import=src.routes",
         "--collect-all", "ursina",
         "--collect-all", "panda3d",

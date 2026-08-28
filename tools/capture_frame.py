@@ -5,7 +5,7 @@ Used as a rendering smoke test: it builds the same scene and HUD the player
 sees, flies the fleet for a while at high warp, then writes a PNG. Run it
 under a virtual display when there is no monitor:
 
-    xvfb-run -a --server-args="-screen 0 1600x1000x24" python scripts/capture_frame.py
+    xvfb-run -a --server-args="-screen 0 1600x1000x24" python tools/capture_frame.py
 
 Some locked-down CI sandboxes cannot install Xvfb/libGL. In that case this
 script falls back to a deterministic Pillow top-down capture driven by the same
@@ -125,9 +125,8 @@ def _fallback_capture(reason: BaseException) -> int:
             trails[ship.name].append((float(r[0]), float(r[1])))
             trails[ship.name] = trails[ship.name][-70:]
 
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import ImageFont
 
-    from src.utils.procedural import GAME_BODY_PALETTES
 
     def _font(size: int):
         try:
@@ -159,7 +158,7 @@ def _fallback_capture(reason: BaseException) -> int:
     if os.path.isfile(glow_path):
         for glow_px, opacity in ((340, 0.85), (720, 0.45)):
             sprite = Image.open(glow_path).convert("RGBA").resize((glow_px, glow_px))
-            alpha = sprite.split()[3].point(lambda a: int(a * opacity))
+            alpha = sprite.split()[3].point(lambda a, o=opacity: int(a * o))
             sprite.putalpha(alpha)
             img.paste(sprite, (cx - glow_px // 2, cy - glow_px // 2), sprite)
         draw = ImageDraw.Draw(img)

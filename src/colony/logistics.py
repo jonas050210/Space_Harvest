@@ -1,4 +1,4 @@
-"""Storage, drone delivery, and colony logistics accounting."""
+"""Storage and colony logistics accounting."""
 
 from . import research
 
@@ -39,18 +39,6 @@ def store(state, resources):
     return stored, overflow
 
 
-def deliver_drone_cargo(state, drone_state):
-    """Unload a drone's typed cargo into storage and clear its hold."""
-    resource_key = drone_state.get("cargo_resource")
-    amount = drone_state.get("cargo", 0)
-    if not resource_key or amount <= 0:
-        return {}, {}
-    stored, overflow = store(state, {resource_key: amount})
-    drone_state["cargo"] = 0
-    drone_state["cargo_resource"] = None
-    return stored, overflow
-
-
 def summary(state):
     """Return UI-friendly logistics metrics."""
     resources = state.get("resources", {})
@@ -58,22 +46,3 @@ def summary(state):
     used = sum(resources.get(key, 0) for key in MINING_ORES)
     capacity = capacity_for(state, "shared") * 5
     return {"used": used, "capacity": capacity, "delivered": sum(state.get("logistics", {}).get("lifetime_delivered", {}).values())}
-
-
-def process_production(state):
-    """Run one production cycle for every recipe supported by installed modules."""
-    from . import config
-
-    results = {}
-    modules = state.get("modules", [])
-    unlocked = state.get("research", {}).get("unlocked", [])
-    for key, recipe in config.PRODUCTION_RECIPES.items():
-        if recipe["module"] not in modules or recipe.get("research") and recipe["research"] not in unlocked:
-            continue
-        if all(state.get("resources", {}).get(resource, 0) >= amount for resource, amount in recipe["input"].items()):
-            for resource, amount in recipe["input"].items():
-                state["resources"][resource] -= amount
-            stored, overflow = store(state, recipe["output"])
-            results[key] = {"stored": stored, "overflow": overflow}
-            state.setdefault("logistics", {}).setdefault("production", {})[key] = state["logistics"].get("production", {}).get(key, 0) + 1
-    return results

@@ -41,10 +41,8 @@ from src.config import (
     STATION_MODULE_CATALOG,
     SWARM_BASE_DRONES,
     SWARM_COOLDOWN_DAYS,
-    SWARM_CREDIT_COST_PER_DRONE,
     SWARM_DRONES_PER_BAY,
     SWARM_DURATION_DAYS,
-    SWARM_ENERGY_COST_PER_DRONE,
     SWARM_MAX_DRONES,
     SWARM_YIELD_T_PER_DRONE_DAY,
     SURFACE_ISRU_DEPOT_GEN_BONUS,
@@ -52,13 +50,9 @@ from src.config import (
     SURFACE_SURVEY_BONUS,
     SURFACE_SURVEY_DAYS,
     RIVAL_DUMP_PERIOD_DAYS,
-    RIVAL_DUMP_TONNES,
     RIVAL_MINE_T_PER_DAY,
-    RIVAL_NAME,
-    SIM_SECONDS_PER_DAY,
     COMET_ELEMENTS,
     COMET_KEY,
-    COMET_VEIN_BONUS,
     CREW_BOTANIST_SAVING_CAP,
     MINING_EXTRA_SPAWNS,
     CREW_BOTANIST_WATER_SAVING,
@@ -97,6 +91,7 @@ from src.config import (
     DEBRIS_WEAR_PCT_PER_DAY,
     FLEET_NAME_POOL,
     FLARE_DURATION_DAYS_RANGE,
+    FLARE_EXPOSURE_BY_BODY,
     FLARE_MORALE_DRAIN_PER_DAY,
     FLARE_QUIET_DAYS_RANGE,
     FLARE_WARNING_DAYS,
@@ -733,10 +728,8 @@ class OpsSimulation(OrbitalSimulation):
                     f"{ship.name} tops up at {self.bodies[ship.origin].name} "
                     f"depot (+{draw:,.0f} m/s) before the next hop."
                 )
-        cargo = None
         if purpose == "harvest":
-            cargo = None  # let dispatch plan extraction
-            ok, message = self.dispatch(ship, dest, cargo=None)
+            ok, message = self.dispatch(ship, dest, cargo=None)  # let dispatch plan extraction
         else:
             ok, message = super().dispatch(ship, dest, cargo={"ice": 0.0})
             if ok:
@@ -1240,7 +1233,7 @@ class OpsSimulation(OrbitalSimulation):
         """Hire a specialist. Botanists join the colony, others a ship."""
         if role == "botanist":
             self.botanists += 1
-            self.note(f"A botanist joins the colony hydroponics roster.")
+            self.note("A botanist joins the colony hydroponics roster.")
             return True, "Botanist hired for the colony."
         if ship_name is None or ship_name not in self.crew:
             return False, "Pick a ship for the new hire."
@@ -1308,12 +1301,9 @@ class OpsSimulation(OrbitalSimulation):
 
         # Weather wear applies only to ships actually in flight; docked ships
         # sit inside the colony's shielding.
-        wear = 0.0
-        if self.flare_state == "flare":
-            wear += FLARE_WEAR_PCT_PER_DAY
-        if self.debris_active:
-            wear += DEBRIS_WEAR_PCT_PER_DAY
-        if wear <= 0.0:
+        flare_wear = FLARE_WEAR_PCT_PER_DAY if self.flare_state == "flare" else 0.0
+        debris_wear = DEBRIS_WEAR_PCT_PER_DAY if self.debris_active else 0.0
+        if flare_wear <= 0.0 and debris_wear <= 0.0:
             return
         for ship in self.ships:
             mission = self.missions.get(ship.name)
@@ -1322,11 +1312,18 @@ class OpsSimulation(OrbitalSimulation):
             current = self.hull.get(ship.name, HULL_MAX_PCT)
             floor = float(getattr(self, "hull_floor", HULL_MIN_PCT))
             resist = 0.0
+            exposure = 1.0
             if mission is not None:
                 resist = max(
                     self.body_weather_resist(mission.target),
                     self.body_weather_resist(getattr(ship, "origin", "") or ""),
                 )
+                # Solar exposure: bodies that skim the sun ride flares harder.
+                exposure = max(
+                    FLARE_EXPOSURE_BY_BODY.get(mission.target, 1.0),
+                    FLARE_EXPOSURE_BY_BODY.get(getattr(ship, "origin", "") or "", 1.0),
+                )
+            wear = flare_wear * exposure + debris_wear
             self.hull[ship.name] = max(floor, current - wear * (1.0 - resist) * dt_days)
 
     # -- gravitational perturbations ------------------------------------------

@@ -165,10 +165,8 @@ def build_exe(onefile: bool = False) -> str:
     print(f"[setup] Building {GAME_NAME} v{GAME_VERSION} ({name})...")
 
     pack = os.path.join(PROJECT_DIR, "packaging", "build_exe.py")
-    legacy = os.path.join(PROJECT_DIR, "scripts", "build_steam.py")
-    builder = pack if os.path.isfile(pack) else legacy
-    if os.path.isfile(builder):
-        cmd = [sys.executable, builder]
+    if os.path.isfile(pack):
+        cmd = [sys.executable, pack]
         if onefile:
             cmd.append("--onefile")
         try:

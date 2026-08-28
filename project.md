@@ -1,7 +1,7 @@
 # Space Harvest — Project
 
 Orbital farming on real launch windows, with patched-conic astrodynamics
-underneath. Product name **Space Harvest** v1.5.0. Executable: `SpaceHarvest`.
+underneath. Product name **Space Harvest** v1.6.0. Executable: `SpaceHarvest`.
 
 Repository: https://github.com/jonas050210/Space_Harvest
 
@@ -12,10 +12,16 @@ Target PC: i7-12700F / 32 GB / RTX 4060 Ti 8 GB. Python 3.11–3.13, Ursina 8.3.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest tests/ -q
+.venv/bin/ruff check .                        # lint gate (also in CI)
+.venv/bin/python -m pytest tests/ -q -m "not slow"   # fast loop (~2 min)
+.venv/bin/python -m pytest tests/ -q          # full suite (CI runs this)
 .venv/bin/python -m src.main --headless --sim-days 900
 .venv/bin/python setup.py
 ```
+
+CI (`.github/workflows/ci.yml`) runs ruff, the full suite, a 900-day
+headless smoke and a rendering smoke with the screenshot as an artifact on
+every push.
 
 ## Architecture
 
@@ -49,7 +55,8 @@ Balance knobs live in `src/config/__init__.py`.
 
 ## Known limits
 
-* Multi-revolution Lambert exists but almost never wins on this near-coplanar network.
+* Multi-revolution Lambert exists and Vagrant (i = 48 deg) is the first
+  body inclined enough for its branches to compete on price.
 * Economy is deterministic per version (RNG state is saved).
 * Quality flags `bloom` / `shadows` / `particles` / `star_twinkle` are reserved; Ultra is denser belts, trails, flares, MSAA.
 * Steamworks is a soft-bridge until `STEAM_APP_ID` is set.
@@ -57,4 +64,5 @@ Balance knobs live in `src/config/__init__.py`.
 ## Parked
 
 Gamepad; localisation; contract negotiation panels; ship LOD imposters.
-Do not add more ores or bodies until the current loop is played through.
+Campaign bodies are data in `config.CAMPAIGN_BODIES` (installed per-campaign
+by the ops layer); add new ores only with market + mining + HUD in one pass.

@@ -97,7 +97,7 @@ def planet_texture(size: int = 512, seed: int = 20260826,
     height = np.zeros((size, size), dtype=float)
     amplitude = 1.0
     total = 0.0
-    for octave, cells in enumerate((6, 12, 24, 48)):
+    for _octave, cells in enumerate((6, 12, 24, 48)):
         height += amplitude * _value_noise(size, cells, rng)
         total += amplitude
         amplitude *= 0.5
@@ -157,15 +157,6 @@ def build_all(asset_root: str) -> dict[str, str]:
     return outputs
 
 
-if __name__ == "__main__":
-    # src/utils/procedural.py -> the project root is three levels up, so the
-    # assets land in <project>/assets rather than <project>/src/assets.
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    root = os.path.join(project_root, "assets")
-    for name, path in build_all(root).items():
-        print(f"  {name:22s} {os.path.getsize(path) / 1024.0:7.1f} KB  {path}")
-
-
 # ---------------------------------------------------------------------------
 # Game textures: stylised skybox, planets, glows (generated, committed once)
 # ---------------------------------------------------------------------------
@@ -179,7 +170,24 @@ GAME_BODY_PALETTES = {
     "deep_belt": ((0.42, 0.32, 0.62), (0.66, 0.50, 0.88)),
     "derelict_zone": ((0.48, 0.30, 0.22), (0.72, 0.50, 0.34)),
     "nix": ((0.78, 0.86, 0.95), (0.95, 0.98, 1.0)),
+    # Campaign bodies (ops layer installs these; textures are style-only).
+    "comet_vigil": ((0.45, 0.60, 0.78), (0.85, 0.94, 1.0)),
+    "trojan_field": ((0.50, 0.62, 0.44), (0.82, 0.92, 0.76)),
+    "cinder_moon": ((0.55, 0.16, 0.10), (0.95, 0.45, 0.28)),
+    "outer_reach": ((0.20, 0.32, 0.58), (0.45, 0.65, 1.0)),
+    "frost_ring": ((0.45, 0.62, 0.80), (0.80, 0.93, 1.0)),
+    "ember_shoal": ((0.58, 0.22, 0.08), (1.0, 0.52, 0.24)),
+    "l5_garden": ((0.26, 0.55, 0.34), (0.55, 0.90, 0.66)),
+    "hearthwreck": ((0.36, 0.32, 0.28), (0.68, 0.60, 0.52)),
+    "night_well": ((0.12, 0.16, 0.30), (0.30, 0.38, 0.65)),
+    # The Far Charter (v1.6).
+    "sungrazer": ((0.62, 0.36, 0.10), (1.0, 0.75, 0.32)),
+    "vagrant": ((0.22, 0.50, 0.46), (0.50, 0.90, 0.82)),
+    "boreas": ((0.32, 0.38, 0.62), (0.68, 0.75, 1.0)),
 }
+
+#: bodies rendered with the banded gas-giant texture instead of planet_texture.
+GAS_GIANT_TEXTURE_KEYS = ("gas_giant_orbit", "boreas")
 
 
 def starfield_texture(width: int = 1024, height: int = 512, seed: int = 7,
@@ -302,17 +310,25 @@ def write_game_textures(asset_root: str) -> dict[str, str]:
                                        glow_sprite(size=64, colour=(120, 220, 255), hardness=1.8))
     out["select_ring.png"] = write_png(os.path.join(tex_dir, "select_ring.png"),
                                        _ring_sprite(colour=(110, 235, 255)))
-    out["gas_giant.png"] = write_png(os.path.join(tex_dir, "gas_giant.png"),
-                                     gas_giant_texture())
     from src.simulation.bodies import BODIES as _BODIES
 
-    for key, body in _BODIES.items():
+    # Labels: the sealed table plus every campaign body the ops layer installs.
+    from src.config import CAMPAIGN_BODIES, COMET_KEY
+    label_names = {key: body.name for key, body in _BODIES.items()}
+    label_names.update({key: spec["name"] for key, spec in CAMPAIGN_BODIES.items()})
+    label_names[COMET_KEY] = "Comet Vigil"
+    for key, name in label_names.items():
         out[f"label_{key}.png"] = write_png(
             os.path.join(tex_dir, f"label_{key}.png"),
-            label_texture(body.name),
+            label_texture(name),
         )
     for key, (base, accent) in GAME_BODY_PALETTES.items():
-        if key == "gas_giant_orbit":
+        if key in GAS_GIANT_TEXTURE_KEYS:
+            out[f"{key}.png"] = write_png(
+                os.path.join(tex_dir, f"{key}.png"),
+                gas_giant_texture(base=base, accent=accent,
+                                  seed=12 if key == "boreas" else 5),
+            )
             continue
         seed = 900 + zlib.crc32(key.encode("utf-8")) % 5000
         out[f"{key}.png"] = write_png(
@@ -439,3 +455,12 @@ def make_hum_wav(path: str, base_hz: float = 55.0, seconds: float = 4.0) -> str:
     samples[:fade] = samples[:fade] * ramp + samples[-fade:] * (1.0 - ramp)
     samples = samples[:-fade]
     return _write_wav(path, 0.3 * samples / max(1e-9, np.max(np.abs(samples))))
+
+
+if __name__ == "__main__":
+    # src/utils/procedural.py -> the project root is three levels up, so the
+    # assets land in <project>/assets rather than <project>/src/assets.
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    root = os.path.join(project_root, "assets")
+    for name, path in build_all(root).items():
+        print(f"  {name:22s} {os.path.getsize(path) / 1024.0:7.1f} KB  {path}")

@@ -16,10 +16,10 @@ import os
 import random
 import time
 
-from ursina import Entity, Mesh, Texture, Vec3, color
+from ursina import Entity, Mesh, Vec3, color
 
 from ..config import SCENE_UNITS_PER_AU
-from ..simulation.bodies import BODIES, orbit_points
+from ..simulation.bodies import BODIES
 from .ship import Freighter, OrbitLine
 from .drone import DroneSwarm
 import src.entities.drone as _drone_module
@@ -145,12 +145,13 @@ class OrbitalScene:
         texture = _tex(f"{key}.png")
         if texture is not None:
             entity.texture = texture
-        if key == "gas_giant_orbit":
+        if key in ("gas_giant_orbit", "boreas"):
             # Ring plane: two flat circles, faintly tinted.
+            ring_tint = (0.88, 0.76, 0.96) if key == "gas_giant_orbit" else (0.72, 0.80, 1.0)
             for ring_scale, ring_opacity in ((3.4, 0.30), (4.3, 0.18)):
-                ring = Entity(parent=entity, model="circle", scale=ring_scale,
-                              color=color.rgba(0.88, 0.76, 0.96, ring_opacity),
-                              rotation_x=78, unlit=True, double_sided=True)
+                Entity(parent=entity, model="circle", scale=ring_scale,
+                       color=color.rgba(ring_tint[0], ring_tint[1], ring_tint[2], ring_opacity),
+                       rotation_x=78, unlit=True, double_sided=True)
         self.body_entities[key] = entity
         # Soft atmosphere shell (readable on high/ultra).
         atmo = Entity(parent=entity, model="sphere",
@@ -414,7 +415,6 @@ class OrbitalScene:
         if entity is None or not self.quality.get("surface_detail", True):
             return
         rng = random.Random(hash(body_key) & 0xFFFFFFFF)
-        base = float(entity.scale_x)
         # Ground disc (local "horizon").
         ground = Entity(parent=entity, model="circle", scale=8.0,
                         color=color.rgba(0.15, 0.14, 0.16, 0.95),
@@ -456,14 +456,14 @@ class OrbitalScene:
             beacon = Entity(parent=entity, model="sphere", scale=0.22,
                             position=(2.4 * math.cos(ang), 0.35, 2.4 * math.sin(ang)),
                             color=color.rgb(*rgb), unlit=True)
-            beam = Entity(parent=beacon, model="cube", scale=Vec3(0.15, 2.2, 0.15),
-                          position=(0, 1.0, 0), color=color.rgba(rgb[0], rgb[1], rgb[2], 0.45), unlit=True)
+            Entity(parent=beacon, model="cube", scale=Vec3(0.15, 2.2, 0.15),
+                   position=(0, 1.0, 0), color=color.rgba(rgb[0], rgb[1], rgb[2], 0.45), unlit=True)
             self.surface_props.append(beacon)
         # Landing pad.
         pad = Entity(parent=entity, model="cube", scale=Vec3(1.4, 0.08, 1.4),
                      position=(0, 0.06, 0), color=color.rgb(0.25, 0.28, 0.35), unlit=True)
-        ring = Entity(parent=pad, model="circle", scale=1.3, position=(0, 0.6, 0),
-                      rotation_x=90, color=color.rgba(0.4, 0.9, 1.0, 0.5), unlit=True)
+        Entity(parent=pad, model="circle", scale=1.3, position=(0, 0.6, 0),
+               rotation_x=90, color=color.rgba(0.4, 0.9, 1.0, 0.5), unlit=True)
         self.surface_props.append(pad)
 
     def set_route_overlay(self, body_keys: list[str], sim=None) -> None:

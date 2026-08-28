@@ -13,7 +13,6 @@ dist/
 build/
 *.spec
 steam/steam_install.json
-settings.json
 
 src/saves/
 packaging/__pycache__/

@@ -168,7 +168,6 @@ def test_lambert_solution_actually_arrives(a1, a2, inclination):
     trajectory it returns really reaches the target at the stated time.
     """
     r1 = np.array([a1 * AU, 0.0, 0.0])
-    v1_circ = math.sqrt(MU_SUN / (a1 * AU))
     # Target sits ahead on an inclined orbit.
     ang = math.radians(110.0)
     r2 = a2 * AU * np.array([math.cos(ang), math.sin(ang) * math.cos(inclination), math.sin(ang) * math.sin(inclination)])
@@ -229,7 +228,7 @@ def test_multi_rev_lambert_arrives_after_the_requested_revolutions():
     tof = 1.6 * period
     solutions = transfers.lambert_multi(r1, r2, tof, MU_SUN, revs=1)
     assert len(solutions) == 2  # left and right branch of the TOF curve
-    for v1, v2 in solutions:
+    for v1, _v2 in solutions:
         r_arr, _ = kepler.universal_kepler(r1, v1, tof, MU_SUN)
         assert r_arr == pytest.approx(r2, abs=1e-6)
         # Revolution count: the transfer orbit period must satisfy
@@ -252,5 +251,8 @@ def test_multi_rev_lambert_left_branch_is_cheaper_than_the_fast_single_rev():
     tof = 1.6 * period
     single = transfers.lambert(r1, r2, tof, MU_SUN)
     multi = transfers.lambert_multi(r1, r2, tof, MU_SUN, revs=1)
-    cost = lambda sol: float(np.linalg.norm(sol[0]) + np.linalg.norm(sol[1]))
+
+    def cost(sol):
+        return float(np.linalg.norm(sol[0]) + np.linalg.norm(sol[1]))
+
     assert min(cost(s) for s in multi) < cost(single)

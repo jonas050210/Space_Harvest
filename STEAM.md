@@ -1,6 +1,6 @@
 # Steam readiness — Space Harvest
 
-Version **1.5.0**. Ship PC: **i7-12700F / 32 GB DDR4 / RTX 4060 Ti 8 GB**.
+Version **1.6.0**. Ship PC: **i7-12700F / 32 GB DDR4 / RTX 4060 Ti 8 GB**.
 
 **Space Harvest** = orbital farming on real launch windows.
 
@@ -11,7 +11,9 @@ Version **1.5.0**. Ship PC: **i7-12700F / 32 GB DDR4 / RTX 4060 Ti 8 GB**.
 | Name / branding | Space Harvest everywhere (window, menus, depot, docs) |
 | Graphics | Low / Medium / High / Ultra (belt, trails, flares, MSAA) |
 | Display | Resolution, fullscreen, VSync, FOV, UI scale, volume |
-| Campaign | Director / Tight / Ironman · Endless / Charter / Legacy |
+| Campaign | Director / Tight / Ironman · Endless / Charter / Legacy / Worldseed |
+| Fleet | Scout / Freighter / Refinery / Hauler / Tanker / Clipper / Courser / Argosy |
+| Network | 17 fields: belt, Aurelia + Nix, comet Vigil, the Wide Sky (Sungrazer, Vagrant, Boreas) |
 | Achievements | Firsts + secrets → `saves/achievements_progress.json` |
 | UX | Mouse command bar, ship picker, dispatch confirm, body dossier, year report (F1) |
 | Package | `python setup.py --build` → `dist/SpaceHarvest/` |
@@ -31,6 +33,9 @@ Before store launch: set `STEAM_APP_ID` in `src/config/__init__.py`, wire
 ## Verification
 
 ```text
+ruff check .
 pytest tests/ -q
 python -m src.main --headless --sim-days 900
 ```
+
+CI runs all three (plus a rendering smoke) on every push.

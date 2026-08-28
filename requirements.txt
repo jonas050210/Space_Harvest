@@ -3,6 +3,6 @@
 ursina>=6.0.0
 numpy>=1.26
 pillow>=10.0
-matplotlib>=3.8        # optional: porkchop plotting helper in scripts/
+matplotlib>=3.8        # optional: porkchop plotting helper in tools/
 pyinstaller>=6.0.0     # optional: single-exe packaging, see README
 pytest>=8,<9           # dev: test suite
