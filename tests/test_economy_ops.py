@@ -1659,7 +1659,8 @@ def test_campaign_fields_exist_and_have_fingerprints():
     from src.operations import OpsSimulation
 
     sim = OpsSimulation()
-    for key in ("trojan_field", "cinder_moon", "outer_reach"):
+    for key in ("trojan_field", "cinder_moon", "outer_reach", "frost_ring",
+                "ember_shoal", "l5_garden", "hearthwreck", "night_well"):
         assert key in sim.bodies
         assert key in sim.trade_targets
         fp = body_fingerprint(key)
@@ -2081,7 +2082,127 @@ def test_achievements_vdf_is_a_closed_table():
         assert f'"{key}"' in text
 
 
-def test_game_version_is_140():
+def test_game_version_is_current():
     from src.config import GAME_VERSION
 
-    assert GAME_VERSION.startswith("1.4")
+    assert GAME_VERSION.startswith("1.5")
+
+
+# --------------------------------------------------------------------------
+# v1.5 Far Charter: new fields, clipper, garden, worldseed
+# --------------------------------------------------------------------------
+
+
+def test_far_charter_bodies_and_unique_ores():
+    from src.mining import body_fingerprint
+    from src.operations import OpsSimulation
+    from src.simulation.bodies import BODIES as MODULE
+
+    sim = OpsSimulation()
+    for key in ("ember_shoal", "l5_garden", "hearthwreck", "night_well"):
+        assert key in sim.bodies and key in sim.trade_targets
+        fp = body_fingerprint(key)
+        assert abs(sum(fp.values()) - 1.0) < 1e-6
+    assert "memory_glass" in body_fingerprint("hearthwreck")
+    assert "memory_glass" not in body_fingerprint("inner_belt")
+    assert "seedstock" in body_fingerprint("l5_garden")
+    assert "seedstock" not in body_fingerprint("ember_shoal")
+    assert "hearthwreck" not in MODULE
+
+
+def test_clipper_class_and_icebox_capacity():
+    from src.config import SHIP_CLASSES
+    from src.operations import OpsSimulation
+
+    assert "clipper" in SHIP_CLASSES
+    sim = OpsSimulation()
+    ship, msg = sim.buy_ship("clipper")
+    assert ship is not None, msg
+    assert sim.ship_class[ship.name] == "clipper"
+    assert ship.delta_v == SHIP_CLASSES["clipper"]["delta_v"]
+    base = sim.ship_capacity(ship.name)
+    ok, _ = sim.install_part(ship.name, "icebox")
+    assert ok and sim.ship_capacity(ship.name) > base
+    ok, _ = sim.install_part(ship.name, "sail")
+    assert ok
+
+
+def test_greenhouse_drinks_ice_and_raises_garden():
+    from src.main import Game
+
+    game = Game(headless=True)
+    ok, _ = game.sim.build_station_module("l5_garden", "greenhouse")
+    assert ok
+    ice_before = game.colony.state["resources"]["ice"]
+    score_before = float(game.colony.state.get("garden_score", 0.0))
+    for _ in range(40):
+        game.update(2.0)
+    assert game.colony.state["resources"]["ice"] < ice_before
+    assert float(game.colony.state["garden_score"]) > score_before
+
+
+def test_foundry_speeds_waiting_smelt():
+    from src.operations import OpsSimulation
+    from src.simulation.orbital_sim import Leg
+
+    sim = OpsSimulation()
+    sim.build_refinery("inner_belt")
+    ship = sim.ships[0]
+    ship.cargo = {"iron": 30.0, "silver": 10.0}
+    sim.missions[ship.name] = type(
+        "M", (), {"leg": Leg.WAITING, "target": "inner_belt", "return_window": None}
+    )()
+    sim._refinery_smelt_waiting(1.0)
+    without = sim.refineries["inner_belt"].batches_done
+    sim2 = OpsSimulation()
+    sim2.build_refinery("inner_belt")
+    sim2.build_station_module("inner_belt", "foundry")
+    ship2 = sim2.ships[0]
+    ship2.cargo = {"iron": 30.0, "silver": 10.0}
+    sim2.missions[ship2.name] = type(
+        "M", (), {"leg": Leg.WAITING, "target": "inner_belt", "return_window": None}
+    )()
+    sim2._refinery_smelt_waiting(1.0)
+    assert sim2.refineries["inner_belt"].batches_done >= without
+
+
+def test_new_techs_and_worldseed_victory():
+    from src.config import TECHS, VICTORY_ORDER
+    from src.main import Game
+
+    keys = {t[0] for t in TECHS}
+    assert "greenhouse_lattice" in keys and "wreck_charter" in keys
+    assert "worldseed" in VICTORY_ORDER
+    game = Game(headless=True)
+    game.new_campaign(difficulty="director", victory="worldseed")
+    game.credits = 40_000.0
+    game.sim.stats["mass_delivered"] = 8_000.0
+    game.colony.state["garden_score"] = 80.0
+    game.colony.state.setdefault("logistics", {}).setdefault("lifetime_delivered", {})["seedstock"] = 3.0
+    game._tick_victory()
+    assert game.victory_achieved == "worldseed"
+
+
+def test_handle_action_buys_clipper_and_greenhouse():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.credits = 50_000.0
+    game.handle_action("buy_clipper")
+    assert any(game.sim.ship_class.get(s.name) == "clipper" for s in game.sim.ships)
+    game.handle_action("mod_greenhouse")
+    assert any("greenhouse" in mods for mods in game.sim.station_modules.values())
+
+
+def test_new_ores_price_and_store_far_charter():
+    from src.config import MARKET_BASE_PRICES
+    from src.main import Game
+
+    for ore in ("seedstock", "memory_glass"):
+        assert ore in MARKET_BASE_PRICES
+    game = Game(headless=True)
+    stored = game.colony.receive({"seedstock": 8.0, "memory_glass": 2.0})
+    assert stored["stored"]["seedstock"] == pytest.approx(8.0)
+    before = game.credits
+    game.sell_all()
+    assert game.credits > before

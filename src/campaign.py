@@ -92,14 +92,18 @@ def check_victory(game) -> str | None:
     firsts_done = sum(1 for v in getattr(game, "firsts", {}).values() if v)
     tonnage = float(game.sim.stats.get("mass_delivered", 0.0))
     credits = float(getattr(game, "credits", 0.0))
+    life = game.colony.state.get("logistics", {}).get("lifetime_delivered", {})
     aurellium_ok = True
     if spec.get("aurellium"):
-        life = game.colony.state.get("logistics", {}).get("lifetime_delivered", {})
         aurellium_ok = float(life.get("aurellium", 0.0)) > 0.0
+    seed_ok = True
+    if spec.get("seedstock"):
+        seed_ok = float(life.get("seedstock", 0.0)) > 0.0
+    garden_ok = float(game.colony.state.get("garden_score", 0.0)) >= float(spec.get("garden", 0.0) or 0.0)
     firsts_ok = firsts_done >= int(spec.get("firsts_needed", 0) or 0)
     credits_ok = credits >= float(spec.get("credits", 0.0) or 0.0)
     tonnage_ok = tonnage >= float(spec.get("tonnage", 0.0) or 0.0)
-    if credits_ok and tonnage_ok and aurellium_ok and firsts_ok:
+    if credits_ok and tonnage_ok and aurellium_ok and firsts_ok and seed_ok and garden_ok:
         return mode
     return None
 
@@ -124,6 +128,10 @@ def victory_progress(game) -> dict[str, Any]:
         "firsts_goal": int(spec.get("firsts_needed", 0) or 0),
         "aurellium": aurellium,
         "needs_aurellium": bool(spec.get("aurellium")),
+        "garden": float(game.colony.state.get("garden_score", 0.0)),
+        "garden_goal": float(spec.get("garden", 0.0) or 0.0),
+        "needs_seedstock": bool(spec.get("seedstock")),
+        "seedstock": float(life.get("seedstock", 0.0)),
         "achieved": bool(getattr(game, "victory_achieved", None)),
     }
 
@@ -307,6 +315,7 @@ def year_report(game) -> list[str]:
         f"Depots / refineries {len(game.sim.depots)} / {len(game.sim.refineries)}",
         f"Difficulty         {difficulty_spec(getattr(game, 'difficulty', DEFAULT_DIFFICULTY))['label']}",
         f"Victory mode       {victory_spec(getattr(game, 'victory_mode', DEFAULT_VICTORY))['label']}",
+        f"Garden score       {float(game.colony.state.get('garden_score', 0.0)):.1f}",
     ]
 
 

@@ -27,6 +27,7 @@ CLASS_TINTS = {
     "refinery": (1.00, 0.92, 0.72),
     "hauler": (1.00, 0.85, 0.85),
     "tanker": (0.55, 0.85, 1.00),
+    "clipper": (0.85, 0.70, 1.00),
 }
 
 
@@ -47,6 +48,8 @@ class Freighter(Entity):
             hull_s = Vec3(0.24, 0.24, 0.46)
         elif class_key == "tanker":
             hull_s, nose_s, nose_z = Vec3(0.18, 0.18, 0.70), Vec3(0.16, 0.16, 0.20), 0.48
+        elif class_key == "clipper":
+            hull_s, nose_s, nose_z = Vec3(0.10, 0.10, 0.78), Vec3(0.10, 0.10, 0.20), 0.50
         self.hull = Entity(parent=self, model="cube", scale=hull_s,
                            color=color.rgb(0.95, 0.97, 1.0))
         self.nose = Entity(parent=self, model="sphere", scale=nose_s,
@@ -74,6 +77,10 @@ class Freighter(Entity):
             self.extra_parts.append(Entity(
                 parent=self, model="sphere", scale=Vec3(0.20, 0.20, 0.34),
                 position=(0, 0.17, 0.05), color=color.rgb(0.9, 0.8, 0.6)))
+        if class_key == "clipper":  # swept fin
+            self.extra_parts.append(Entity(
+                parent=self, model="cube", scale=Vec3(0.55, 0.02, 0.18),
+                position=(0, 0.02, -0.12), color=color.rgb(0.8, 0.65, 1.0)))
         self.engine_glow = Entity(parent=self, model="quad", scale=0.30,
                                   position=(0, 0, -0.36), color=color.cyan,
                                   billboard=True, unlit=True)

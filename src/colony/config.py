@@ -4,7 +4,7 @@ Only the keys the live game reads remain. The full upstream builder catalogue
 lived here once; it was trimmed when Space Harvest became the product.
 """
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 GAME_NAME = "Space Harvest"
 
 DIFFICULTY = {"easy": 0.7, "medium": 1.0, "hard": 1.4}
@@ -25,6 +25,8 @@ RESOURCES = {
     "cobalt": {"name": "Cobalt", "value": 12},
     "magnetite": {"name": "Magnetite", "value": 7},
     "xenonite": {"name": "Xenonite", "value": 50},
+    "seedstock": {"name": "Seedstock", "value": 18},
+    "memory_glass": {"name": "Memory Glass", "value": 55},
 }
 
 # Research tree kept so logistics capacity bonuses still resolve.

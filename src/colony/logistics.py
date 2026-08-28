@@ -54,7 +54,8 @@ def deliver_drone_cargo(state, drone_state):
 def summary(state):
     """Return UI-friendly logistics metrics."""
     resources = state.get("resources", {})
-    used = sum(resources.get(key, 0) for key in ("ice", "iron", "gold", "silver", "platinum", "components", "electronics", "thorite", "aurellium", "silicates", "obsidian", "helium3", "cobalt", "magnetite", "xenonite"))
+    from src.config import MINING_ORES
+    used = sum(resources.get(key, 0) for key in MINING_ORES)
     capacity = capacity_for(state, "shared") * 5
     return {"used": used, "capacity": capacity, "delivered": sum(state.get("logistics", {}).get("lifetime_delivered", {}).values())}
 

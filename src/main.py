@@ -55,6 +55,7 @@ from src.config import (  # noqa: E402
     GAME_NAME,
     GAME_TAGLINE,
     GAME_VERSION,
+    GARDEN_SCORE_PER_ICE,
     HULL_CRITICAL_PCT,
     PARTS_CATALOG,
     QUALITY_ORDER,
@@ -117,7 +118,7 @@ from src.game import logistics as colony_logistics  # noqa: E402
 from src.game import savegame as colony_savegame  # noqa: E402
 from src.game import state as colony_state  # noqa: E402
 
-BUY_MENU = ("scout", "freighter", "refinery", "hauler", "tanker")
+BUY_MENU = ("scout", "freighter", "refinery", "hauler", "tanker", "clipper")
 CREDITS_HISTORY_POINTS = 240
 CREDITS_HISTORY_SAMPLE_DAYS = 2.0
 
@@ -582,6 +583,7 @@ class Game:
         self.sim.recover_mines(dt_days)
         self.market.update(dt_days)
         self._tick_life_support(dt_days)
+        self._tick_garden(dt_days)
         self._tick_contracts()
         self._sample_credits_history()
         self._book_deliveries()
@@ -1036,6 +1038,16 @@ class Game:
             "first_observatory": any("observatory" in mods for mods in self.sim.station_modules.values()),
             "first_drill_yard": any("drill_yard" in mods for mods in self.sim.station_modules.values()),
             "first_capture_frost": self.sim.stats.get("captures_by_body", {}).get("frost_ring", 0) >= 1,
+            "first_capture_ember": captures.get("ember_shoal", 0) >= 1,
+            "first_capture_l5": captures.get("l5_garden", 0) >= 1,
+            "first_capture_hearthwreck": captures.get("hearthwreck", 0) >= 1,
+            "first_capture_night": captures.get("night_well", 0) >= 1,
+            "first_clipper": any(self.sim.ship_class.get(s.name) == "clipper" for s in self.sim.ships),
+            "first_greenhouse": any("greenhouse" in mods for mods in self.sim.station_modules.values()),
+            "first_foundry": any("foundry" in mods for mods in self.sim.station_modules.values()),
+            "seedstock_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("seedstock", 0.0) > 0.0,
+            "memory_glass_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("memory_glass", 0.0) > 0.0,
+            "garden_40": float(self.colony.state.get("garden_score", 0.0)) >= 40.0,
         }
 
     def _tick_firsts(self) -> None:
@@ -1064,6 +1076,10 @@ class Game:
             if self.achievements.unlock("secret_zero_incident_streak"):
                 self.steam.unlock("secret_zero_incident_streak")
                 self.say("ACHIEVEMENT: Ten clean runs -- no incidents.", seconds=8.0)
+        if float(self.colony.state.get("garden_score", 0.0)) >= 80.0:
+            if self.achievements.unlock("secret_worldseed"):
+                self.steam.unlock("secret_worldseed")
+                self.say("ACHIEVEMENT: The garden took.", seconds=8.0)
 
     def _tick_victory(self) -> None:
         if self.victory_achieved:
@@ -1092,6 +1108,10 @@ class Game:
                 bits.append(f"firsts {progress['firsts']}/{progress['firsts_goal']}")
             if progress["needs_aurellium"]:
                 bits.append("aurellium" + (" OK" if progress["aurellium"] > 0 else " --"))
+            if progress.get("garden_goal"):
+                bits.append(f"garden {progress.get('garden', 0):.0f}/{progress['garden_goal']:.0f}")
+            if progress.get("needs_seedstock"):
+                bits.append("seedstock" + (" OK" if progress.get("seedstock", 0) > 0 else " --"))
             goals.append(f"GOAL {progress['label']}: " + " | ".join(bits))
         for key, label, _credits, _research in FIRSTS:
             if not self.firsts.get(key):
@@ -1392,6 +1412,30 @@ class Game:
         reference = max(1.0, LIFE_SOLAR_ENERGY_PER_DAY * 4.0)
         load = 0.15 + 0.6 * (energy_used / dt_days) / reference
         self.power_load = min(1.0, max(0.05, load))
+
+    def _tick_garden(self, dt_days: float) -> None:
+        """Greenhouse domes drink colony ice and raise garden score.
+
+        Ice cost is honest (catalogue rate); techs scale the score via
+        ``tech_mults['garden']``. Life support still melts ice separately.
+        """
+        if dt_days <= 0.0:
+            return
+        want = 0.0
+        if hasattr(self.sim, "tick_garden_ice"):
+            want = float(self.sim.tick_garden_ice(dt_days))
+        if want <= 0.0:
+            return
+        resources = self.colony.state.setdefault("resources", {})
+        drink = min(float(resources.get("ice", 0.0)), want)
+        if drink <= 0.0:
+            return
+        resources["ice"] = float(resources.get("ice", 0.0)) - drink
+        garden_mult = float(self.sim.tech_mults.get("garden", 1.0))
+        self.colony.state["garden_score"] = (
+            float(self.colony.state.get("garden_score", 0.0))
+            + drink * GARDEN_SCORE_PER_ICE * garden_mult
+        )
 
     def _tick_contracts(self) -> None:
         """Post offers, honour decisions, retire overdue and stale paper."""
@@ -1915,6 +1959,12 @@ class Game:
         if action == "mod_shield_mast":
             self.build_station_module_selected("shield_mast")
             return
+        if action == "mod_greenhouse":
+            self.build_station_module_selected("greenhouse")
+            return
+        if action == "mod_foundry":
+            self.build_station_module_selected("foundry")
+            return
         if action == "toggle_drill":
             self.toggle_drill()
             return
@@ -1923,7 +1973,7 @@ class Game:
             return
         buys = {
             "buy_scout": "scout", "buy_freighter": "freighter", "buy_refinery": "refinery",
-            "buy_hauler": "hauler", "buy_tanker": "tanker",
+            "buy_hauler": "hauler", "buy_tanker": "tanker", "buy_clipper": "clipper",
         }
         if action in buys:
             self.buy_ship_class(buys[action])
@@ -1932,6 +1982,7 @@ class Game:
             "part_tank": "tank", "part_drill": "drill", "part_quarters": "quarters",
             "part_navsuite": "navsuite", "part_scanner": "scanner",
             "part_shield": "shield", "part_magclamp": "magclamp",
+            "part_icebox": "icebox", "part_sail": "sail",
         }
         if action in parts:
             self.buy_part(parts[action])
