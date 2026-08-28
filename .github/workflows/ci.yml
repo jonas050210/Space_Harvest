@@ -1,1 +1,55 @@
+name: CI
 
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt ruff
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      # Ursina is installed above, so even the window_type="none" UI tests
+      # run (they need no display). Nothing in the suite needs a GPU here.
+      - name: Test suite
+        run: python -m pytest tests/ -q
+
+      - name: Headless smoke (900 sim-days)
+        run: python -m src.main --headless --sim-days 900
+
+      # Real windowed render under a virtual display; the tool falls back to
+      # its Pillow capture (still exit 0) if GL is unavailable on the runner.
+      - name: Rendering smoke (screenshot)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libgl1 libglu1-mesa \
+            libxrandr2 libxinerama1 libxcursor1 libxi6
+          xvfb-run -a --server-args="-screen 0 1600x1000x24" python tools/capture_frame.py
+
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot
+          path: logs/screenshot.png
+          if-no-files-found: ignore
