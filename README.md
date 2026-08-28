@@ -2,84 +2,75 @@
 
 **Space Harvest** is orbital farming on real launch windows.
 
-Asteroids are your fields. Geometry is the season. Wait for the window, dispatch freighters or a hundred-drone swarm, hop through refuel barns, and keep the colony breathing.
+Asteroids are your fields. Geometry is the season. Wait for the window, dispatch
+a freighter (or a hundred-drone swarm), hop through refuel barns, and keep the
+colony breathing.
+
+Version **1.5.0**. Python 3.11–3.13, Ursina 8.x.
 
 ## One command: `setup.py`
-
-Everything goes through **`setup.py`**. There is no `start.py`.
-
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-
-# PLAY (default)
-.\.venv\Scripts\python setup.py
-
-# Desktop shortcut (points at setup.py, or the EXE after --build)
-.\.venv\Scripts\python setup.py --shortcut
-
-# Tests
-.\.venv\Scripts\python setup.py --test
-
-# Windows EXE (PyInstaller)
-.\.venv\Scripts\python setup.py --test --build
-# → dist\SpaceHarvest\SpaceHarvest.exe
-# shortcut is refreshed to the EXE automatically
-```
-
-Linux / macOS:
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python setup.py              # play
-.venv/bin/python setup.py --shortcut   # ~/.Desktop entry
-.venv/bin/python setup.py --build
+.venv/bin/python setup.py --test       # pytest
+.venv/bin/python setup.py --build      # PyInstaller → dist/SpaceHarvest/
 ```
 
-Also valid: `python -m src` or `python -m src.main`.
+Windows:
 
-### How the EXE works
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt
+.\.venv\Scripts\python setup.py
+```
 
-You do **not** hand-write an `.exe`. On Windows, `setup.py --build` runs **PyInstaller**, which freezes Python + Ursina + `src/` + `assets/` into `dist/SpaceHarvest/`. Build on Windows 11 for a Windows EXE.
+Also valid: `python -m src` or `python -m src.main`. Headless self-test:
 
-## Package layout
+```bash
+python -m src.main --headless --sim-days 900
+```
+
+## Play
+
+The belt does **not** fly itself. Idle ships wait for you.
+
+| Input | Action |
+| --- | --- |
+| Click a rock / TAB | Target a field |
+| Click a ship / SPACE | Select an idle hull |
+| ENTER or **GO** | Dispatch (twice if confirm is on) |
+| D or **SWARM** | Harvest swarm while the window is GO |
+| S / 5 / 6 or **SELL** | Sell 100% / 50% / 25% |
+| R or **BARN** | Build / upgrade a refuel depot |
+| `,` `/` `.` Backspace | Cycle views / map / surface / network |
+| [ ] | Warp |
+| F5 / ESC | Save / pause |
+
+How-to-play is on the title menu. Full key list lives in `src/app/controls.py`
+— that file is the single source of truth.
+
+## Layout
 
 ```text
-setup.py                 # play / shortcut / test / build  ← only owner entry
-packaging/
-  play_entry.py          # frozen EXE entry
-  build_exe.py           # PyInstaller recipe
-  steam/                 # depot / achievements metadata
-src/
-  app/                   # launch paths
-  config/                # all balance knobs
-  ops/                   # fleet operations (wraps sealed core)
-  colony/                # storage / saves / research bridge
-  maths/ simulation/     # SEALED orbital core
-  entities/ ui/          # presentation
-  main.py                # game shell (compat)
-  operations.py          # shim → src.ops
-  game/                  # shim → src.colony
-tools/                   # capture_frame, porkchop
+setup.py                 play / shortcut / test / build
+packaging/               PyInstaller entry
+src/app/                 launch, controls, audio
+src/config/              balance knobs
+src/ops/                 fleet operations (wraps sealed core)
+src/colony/              storage / saves / research bridge
+src/maths  simulation/   SEALED orbital core
+src/entities  ui/        presentation
 tests/
 assets/
+steam/                   depot / achievements metadata
 ```
+
+Saves go to `./saves` in development, or `Documents/My Games/SpaceHarvest`
+(Windows) / `~/.local/share/SpaceHarvest` (Linux) when frozen.
 
 ## Graphics
 
-| Preset | Best for |
-| --- | --- |
-| Low | Deck / iGPU |
-| Medium | Default |
-| High | Discrete GPUs |
-| Ultra | i7-12700F + RTX 4060 Ti |
+K cycles Low / Medium / High / Ultra in play. Full settings on the title menu.
 
-**K** cycles quality in-play. Full settings on the title menu.
-
-## Core loop
-
-Wait for geometry → GO → freighter or **D** swarm → multi-stop barns → sell without flooding → surface survey / ISRU → modules → tanker fills barns → rival optional.
-
-See `STEAM.md` for depot notes and `project.md` for architecture.
-
-Credits: Ursina; Izzo Lambert (poliastro/lamberthub, MIT); lineage jonas050210.
+Credits: Ursina; Izzo Lambert (poliastro/lamberthub, MIT).

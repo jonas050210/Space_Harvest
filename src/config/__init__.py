@@ -86,10 +86,14 @@ SHIP_CLASSES = {
     "tanker":    {"name": "Tanker",    "capacity": 80.0, "delta_v": 28.0e3, "price": 6200.0,
                   "refuel_rate": 320.0, "wear_factor": 0.90, "mine_bonus": 0.6,
                   "depot_fill_bonus": 1.75},
+    # Window specialist: tiny hold, honest long tank — the far-field courier.
+    "clipper":   {"name": "Clipper",   "capacity": 90.0, "delta_v": 32.0e3, "price": 7800.0,
+                  "refuel_rate": 180.0, "wear_factor": 0.80, "mine_bonus": 0.85},
 }
 DEFAULT_SHIP_CLASS = "freighter"
 FLEET_NAME_POOL = ("Kestrel", "Petrel", "Harrier", "Osprey", "Falcon", "Condor",
-                   "Raven", "Heron", "Skua", "Gannet", "Tern", "Egret")
+                   "Raven", "Heron", "Skua", "Gannet", "Tern", "Egret",
+                   "Albatross", "Ibis", "Plover", "Snipe", "Curlew", "Stilt")
 
 # --- credits (earned by selling ore on the Earth market) --------------------
 START_CREDITS = 600.0
@@ -106,7 +110,7 @@ HULL_REPAIR_COST_PER_PCT = 12.0  # credits per percentage point restored
 MINING_SEED = 20260826         # combined with the body key, deterministic
 MINING_ORES = ("ice", "iron", "silver", "gold", "platinum", "components", "electronics",
                "thorite", "aurellium", "silicates", "obsidian", "helium3",
-               "cobalt", "magnetite", "xenonite")
+               "cobalt", "magnetite", "xenonite", "seedstock", "memory_glass")
 # Vein size per ore in tonnes: after extracting one vein-size the yield is at
 # 1/e, forcing expansion to fresh rocks while slow recovery keeps the game
 # from dead-ending.
@@ -114,7 +118,8 @@ MINING_VEIN_SIZE_T = {"ice": 1200.0, "iron": 1600.0, "silver": 700.0,
                       "gold": 450.0, "platinum": 300.0, "components": 500.0, "electronics": 250.0,
                       "thorite": 380.0, "aurellium": 140.0,
                       "silicates": 900.0, "obsidian": 220.0, "helium3": 90.0,
-                      "cobalt": 520.0, "magnetite": 640.0, "xenonite": 110.0}
+                      "cobalt": 520.0, "magnetite": 640.0, "xenonite": 110.0,
+                      "seedstock": 160.0, "memory_glass": 70.0}
 # Campaign-only ore spawns, appended to a body's module-declared resources.
 # The deep belt and the derelict hull carry radioactive thorite in their slag;
 # aurellium exists ONLY in the comet -- the jackpot that makes the chase pay.
@@ -127,6 +132,10 @@ MINING_EXTRA_SPAWNS = {
     "outer_reach": ("helium3", "thorite", "platinum", "xenonite"),
     "frost_ring": ("ice", "xenonite", "cobalt"),
     "metallic_belt": ("magnetite",),
+    "ember_shoal": ("obsidian", "gold", "magnetite"),
+    "l5_garden": ("ice", "silicates", "seedstock"),
+    "hearthwreck": ("components", "electronics", "memory_glass", "thorite"),
+    "night_well": ("helium3", "xenonite", "thorite"),
 }
 MINING_DRILL_YIELD_BONUS = 1.6   # core drilling multiplier per run
 MINING_DRILL_WEAR_PCT = 6.0      # hull cost of drilling on every drilled run
@@ -147,6 +156,7 @@ MARKET_BASE_PRICES = {  # credits per tonne
     "thorite": 70.0, "aurellium": 480.0,
     "silicates": 18.0, "obsidian": 310.0, "helium3": 520.0,
     "cobalt": 95.0, "magnetite": 55.0, "xenonite": 610.0,
+    "seedstock": 140.0, "memory_glass": 720.0,
 }
 # Tonnes the Earth market absorbs before the price visibly sags; rare ores
 # flood much faster, so dumping a hauler load of platinum crashes its price.
@@ -154,14 +164,16 @@ MARKET_ABSORPTION_T = {"ice": 400.0, "iron": 320.0, "silver": 140.0, "gold": 60.
                        "platinum": 30.0, "components": 80.0, "electronics": 40.0,
                        "thorite": 45.0, "aurellium": 12.0,
                        "silicates": 200.0, "obsidian": 22.0, "helium3": 10.0,
-                       "cobalt": 55.0, "magnetite": 120.0, "xenonite": 8.0}
+                       "cobalt": 55.0, "magnetite": 120.0, "xenonite": 8.0,
+                       "seedstock": 28.0, "memory_glass": 6.0}
 MARKET_FLOOD_HALF_LIFE_DAYS = 30.0
 MARKET_SEASONAL_AMPLITUDE = 0.22
 MARKET_SEASONAL_PERIOD_DAYS = {"ice": 240.0, "iron": 300.0, "silver": 360.0,
                                "gold": 420.0, "platinum": 480.0, "components": 390.0, "electronics": 450.0,
                                "thorite": 330.0, "aurellium": 540.0,
                                "silicates": 280.0, "obsidian": 400.0, "helium3": 600.0,
-                               "cobalt": 350.0, "magnetite": 310.0, "xenonite": 620.0}
+                               "cobalt": 350.0, "magnetite": 310.0, "xenonite": 620.0,
+                               "seedstock": 365.0, "memory_glass": 700.0}
 MARKET_NOISE_SIGMA = 0.05           # random-walk strength, per sqrt(day)
 MARKET_NOISE_MEAN_REVERSION = 0.02  # per day toward demand 1.0
 MARKET_PRICE_FLOOR_FRACTION = 0.15  # price never drops below this share of base
@@ -309,10 +321,13 @@ PARTS_CATALOG = {
     "shield": {"name": "Shield Weave", "base_price": 2800.0, "wear_factor": 0.75, "max_per_ship": 1},
     # Mag-clamps: hold capacity bump without changing ship class.
     "magclamp": {"name": "Mag-Clamps", "base_price": 1900.0, "capacity": 40.0, "max_per_ship": 2},
+    "icebox": {"name": "Icebox Hold", "base_price": 1600.0, "capacity": 50.0, "max_per_ship": 2},
+    "sail": {"name": "Solar Sail", "base_price": 2400.0, "wear_factor": 0.85, "max_per_ship": 1},
 }
 PARTS_PRICE_ESCALATION = 1.25
 PARTS_SEASON_DAYS = {"tank": 300.0, "drill": 340.0, "quarters": 260.0, "drones": 400.0,
-                     "navsuite": 600.0, "scanner": 320.0, "shield": 380.0, "magclamp": 290.0}
+                     "navsuite": 600.0, "scanner": 320.0, "shield": 380.0, "magclamp": 290.0,
+                     "icebox": 280.0, "sail": 410.0}
 
 # --- the comet ----------------------------------------------------------------
 # "Vigil" is a long-period comet: perihelion inside the inner belt, aphelion
@@ -375,6 +390,7 @@ REFINERY_RECIPES = (
     {"output": "electronics", "amount": 2.0, "input": {"gold": 3.0}},
     {"output": "components", "amount": 3.0, "input": {"cobalt": 2.0, "magnetite": 2.0}},
     {"output": "electronics", "amount": 2.0, "input": {"xenonite": 1.0, "gold": 1.0}},
+    {"output": "electronics", "amount": 3.0, "input": {"memory_glass": 1.0, "gold": 1.0}},
 )
 
 # --- "Firsts": KSP-style one-shot milestones -------------------------------------
@@ -418,6 +434,16 @@ FIRSTS = (
     ("first_observatory", "Field observatory online", 500.0, 10.0),
     ("first_drill_yard", "Drill yard chewing bedrock", 600.0, 8.0),
     ("first_capture_frost", "First harvest: Frost Ring", 1100.0, 14.0),
+    ("first_capture_ember", "First harvest: Ember Shoal", 650.0, 8.0),
+    ("first_capture_l5", "First harvest: L5 Garden — the quiet field", 700.0, 8.0),
+    ("first_capture_hearthwreck", "HEARTHWRECK BOARDED — memory glass sings", 2200.0, 28.0),
+    ("first_capture_night", "First harvest: Night Well", 1600.0, 18.0),
+    ("first_clipper", "Clipper commissioned — the far windows open", 800.0, 8.0),
+    ("first_greenhouse", "Greenhouse dome fogging the glass", 550.0, 8.0),
+    ("first_foundry", "Field foundry online", 600.0, 8.0),
+    ("seedstock_1", "First seedstock shipment — Earth wants a garden", 900.0, 12.0),
+    ("memory_glass_1", "First memory-glass crate — the archive blinks", 2000.0, 30.0),
+    ("garden_40", "Garden score 40 — a world taking root", 1200.0, 15.0),
 )
 
 
@@ -465,6 +491,46 @@ CAMPAIGN_BODIES = {
         "description": "Icy shepherd ring — xenonite snow and cobalt slag.",
         "render_scale": 0.65,
     },
+    "ember_shoal": {
+        "name": "Ember Shoal",
+        "elements": {"a": 1.72, "e": 0.09, "i_deg": 3.8, "raan_deg": 118.0,
+                     "argp_deg": 40.0, "nu_deg": 200.0},
+        "radius_km": 11.0, "soi_km": 26000.0,
+        "palette": (0.95, 0.42, 0.18),
+        "resources": ("obsidian", "gold", "iron"),
+        "description": "Inner volcanic shoal — cheap windows, hot rock.",
+        "render_scale": 0.55,
+    },
+    "l5_garden": {
+        "name": "L5 Garden",
+        "elements": {"a": 2.80, "e": 0.04, "i_deg": 2.2, "raan_deg": 40.0,
+                     "argp_deg": 20.0, "nu_deg": 150.0},  # ~L5 trailing Aurelia
+        "radius_km": 13.0, "soi_km": 30000.0,
+        "palette": (0.45, 0.82, 0.55),
+        "resources": ("ice", "silicates", "seedstock"),
+        "description": "Aurelia L5 — quiet ice and the seedstock Earth will pay for.",
+        "render_scale": 0.68,
+    },
+    "hearthwreck": {
+        "name": "Hearthwreck",
+        "elements": {"a": 5.65, "e": 0.31, "i_deg": 11.0, "raan_deg": 300.0,
+                     "argp_deg": 175.0, "nu_deg": 55.0},
+        "radius_km": 18.0, "soi_km": 42000.0,
+        "palette": (0.62, 0.55, 0.48),
+        "resources": ("components", "electronics", "memory_glass"),
+        "description": "A derelict generation ship. Multi-hop salvage. Memory glass only here.",
+        "render_scale": 0.9,
+    },
+    "night_well": {
+        "name": "Night Well",
+        "elements": {"a": 6.40, "e": 0.18, "i_deg": 8.2, "raan_deg": 15.0,
+                     "argp_deg": 250.0, "nu_deg": 10.0},
+        "radius_km": 20.0, "soi_km": 48000.0,
+        "palette": (0.22, 0.28, 0.48),
+        "resources": ("helium3", "xenonite", "thorite"),
+        "description": "A dark well past Outer Reach. Clippers and barns, or stay home.",
+        "render_scale": 0.8,
+    },
 }
 
 
@@ -491,6 +557,16 @@ STATION_MODULE_CATALOG = {
         "weather_resist": 0.5, "max_per_body": 1,
         "blurb": "Halves flare/debris wear for ships waiting here.",
     },
+    "greenhouse": {
+        "name": "Greenhouse Dome", "cost": 3900.0,
+        "research_per_day": 0.08, "garden_ice_per_day": 0.45, "max_per_body": 2,
+        "blurb": "Drinks ice, grows garden score, trickles research.",
+    },
+    "foundry": {
+        "name": "Field Foundry", "cost": 4400.0,
+        "refinery_bonus": 0.5, "max_per_body": 1,
+        "blurb": "Speeds the mill while ships wait here.",
+    },
 }
 
 # --- multi-stop delivery planner (KSP-style refuel hops) --------------------
@@ -515,6 +591,10 @@ TECHS = (
     ("cryo_tankers", "Cryo Tanker Protocols", 65, {"refuel_rate": 1.20}),
     ("deep_core_bits", "Deep-Core Drill Bits", 75, {"mine_bonus": 1.20}),
     ("xenon_capture", "Xenon Capture Nets", 90, {"swarm_yield": 1.15, "mine_bonus": 1.10}),
+    ("greenhouse_lattice", "Greenhouse Lattice", 70, {"garden": 1.35, "life_solar": 1.10}),
+    ("wreck_charter", "Wreck Charter Rights", 85, {"contract_reward": 1.20}),
+    ("magnetic_sail", "Magnetic Sail Doctrine", 75, {"refuel_rate": 1.15}),
+    ("memory_foundry", "Memory Foundry", 95, {"refinery": 1.25}),
 )
 
 # --- campaign difficulty -------------------------------------------------------
@@ -563,7 +643,7 @@ DEFAULT_DIFFICULTY = "director"
 
 # --- victory / campaign goals --------------------------------------------------
 # Player picks one at NEW HARVEST. Endless never ends; charter is the Steam clear.
-VICTORY_ORDER = ("endless", "charter", "legacy")
+VICTORY_ORDER = ("endless", "charter", "legacy", "worldseed")
 VICTORY_MODES = {
     "endless": {
         "label": "Endless Director",
@@ -589,6 +669,16 @@ VICTORY_MODES = {
         "aurellium": False,
         "firsts_needed": 15,
     },
+    "worldseed": {
+        "label": "Worldseed",
+        "blurb": "Garden 80, a seedstock shipment, 8,000 t hauled.",
+        "credits": 40_000.0,
+        "tonnage": 8_000.0,
+        "aurellium": False,
+        "firsts_needed": 0,
+        "garden": 80.0,
+        "seedstock": True,
+    },
 }
 DEFAULT_VICTORY = "endless"
 
@@ -599,6 +689,7 @@ ACHIEVEMENTS = tuple(key for key, _label, _c, _r in FIRSTS) + (
     "secret_zero_incident_streak",
     "secret_charter_clear",
     "secret_ironman_year",
+    "secret_worldseed",
 )
 
 # --- quality presets -----------------------------------------------------------
@@ -715,6 +806,12 @@ SURFACE_ISRU_COST_CR = 1200.0
 SURFACE_ISRU_DEPOT_GEN_BONUS = 2.5   # extra m/s per day on that body's depot
 SURFACE_ISRU_MAX_PER_BODY = 2
 
+# --- garden / worldseed -------------------------------------------------------
+# Greenhouse domes drink colony ice and raise a garden score. Techs may scale
+# it via tech_mults["garden"]. This is ops+game layer only — not physics.
+GARDEN_SCORE_PER_ICE = 1.0
+GARDEN_START = 0.0
+
 # --- rival charter (light antagonist) ----------------------------------------
 # A competing outfit quietly mines the same veins. They do not fly visible
 # ships; they accelerate depletion and occasionally dump ore on Earth.
@@ -733,5 +830,5 @@ WINDOW_SIZE = (1440, 900)
 # Steamworks app id placeholder (replace before store launch). Zero means
 # "no Steam"; steam_appid.txt is written beside the executable by the packager.
 STEAM_APP_ID = 0
-GAME_VERSION = "1.3.0"
+GAME_VERSION = "1.5.0"
 EXECUTABLE_NAME = "SpaceHarvest"

@@ -133,7 +133,6 @@ from src.market import rng_from_json, rng_to_json
 from src.maths.elements import OrbitalElements
 from src.maths import windows as window_solver
 from src.mining import YieldLedger, plan_extraction, register_body_ores, register_extra_spawns
-from src.simulation.bodies import BODIES
 from src.simulation.bodies import BODIES, Body, TRADE_TARGETS
 from src.simulation.orbital_sim import Delivery, Leg, LogEntry, Mission, OrbitalSimulation, Ship
 
@@ -420,17 +419,16 @@ class OpsSimulation(OrbitalSimulation):
     def ship_mine_bonus(self, ship_name: str) -> float:
         ups = self.upgrades.get(ship_name, {})
         bonus = 1.0
-        drills = ups.get("drill", 0)
-        bonus += drills * float(PARTS_CATALOG.get("drill", {}).get("mine_bonus", 0.0))
-        scanners = ups.get("scanner", 0)
-        bonus += scanners * float(PARTS_CATALOG.get("scanner", {}).get("mine_bonus", 0.0))
+        for key, count in ups.items():
+            bonus += int(count) * float(PARTS_CATALOG.get(key, {}).get("mine_bonus", 0.0) or 0.0)
         bonus *= float(self.tech_mults.get("mine_bonus", 1.0))
         return bonus
 
     def ship_capacity(self, ship_name: str) -> float:
         spec = self.class_spec(ship_name)
-        clamps = self.upgrades.get(ship_name, {}).get("magclamp", 0)
-        extra = clamps * float(PARTS_CATALOG.get("magclamp", {}).get("capacity", 0.0))
+        extra = 0.0
+        for key, count in self.upgrades.get(ship_name, {}).items():
+            extra += int(count) * float(PARTS_CATALOG.get(key, {}).get("capacity", 0.0) or 0.0)
         return float(spec["capacity"]) + extra
 
     def body_mine_bonus(self, body_key: str) -> float:
@@ -451,8 +449,7 @@ class OpsSimulation(OrbitalSimulation):
         if owned.get(part_key, 0) >= info["max_per_ship"]:
             return False, f"{ship_name} already carries the maximum {info['name']}s."
         owned[part_key] = owned.get(part_key, 0) + 1
-        # Mag-clamps resize the live hold.
-        if part_key == "magclamp":
+        if float(info.get("capacity", 0.0) or 0.0) > 0.0:
             for ship in self.ships:
                 if ship.name == ship_name:
                     ship.capacity = self.ship_capacity(ship_name)
@@ -479,8 +476,10 @@ class OpsSimulation(OrbitalSimulation):
         factor = self.class_spec(ship.name)["wear_factor"]
         # Difficulty (and future techs) scale wear via a generic multiplier.
         factor *= float(self.tech_mults.get("hull_wear", 1.0))
-        if self.upgrades.get(ship.name, {}).get("shield", 0):
-            factor *= float(PARTS_CATALOG.get("shield", {}).get("wear_factor", 1.0))
+        for key, count in self.upgrades.get(ship.name, {}).items():
+            wf = PARTS_CATALOG.get(key, {}).get("wear_factor")
+            if wf and int(count) > 0:
+                factor *= float(wf) ** int(count)
         current = self.hull.get(ship.name, HULL_MAX_PCT)
         floor = float(getattr(self, "hull_floor", HULL_MIN_PCT))
         self.hull[ship.name] = max(floor, current - dv_ms * HULL_WEAR_PCT_PER_MS * factor)
@@ -850,14 +849,25 @@ class OpsSimulation(OrbitalSimulation):
         return min(0.9, masts * float(STATION_MODULE_CATALOG["shield_mast"].get("weather_resist", 0.5)))
 
     def tick_observatories(self, dt_days: float) -> float:
-        """Passive research from field observatories. Returns RP granted."""
+        """Passive research from any station module that lists research_per_day."""
         total = 0.0
-        rate = float(STATION_MODULE_CATALOG.get("observatory", {}).get("research_per_day", 0.0))
-        for body_key, mods in self.station_modules.items():
-            n = int(mods.get("observatory", 0))
-            if n:
-                total += rate * n * dt_days
+        for mods in self.station_modules.values():
+            for key, count in mods.items():
+                rate = float(STATION_MODULE_CATALOG.get(key, {}).get("research_per_day", 0.0) or 0.0)
+                n = int(count)
+                if rate and n:
+                    total += rate * n * dt_days
         return total
+
+    def tick_garden_ice(self, dt_days: float) -> float:
+        """Ice tonnes greenhouse domes want to drink this step (caller bills storage)."""
+        if dt_days <= 0.0:
+            return 0.0
+        per = float(STATION_MODULE_CATALOG.get("greenhouse", {}).get("garden_ice_per_day", 0.0) or 0.0)
+        count = 0
+        for mods in self.station_modules.values():
+            count += int(mods.get("greenhouse", 0))
+        return per * count * dt_days
 
     def warehouse_storage_bonus(self) -> float:
         total = 0.0
@@ -1013,7 +1023,12 @@ class OpsSimulation(OrbitalSimulation):
             refinery = self.refineries.get(mission.target)
             if refinery is None:
                 continue
-            refinery.progress += REFINERY_BATCHES_PER_DAY * self.tech_mults.get("refinery", 1.0) * dt_days
+            foundry = int(self.station_modules.get(mission.target, {}).get("foundry", 0))
+            foundry_mult = 1.0 + foundry * float(
+                STATION_MODULE_CATALOG.get("foundry", {}).get("refinery_bonus", 0.0) or 0.0)
+            refinery.progress += (
+                REFINERY_BATCHES_PER_DAY * self.tech_mults.get("refinery", 1.0) * foundry_mult * dt_days
+            )
             while refinery.progress >= 1.0:
                 recipe = self._first_craftable_recipe(ship)
                 if recipe is None:

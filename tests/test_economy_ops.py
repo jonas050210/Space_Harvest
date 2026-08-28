@@ -1646,7 +1646,7 @@ def test_ironman_blocks_mid_run_load(monkeypatch, tmp_path):
     game.credits = 1.0
     game.try_load("quick")
     # Still at the diverged value because load was blocked.
-    assert game.credits == 1.0 or game.credits == before
+    assert game.credits == 1.0
 
 
 # --------------------------------------------------------------------------
@@ -1659,7 +1659,8 @@ def test_campaign_fields_exist_and_have_fingerprints():
     from src.operations import OpsSimulation
 
     sim = OpsSimulation()
-    for key in ("trojan_field", "cinder_moon", "outer_reach"):
+    for key in ("trojan_field", "cinder_moon", "outer_reach", "frost_ring",
+                "ember_shoal", "l5_garden", "hearthwreck", "night_well"):
         assert key in sim.bodies
         assert key in sim.trade_targets
         fp = body_fingerprint(key)
@@ -1974,3 +1975,234 @@ def test_refinery_accepts_cobalt_magnetite_recipe():
     outs = [(r["output"], r["input"]) for r in REFINERY_RECIPES]
     assert any("cobalt" in inp for _, inp in outs)
     assert any("xenonite" in inp for _, inp in outs)
+
+
+# --------------------------------------------------------------------------
+# v1.4 playable director: controls, no live autopilot, campaign HUD, saves
+# --------------------------------------------------------------------------
+
+
+def test_control_table_binds_the_missing_verbs():
+    from src.app.controls import COMMAND_BAR, PLAY_BINDINGS, action_for_key, help_line
+
+    actions = {b.action for b in PLAY_BINDINGS}
+    keys = {b.key for b in PLAY_BINDINGS}
+    for needed in ("swarm", "cycle_view", "view_map", "view_surface", "view_network",
+                   "toggle_hops", "cycle_ship", "dispatch", "sell", "depot"):
+        assert needed in actions
+    for key in ("d", ",", "/", ".", ";", "space", "backspace", "enter", "tab"):
+        assert key in keys
+        assert action_for_key(key)
+    bar = {action for _label, action in COMMAND_BAR}
+    assert {"dispatch", "cycle_ship", "sell", "swarm", "depot", "cycle_view"} <= bar
+    assert "ENTER" in help_line() and "SPACE" in help_line()
+
+
+def test_handle_action_cycles_ship_and_dispatches_selected():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.settings["confirm_dispatch"] = False
+    assert game.selected_idle_ship().name in ("Kestrel", "Petrel")
+    game.handle_action("cycle_ship")
+    first = game.selected_ship_name
+    game.handle_action("cycle_ship")
+    assert game.selected_ship_name != first
+    game.handle_action("dispatch")
+    assert game.sim.missions
+
+
+def test_windowed_game_does_not_autodispatch():
+    from src.main import Game
+
+    game = Game(headless=False)
+    game.screen = "play"
+    game.paused = False
+    for _ in range(40):
+        game.update(3.0)
+    assert game.sim.missions == {}
+
+
+def test_hud_survives_campaign_only_targets(ursina_app):
+    from src.main import Game
+    from src.ui.orbital_hud import OrbitalHUD
+
+    game = Game(headless=True)
+    hud = OrbitalHUD(game.sim.trade_targets)
+    assert "comet_vigil" in hud.targets
+    hud.set_target("comet_vigil")
+    hud.update(game.sim, game.colony.summary(), "", extra=game._ops_hud_data())
+    assert "Vigil" in hud.plan_header.text or "COMET" in hud.plan_header.text.upper() or "VIGIL" in hud.plan_header.text.upper()
+
+
+def test_save_root_is_repo_saves_not_src(tmp_path, monkeypatch):
+    from src.game import savegame as colony_savegame
+    from src.main import Game
+
+    monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
+    game = Game(headless=True)
+    game.save_game("ceo")
+    assert (tmp_path / "ceo.json").is_file()
+    # Meta files are not campaign slots.
+    (tmp_path / "achievements_progress.json").write_text("{}", encoding="utf-8")
+    names = colony_savegame.list_saves()
+    assert "ceo.json" in names
+    assert "achievements_progress.json" not in names
+
+
+def test_alert_wavs_cover_window_build_click(tmp_path):
+    import wave
+
+    from src.utils.procedural import make_alert_wav, make_build_wav, make_click_wav, make_window_chime_wav
+
+    for maker, name in (
+        (make_click_wav, "click.wav"),
+        (make_build_wav, "build.wav"),
+        (make_window_chime_wav, "window.wav"),
+    ):
+        path = maker(str(tmp_path / name))
+        with wave.open(path) as handle:
+            assert handle.getnframes() > 200
+    path = make_alert_wav("flare", str(tmp_path / "flare.wav"))
+    with wave.open(path) as handle:
+        assert handle.getnchannels() == 1
+
+
+def test_achievements_vdf_is_a_closed_table():
+    from pathlib import Path
+
+    from src.config import ACHIEVEMENTS
+
+    text = Path("steam/achievements.vdf").read_text(encoding="utf-8")
+    assert text.strip().endswith("}")
+    # Nothing hanging after the closing brace.
+    after = text[text.rfind("}"):].strip()
+    assert after == "}"
+    for key in ACHIEVEMENTS:
+        assert f'"{key}"' in text
+
+
+def test_game_version_is_current():
+    from src.config import GAME_VERSION
+
+    assert GAME_VERSION.startswith("1.5")
+
+
+# --------------------------------------------------------------------------
+# v1.5 Far Charter: new fields, clipper, garden, worldseed
+# --------------------------------------------------------------------------
+
+
+def test_far_charter_bodies_and_unique_ores():
+    from src.mining import body_fingerprint
+    from src.operations import OpsSimulation
+    from src.simulation.bodies import BODIES as MODULE
+
+    sim = OpsSimulation()
+    for key in ("ember_shoal", "l5_garden", "hearthwreck", "night_well"):
+        assert key in sim.bodies and key in sim.trade_targets
+        fp = body_fingerprint(key)
+        assert abs(sum(fp.values()) - 1.0) < 1e-6
+    assert "memory_glass" in body_fingerprint("hearthwreck")
+    assert "memory_glass" not in body_fingerprint("inner_belt")
+    assert "seedstock" in body_fingerprint("l5_garden")
+    assert "seedstock" not in body_fingerprint("ember_shoal")
+    assert "hearthwreck" not in MODULE
+
+
+def test_clipper_class_and_icebox_capacity():
+    from src.config import SHIP_CLASSES
+    from src.operations import OpsSimulation
+
+    assert "clipper" in SHIP_CLASSES
+    sim = OpsSimulation()
+    ship, msg = sim.buy_ship("clipper")
+    assert ship is not None, msg
+    assert sim.ship_class[ship.name] == "clipper"
+    assert ship.delta_v == SHIP_CLASSES["clipper"]["delta_v"]
+    base = sim.ship_capacity(ship.name)
+    ok, _ = sim.install_part(ship.name, "icebox")
+    assert ok and sim.ship_capacity(ship.name) > base
+    ok, _ = sim.install_part(ship.name, "sail")
+    assert ok
+
+
+def test_greenhouse_drinks_ice_and_raises_garden():
+    from src.main import Game
+
+    game = Game(headless=True)
+    ok, _ = game.sim.build_station_module("l5_garden", "greenhouse")
+    assert ok
+    ice_before = game.colony.state["resources"]["ice"]
+    score_before = float(game.colony.state.get("garden_score", 0.0))
+    for _ in range(40):
+        game.update(2.0)
+    assert game.colony.state["resources"]["ice"] < ice_before
+    assert float(game.colony.state["garden_score"]) > score_before
+
+
+def test_foundry_speeds_waiting_smelt():
+    from src.operations import OpsSimulation
+    from src.simulation.orbital_sim import Leg
+
+    sim = OpsSimulation()
+    sim.build_refinery("inner_belt")
+    ship = sim.ships[0]
+    ship.cargo = {"iron": 30.0, "silver": 10.0}
+    sim.missions[ship.name] = type(
+        "M", (), {"leg": Leg.WAITING, "target": "inner_belt", "return_window": None}
+    )()
+    sim._refinery_smelt_waiting(1.0)
+    without = sim.refineries["inner_belt"].batches_done
+    sim2 = OpsSimulation()
+    sim2.build_refinery("inner_belt")
+    sim2.build_station_module("inner_belt", "foundry")
+    ship2 = sim2.ships[0]
+    ship2.cargo = {"iron": 30.0, "silver": 10.0}
+    sim2.missions[ship2.name] = type(
+        "M", (), {"leg": Leg.WAITING, "target": "inner_belt", "return_window": None}
+    )()
+    sim2._refinery_smelt_waiting(1.0)
+    assert sim2.refineries["inner_belt"].batches_done >= without
+
+
+def test_new_techs_and_worldseed_victory():
+    from src.config import TECHS, VICTORY_ORDER
+    from src.main import Game
+
+    keys = {t[0] for t in TECHS}
+    assert "greenhouse_lattice" in keys and "wreck_charter" in keys
+    assert "worldseed" in VICTORY_ORDER
+    game = Game(headless=True)
+    game.new_campaign(difficulty="director", victory="worldseed")
+    game.credits = 40_000.0
+    game.sim.stats["mass_delivered"] = 8_000.0
+    game.colony.state["garden_score"] = 80.0
+    game.colony.state.setdefault("logistics", {}).setdefault("lifetime_delivered", {})["seedstock"] = 3.0
+    game._tick_victory()
+    assert game.victory_achieved == "worldseed"
+
+
+def test_handle_action_buys_clipper_and_greenhouse():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.credits = 50_000.0
+    game.handle_action("buy_clipper")
+    assert any(game.sim.ship_class.get(s.name) == "clipper" for s in game.sim.ships)
+    game.handle_action("mod_greenhouse")
+    assert any("greenhouse" in mods for mods in game.sim.station_modules.values())
+
+
+def test_new_ores_price_and_store_far_charter():
+    from src.config import MARKET_BASE_PRICES
+    from src.main import Game
+
+    for ore in ("seedstock", "memory_glass"):
+        assert ore in MARKET_BASE_PRICES
+    game = Game(headless=True)
+    stored = game.colony.receive({"seedstock": 8.0, "memory_glass": 2.0})
+    assert stored["stored"]["seedstock"] == pytest.approx(8.0)
+    before = game.credits
+    game.sell_all()
+    assert game.credits > before

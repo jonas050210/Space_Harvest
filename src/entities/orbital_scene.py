@@ -445,6 +445,7 @@ class OrbitalScene:
             "electronics": (0.3, 0.95, 0.8),
             "cobalt": (0.25, 0.45, 0.95), "magnetite": (0.45, 0.35, 0.40),
             "xenonite": (0.75, 0.35, 1.0),
+            "seedstock": (0.35, 0.85, 0.40), "memory_glass": (0.85, 0.75, 0.95),
         }
         resources = ()
         if sim is not None and body_key in sim.bodies:

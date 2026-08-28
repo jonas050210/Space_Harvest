@@ -55,6 +55,7 @@ from src.config import (  # noqa: E402
     GAME_NAME,
     GAME_TAGLINE,
     GAME_VERSION,
+    GARDEN_SCORE_PER_ICE,
     HULL_CRITICAL_PCT,
     PARTS_CATALOG,
     QUALITY_ORDER,
@@ -98,7 +99,7 @@ from src.campaign import (  # noqa: E402
     year_report,
 )
 from src.display import apply_window_settings, volume_from_settings  # noqa: E402
-from src.mining import assay_lines, plan_extraction  # noqa: E402
+from src.mining import assay_lines, body_fingerprint, plan_extraction  # noqa: E402
 from src.market import Contracts, Market  # noqa: E402
 from src.operations import OpsSimulation  # noqa: E402
 from src.simulation.orbital_sim import OrbitalSimulation  # noqa: E402
@@ -111,13 +112,13 @@ except Exception:  # pragma: no cover
     Vec3 = None  # type: ignore[assignment]
     lerp = None  # type: ignore[assignment]
 
-# The vendored upstream game provides the colony economy -- and its JSON
-# savegame slots are reused verbatim for the orbital layer's saves.
+from src.app.audio import setup_game_audio  # noqa: E402
+from src.app.controls import action_for_key  # noqa: E402
 from src.game import logistics as colony_logistics  # noqa: E402
 from src.game import savegame as colony_savegame  # noqa: E402
 from src.game import state as colony_state  # noqa: E402
 
-BUY_MENU = ("scout", "freighter", "refinery", "hauler", "tanker")
+BUY_MENU = ("scout", "freighter", "refinery", "hauler", "tanker", "clipper")
 CREDITS_HISTORY_POINTS = 240
 CREDITS_HISTORY_SAMPLE_DAYS = 2.0
 
@@ -213,6 +214,7 @@ class Game:
         self.view_mode = self.settings.get("view_mode", DEFAULT_VIEW_MODE)
         self._surface_visited: set = set()
         self._map_opened = False
+        self.selected_ship_name: str | None = None
         self.achievements = AchievementTracker(
             path=os.path.join(cloud_root(), "achievements_progress.json"))
         self.steam = SteamClient()
@@ -238,7 +240,7 @@ class Game:
         from src.ui.orbital_hud import OrbitalHUD
 
         self.scene = OrbitalScene(parent=ursina_scene)
-        self.hud = OrbitalHUD(self.sim.trade_targets)
+        self.hud = OrbitalHUD(self.sim.trade_targets, on_command=self.handle_action)
         self.set_camera_preset("network")
 
     def set_camera_preset(self, preset: str) -> None:
@@ -299,11 +301,17 @@ class Game:
         camera.look_at(ship.position)
 
     def pick_body(self, entity) -> None:
-        """Select the clicked body as transfer target (windowed)."""
-        if self.hud is None:
+        """Click a ship to select it, or a body to target it."""
+        if self.hud is None or entity is None:
             return
         node = entity
         while node is not None:
+            ship_name = getattr(node, "ship_name", None)
+            if ship_name:
+                self.selected_ship_name = ship_name
+                self._play_alert("click")
+                self.say(f"Ship: {ship_name}.")
+                return
             key = getattr(node, "body_key", None)
             if key is not None:
                 if self.hud.set_target(key):
@@ -313,13 +321,38 @@ class Game:
             node = getattr(node, "parent", None)
 
     # -- actions -------------------------------------------------------------
+    def selected_idle_ship(self):
+        """Idle ship the director currently has selected, or the first idle hull."""
+        idle = [ship for ship in self.sim.ships if ship.name not in self.sim.missions]
+        if not idle:
+            return None
+        names = {ship.name for ship in idle}
+        if self.selected_ship_name not in names:
+            self.selected_ship_name = idle[0].name
+        return next(ship for ship in idle if ship.name == self.selected_ship_name)
+
+    def cycle_selected_ship(self) -> None:
+        idle = [ship for ship in self.sim.ships if ship.name not in self.sim.missions]
+        if not idle:
+            self.say("Every freighter is already flying a mission.")
+            return
+        names = [ship.name for ship in idle]
+        if self.selected_ship_name in names:
+            index = (names.index(self.selected_ship_name) + 1) % len(names)
+        else:
+            index = 0
+        self.selected_ship_name = names[index]
+        ship = idle[index]
+        cls = self.sim.ship_class.get(ship.name, "freighter")
+        self.say(f"Selected {ship.name} ({cls})  tank {ship.delta_v:,.0f} m/s.", seconds=5.0)
+
     def dispatch_selected(self, confirm: bool = False) -> None:
-        """Dispatch an idle ship. With confirm_dispatch on, first ENTER previews."""
+        """Dispatch the selected idle ship. With confirm_dispatch on, first ENTER previews."""
         if self.hud is None and not self.headless:
             return
         target = (self.hud.selected_target() if self.hud is not None
                   else TRADE_TARGETS[0])
-        idle = next((ship for ship in self.sim.ships if ship.name not in self.sim.missions), None)
+        idle = self.selected_idle_ship()
         if idle is None:
             self.say("Every freighter is already flying a mission.")
             self._pending_dispatch = None
@@ -458,18 +491,11 @@ class Game:
         self.say(message + f"  Bill {cost:,.0f} cr.", seconds=7.0)
 
     def _sync_warehouse_capacity(self) -> None:
-        """Mirror warehouse modules into colony module list for storage math."""
-        bonus_units = int(self.sim.warehouse_storage_bonus() // 250) if hasattr(self.sim, "warehouse_storage_bonus") else 0
-        modules = self.colony.state.setdefault("modules", [])
-        # Keep exactly bonus_units synthetic storage entries.
-        modules[:] = [m for m in modules if m != "storage_wh"]
-        modules.extend(["storage_wh"] * max(0, bonus_units))
-        # logistics.capacity_for counts "storage" only — map storage_wh:
-        # patch by also appending "storage"
-        modules[:] = [m for m in modules if m != "storage" or modules.count("storage") <= 1]
-        # simpler: set a direct capacity boost key
-        self.colony.state["warehouse_bonus_t"] = float(
-            self.sim.warehouse_storage_bonus() if hasattr(self.sim, "warehouse_storage_bonus") else 0.0)
+        """Mirror warehouse modules into colony storage capacity."""
+        bonus = 0.0
+        if hasattr(self.sim, "warehouse_storage_bonus"):
+            bonus = float(self.sim.warehouse_storage_bonus())
+        self.colony.state["warehouse_bonus_t"] = bonus
 
     def _tick_rival_market(self) -> None:
         if not int(self.sim.stats.get("rival_dump_pending", 0)):
@@ -548,6 +574,7 @@ class Game:
             return
         if self.paused:
             if self.hud is not None:
+                self.hud.set_commands_visible(False)
                 self.hud.update(self.sim, self.colony.summary(), "PAUSED - ESC to resume",
                                 extra=self._ops_hud_data())
             return
@@ -556,10 +583,13 @@ class Game:
         self.sim.recover_mines(dt_days)
         self.market.update(dt_days)
         self._tick_life_support(dt_days)
+        self._tick_garden(dt_days)
         self._tick_contracts()
         self._sample_credits_history()
         self._book_deliveries()
-        self._refuel_and_redispatch(dt_days)
+        self._refuel_and_repair(dt_days)
+        if self.headless:
+            self._redispatch_idle(dt_days)
         self._tick_tutorial()
         self._tick_audio()
         self._tick_jump()
@@ -604,6 +634,7 @@ class Game:
             else:
                 self.update_camera()
         if self.hud is not None:
+            self.hud.set_commands_visible(self.screen == "play" and not self.paused)
             self._update_windows_board()
             self.hud.update(self.sim, self.colony.summary(), self._current_message(),
                             extra=self._ops_hud_data())
@@ -678,6 +709,11 @@ class Game:
                 apply_window_settings(self.settings)
             except Exception:
                 pass
+        if self.hud is not None:
+            try:
+                self.hud.apply_style(bool(self.settings.get("ui_contrast", True)))
+            except Exception:
+                pass
         vol = volume_from_settings(self.settings)
         if self.audio is not None:
             hum = self.audio.get("hum")
@@ -724,6 +760,7 @@ class Game:
         self.toasts = []
         self.firsts = {}
         self.techs = set()
+        self.selected_ship_name = None
         self._apply_campaign_rules()
         self.deliveries_booked = 0
         self.screen = "play"
@@ -765,6 +802,7 @@ class Game:
                     self.scene.spawn_swarm(key, int(swarm.get("count", 0)))
             self._drift_camera()
         if self.hud is not None:
+            self.hud.set_commands_visible(False)
             self.hud.update(self.sim, self.colony.summary(),
                             "press ENTER to launch", extra=None)
 
@@ -872,10 +910,6 @@ class Game:
         self.say(f"Game saved ({os.path.basename(path)}).")
 
     def load_game(self, slot: str = "quick") -> None:
-        if is_ironman(self.difficulty) and slot != "quick" and self.screen == "play":
-            # Ironman still allows loading the single quick slot on boot, but
-            # refuses mid-run "rewind" loads from the pause menu path.
-            pass
         data = colony_savegame.load_slot(slot)
         if not data:
             self.say("No savegame found in saves/.")
@@ -901,15 +935,10 @@ class Game:
         self.say("Savegame loaded.", seconds=6.0)
 
     def try_load(self, slot: str = "quick") -> None:
-        """Load with Ironman guard: no mid-run F9 on Ironman campaigns."""
-        if is_ironman(self.difficulty) and self.screen == "play" and not self.paused:
-            self.say("Ironman: no mid-flight loads. Pause and Quit to Title to abandon.")
+        """Load with Ironman guard: no mid-run loads on Ironman campaigns."""
+        if is_ironman(self.difficulty) and self.screen == "play":
+            self.say("Ironman: no mid-flight loads. Quit to title to abandon the charter.")
             return
-        if is_ironman(getattr(self, "difficulty", DEFAULT_DIFFICULTY)):
-            # Allow load only from title (continue) -- pause menu blocks F9.
-            if self.screen == "play" and self.paused:
-                self.say("Ironman: loading disabled. Survive or quit to title.")
-                return
         self.load_game(slot)
 
     # -- HUD feed --------------------------------------------------------------
@@ -962,6 +991,8 @@ class Game:
             "route_overlay": self._route_overlay_points(),
             "survey_line": self._survey_hud_line(),
             "rival_line": (RIVAL_NAME + " active") if self.settings.get("rival_enabled", True) else "",
+            "selected_ship": self.selected_idle_ship().name if self.selected_idle_ship() is not None else self.selected_ship_name,
+            "price_focus": list(body_fingerprint(target)),
         }
 
     # -- "Firsts": one-shot milestones ------------------------------------------
@@ -1007,6 +1038,16 @@ class Game:
             "first_observatory": any("observatory" in mods for mods in self.sim.station_modules.values()),
             "first_drill_yard": any("drill_yard" in mods for mods in self.sim.station_modules.values()),
             "first_capture_frost": self.sim.stats.get("captures_by_body", {}).get("frost_ring", 0) >= 1,
+            "first_capture_ember": captures.get("ember_shoal", 0) >= 1,
+            "first_capture_l5": captures.get("l5_garden", 0) >= 1,
+            "first_capture_hearthwreck": captures.get("hearthwreck", 0) >= 1,
+            "first_capture_night": captures.get("night_well", 0) >= 1,
+            "first_clipper": any(self.sim.ship_class.get(s.name) == "clipper" for s in self.sim.ships),
+            "first_greenhouse": any("greenhouse" in mods for mods in self.sim.station_modules.values()),
+            "first_foundry": any("foundry" in mods for mods in self.sim.station_modules.values()),
+            "seedstock_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("seedstock", 0.0) > 0.0,
+            "memory_glass_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("memory_glass", 0.0) > 0.0,
+            "garden_40": float(self.colony.state.get("garden_score", 0.0)) >= 40.0,
         }
 
     def _tick_firsts(self) -> None:
@@ -1035,6 +1076,10 @@ class Game:
             if self.achievements.unlock("secret_zero_incident_streak"):
                 self.steam.unlock("secret_zero_incident_streak")
                 self.say("ACHIEVEMENT: Ten clean runs -- no incidents.", seconds=8.0)
+        if float(self.colony.state.get("garden_score", 0.0)) >= 80.0:
+            if self.achievements.unlock("secret_worldseed"):
+                self.steam.unlock("secret_worldseed")
+                self.say("ACHIEVEMENT: The garden took.", seconds=8.0)
 
     def _tick_victory(self) -> None:
         if self.victory_achieved:
@@ -1063,6 +1108,10 @@ class Game:
                 bits.append(f"firsts {progress['firsts']}/{progress['firsts_goal']}")
             if progress["needs_aurellium"]:
                 bits.append("aurellium" + (" OK" if progress["aurellium"] > 0 else " --"))
+            if progress.get("garden_goal"):
+                bits.append(f"garden {progress.get('garden', 0):.0f}/{progress['garden_goal']:.0f}")
+            if progress.get("needs_seedstock"):
+                bits.append("seedstock" + (" OK" if progress.get("seedstock", 0) > 0 else " --"))
             goals.append(f"GOAL {progress['label']}: " + " | ".join(bits))
         for key, label, _credits, _research in FIRSTS:
             if not self.firsts.get(key):
@@ -1363,6 +1412,30 @@ class Game:
         reference = max(1.0, LIFE_SOLAR_ENERGY_PER_DAY * 4.0)
         load = 0.15 + 0.6 * (energy_used / dt_days) / reference
         self.power_load = min(1.0, max(0.05, load))
+
+    def _tick_garden(self, dt_days: float) -> None:
+        """Greenhouse domes drink colony ice and raise garden score.
+
+        Ice cost is honest (catalogue rate); techs scale the score via
+        ``tech_mults['garden']``. Life support still melts ice separately.
+        """
+        if dt_days <= 0.0:
+            return
+        want = 0.0
+        if hasattr(self.sim, "tick_garden_ice"):
+            want = float(self.sim.tick_garden_ice(dt_days))
+        if want <= 0.0:
+            return
+        resources = self.colony.state.setdefault("resources", {})
+        drink = min(float(resources.get("ice", 0.0)), want)
+        if drink <= 0.0:
+            return
+        resources["ice"] = float(resources.get("ice", 0.0)) - drink
+        garden_mult = float(self.sim.tech_mults.get("garden", 1.0))
+        self.colony.state["garden_score"] = (
+            float(self.colony.state.get("garden_score", 0.0))
+            + drink * GARDEN_SCORE_PER_ICE * garden_mult
+        )
 
     def _tick_contracts(self) -> None:
         """Post offers, honour decisions, retire overdue and stale paper."""
@@ -1678,7 +1751,7 @@ class Game:
     # -- flight-orientation checklist -------------------------------------------
     TUTORIAL_STEPS = (
         ("dispatched",
-         "Welcome to Space Harvest. TAB picks a field (asteroid). Wait for GO, then ENTER to send a freighter."),
+         "Welcome to Space Harvest. TAB a field, SPACE a ship. Wait for GO, then ENTER (or click GO)."),
         ("sold",
          "Harvest is flying home. Press S to sell ore on Earth -- dump one market and its price floods."),
         ("drilled",
@@ -1750,26 +1823,19 @@ class Game:
         self.muted = not self.muted
         self.say("Audio muted." if self.muted else "Audio on.")
 
-    def _refuel_and_redispatch(self, dt_days: float) -> None:
-        """Top up docked freighters from colony energy and send them back out.
-
-        Both halves are what keep the supply chain alive: without refuelling a
-        fleet grounds itself after two runs, and without cost-aware dispatch a
-        ship will accept a mission it cannot return from.
-        """
+    def _refuel_and_repair(self, dt_days: float) -> None:
+        """Top up docked freighters from colony energy and bill hull repairs."""
         granted = self.sim.refuel_docked_fleet(dt_days)
         if granted > 0.0:
             energy = self.colony.state.get("resources", {})
             cost = granted * SHIP_REFUEL_ENERGY_PER_MS
             energy["energy"] = max(0.0, energy.get("energy", 0.0) - cost)
-
-        # Hull maintenance for docked ships, paid from the treasury.
         if self.auto_repair:
             _, repair_cost = self.sim.repair_docked_fleet(dt_days, self.credits)
             self.credits -= repair_cost
 
-        # Re-pricing the network means solving Lambert grids, so the scan is
-        # throttled. Ships already flying are unaffected.
+    def _redispatch_idle(self, dt_days: float) -> None:
+        """Headless autopilot: send full tanks back out. Live play never calls this."""
         if self.sim.time < self.sim._next_scan_time:
             return
         if not any(
@@ -1782,9 +1848,6 @@ class Game:
         for ship in self.sim.ships:
             if ship.name in self.sim.missions or ship.origin != "colony":
                 continue
-            # Auto-dispatch waits for a near-full tank: launching on a sliver
-            # of propellant condemns the ship to the cheapest hop forever.
-            # Manual dispatch (ENTER) stays available at any propellant level.
             if ship.delta_v < 0.85 * self.sim.class_spec(ship.name)["delta_v"]:
                 continue
             target = self._choose_auto_target(ship)
@@ -1798,6 +1861,166 @@ class Game:
                     self.sim.stats["multihop_runs"] = int(self.sim.stats.get("multihop_runs", 0)) + 1
             else:
                 self.sim.dispatch(ship, target)
+
+    def handle_action(self, action: str) -> None:
+        """Run a play-mode action token from the control table or command bar."""
+        if not action:
+            return
+        if action == "dispatch":
+            if self._pending_dispatch is not None:
+                self.dispatch_selected(confirm=True)
+            else:
+                self.dispatch_selected(confirm=False)
+            return
+        if action == "cycle_ship":
+            self.cycle_selected_ship()
+            return
+        if action == "cycle_target":
+            if self.hud is not None:
+                self.hud.cycle_target(1)
+                self.say(f"Target: {self.hud.selected_target()}")
+            return
+        if action == "swarm":
+            self.launch_swarm_selected()
+            return
+        if action == "toggle_hops":
+            self.toggle_prefer_hops()
+            return
+        if action == "jump":
+            self.cycle_jump()
+            return
+        if action == "warp_down":
+            self.sim.cycle_warp(-1)
+            return
+        if action == "warp_up":
+            self.sim.cycle_warp(1)
+            return
+        if action == "cycle_view":
+            self.set_view_mode()
+            return
+        if action == "view_map":
+            self.set_view_mode("map")
+            return
+        if action == "view_surface":
+            self.set_view_mode("surface")
+            return
+        if action == "view_network":
+            self.set_view_mode("network")
+            return
+        if action == "toggle_orbits":
+            if self.scene is not None:
+                self.scene.set_orbits_visible(not self.scene.orbits_visible)
+            return
+        if action == "follow":
+            self.cycle_follow()
+            return
+        if action == "camera_network":
+            self.set_camera_preset("network")
+            return
+        if action == "sell":
+            self.sell_all()
+            return
+        if action == "sell_50":
+            self.sell_all(0.5)
+            return
+        if action == "sell_25":
+            self.sell_all(0.25)
+            return
+        if action == "accept_contract":
+            self.accept_contract()
+            return
+        if action == "decline_contract":
+            self.decline_contract()
+            return
+        if action == "depot":
+            self.build_depot_selected()
+            return
+        if action == "refinery":
+            self.build_refinery_selected()
+            return
+        if action == "drones":
+            self.buy_drone_bay()
+            return
+        if action == "survey":
+            self.surface_survey()
+            return
+        if action == "isru":
+            self.surface_isru()
+            return
+        if action == "mod_observatory":
+            self.build_station_module_selected("observatory")
+            return
+        if action == "mod_warehouse":
+            self.build_station_module_selected("warehouse")
+            return
+        if action == "mod_drill_yard":
+            self.build_station_module_selected("drill_yard")
+            return
+        if action == "mod_shield_mast":
+            self.build_station_module_selected("shield_mast")
+            return
+        if action == "mod_greenhouse":
+            self.build_station_module_selected("greenhouse")
+            return
+        if action == "mod_foundry":
+            self.build_station_module_selected("foundry")
+            return
+        if action == "toggle_drill":
+            self.toggle_drill()
+            return
+        if action == "toggle_repair":
+            self.toggle_repair()
+            return
+        buys = {
+            "buy_scout": "scout", "buy_freighter": "freighter", "buy_refinery": "refinery",
+            "buy_hauler": "hauler", "buy_tanker": "tanker", "buy_clipper": "clipper",
+        }
+        if action in buys:
+            self.buy_ship_class(buys[action])
+            return
+        parts = {
+            "part_tank": "tank", "part_drill": "drill", "part_quarters": "quarters",
+            "part_navsuite": "navsuite", "part_scanner": "scanner",
+            "part_shield": "shield", "part_magclamp": "magclamp",
+            "part_icebox": "icebox", "part_sail": "sail",
+        }
+        if action in parts:
+            self.buy_part(parts[action])
+            return
+        if action == "hire_miner":
+            self.hire("miner")
+            return
+        if action == "hire_botanist":
+            self.hire("botanist")
+            return
+        if action == "fire":
+            self.fire_worst_morale()
+            return
+        if action == "tech":
+            self.buy_tech()
+            return
+        if action == "quality":
+            order = QUALITY_ORDER
+            current = self.settings.get("quality", "medium")
+            idx = order.index(current) if current in order else 0
+            self.settings["quality"] = order[(idx + 1) % len(order)]
+            self.apply_settings()
+            self.say(f"Quality: {self.settings['quality']}.")
+            return
+        if action == "mute":
+            self.settings["muted"] = not self.settings.get("muted", False)
+            self.apply_settings()
+            self.say("Audio muted." if self.muted else "Audio on.")
+            return
+        if action == "save":
+            self.save_game()
+            return
+        if action == "load":
+            self.try_load()
+            return
+        if action == "report":
+            return  # windowed loop opens the overlay; headless ignores
+
 
     def _life_ice_premium(self) -> float:
         """Extra credits-per-tonne on ice while the pantry runs low.
@@ -1935,23 +2158,7 @@ def run_headless(sim_days: float, frames_per_day: int = 4, verbose: bool = True,
 
 def _setup_audio(game: "Game") -> None:
     """Synthesise the ambient hum and alert tones; never fatal if audio fails."""
-    try:
-        from ursina import Audio
-
-        from src.utils.procedural import make_alert_wav, make_hum_wav
-
-        directory = os.path.join("logs", "audio")
-        os.makedirs(directory, exist_ok=True)
-        audio = {"hum": Audio(make_hum_wav(os.path.join(directory, "hum.wav")),
-                              loop=True, autoplay=True)}
-        for kind in ("flare", "hull", "shortage", "contract", "build", "window"):
-            audio[kind] = Audio(make_alert_wav(kind, os.path.join(directory, f"{kind}.wav")),
-                                autoplay=False)
-        game.audio = audio
-        print("[audio] procedural hum and alert tones ready")
-    except Exception as exc:  # no audio device / no numpy wave support
-        game.audio = None
-        print(f"[audio] disabled ({exc})")
+    game.audio = setup_game_audio()
 
 
 def run_windowed() -> None:
@@ -2089,102 +2296,14 @@ def run_windowed() -> None:
             return
         if key == "left mouse down":
             game.pick_body(mouse.hovered_entity)
-        elif key == "tab" and game.hud is not None:
-            game.hud.cycle_target(1)
-            game.say(f"Target: {game.hud.selected_target()}")
-        elif key == "enter":
-            if game._pending_dispatch is not None:
-                game.dispatch_selected(confirm=True)
-            else:
-                game.dispatch_selected(confirm=False)
-        elif key == "o" and game.scene is not None:
-            game.scene.set_orbits_visible(not game.scene.orbits_visible)
-        elif key == "f":
-            game.cycle_follow()
-        elif key == "c":
-            game.set_camera_preset("network")
-        elif key == "[":
-            game.sim.cycle_warp(-1)
-        elif key == "]":
-            game.sim.cycle_warp(1)
-        elif key == "s":
-            game.sell_all()
-        elif key == "5":
-            game.sell_all(0.5)
-        elif key == "6":
-            game.sell_all(0.25)
-        elif key == "=":
-            game.surface_survey()
-        elif key == "-":
-            game.surface_isru()
-        elif key == "7":
-            game.build_station_module_selected("observatory")
-        elif key == "8":
-            game.build_station_module_selected("warehouse")
-        elif key == "9":
-            game.build_station_module_selected("drill_yard")
-        elif key == "'":
-            game.build_station_module_selected("shield_mast")
-        elif key == "x":
-            game.toggle_drill()
-        elif key == "m":
-            game.toggle_repair()
-        elif key in ("1", "2", "3", "4", "0"):
-            # 1-4 classic classes; 0 = tanker
-            idx = 4 if key == "0" else int(key) - 1
-            game.buy_ship_class(BUY_MENU[idx])
-        elif key == "j":
-            game.cycle_jump()
-        elif key == "b":
-            game.accept_contract()
-        elif key == "v":
-            game.decline_contract()
-        elif key == "g":
-            game.hire("miner")
-        elif key == "h":
-            game.fire_worst_morale()
-        elif key == "z":
-            game.hire("botanist")
-        elif key == "r":
-            game.build_depot_selected()
-        elif key == "e":
-            game.build_refinery_selected()
-        elif key == "t":
-            game.buy_part("tank")
-        elif key == "y":
-            game.buy_part("drill")
-        elif key == "u":
-            game.buy_part("quarters")
-        elif key == "p":
-            game.buy_drone_bay()
-        elif key == "i":
-            game.buy_part("navsuite")
-        elif key == "f6":
-            game.buy_part("scanner")
-        elif key == "f7":
-            game.buy_part("shield")
-        elif key == "f8":
-            game.buy_part("magclamp")
-        elif key == "l":
-            game.buy_tech()
-        elif key == "k":
-            order = QUALITY_ORDER
-            current = game.settings.get("quality", "medium")
-            idx = order.index(current) if current in order else 0
-            game.settings["quality"] = order[(idx + 1) % len(order)]
-            game.apply_settings()
-            game.say(f"Quality: {game.settings['quality']}.")
-        elif key == "n":
-            game.settings["muted"] = not game.settings.get("muted", False)
-            game.apply_settings()
-            game.say("Audio muted." if game.muted else "Audio on.")
-        elif key == "f5":
-            game.save_game()
-        elif key == "f9":
-            game.try_load()
-        elif key == "f1":
+            return
+        action = action_for_key(key)
+        if action == "report":
             menus.show_report(year_report(game))
             game.paused = True
+            return
+        if action:
+            game.handle_action(action)
 
     # Ursina discovers the loop and input handler through this module's globals.
     import sys as _sys

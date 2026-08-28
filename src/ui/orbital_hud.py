@@ -7,7 +7,9 @@ toolkit.
 
 from __future__ import annotations
 
-from ursina import Entity, Text, Vec3, camera, color
+from ursina import Button, Entity, Text, Vec3, camera, color
+
+from src.app.controls import COMMAND_BAR, HOWTO_PAGES as CONTROL_HOWTO_PAGES, help_line
 
 from ..config import (
     DEFAULT_SETTINGS,
@@ -30,9 +32,11 @@ from ..simulation.bodies import BODIES
 class OrbitalHUD:
     """Left panel: mission clock, fleet and the active transfer plan."""
 
-    def __init__(self, targets: tuple[str, ...]):
+    def __init__(self, targets: tuple[str, ...], on_command=None):
         self.targets = targets
         self.target_index = 0
+        self.on_command = on_command
+        self.command_buttons: list = []
 
         panel = Entity(parent=camera.ui, model="quad",
                        color=color.rgba(0.045, 0.06, 0.10, 0.90),
@@ -71,10 +75,11 @@ class OrbitalHUD:
         ]
 
         self.help = Text(
-            text="[ / ] warp   TAB target   ENTER dispatch   S sell ore   X drill   M repair   1-4 buy ship   F5/F9 save/load",
-            parent=camera.ui, scale=0.46,
+            text=help_line(),
+            parent=camera.ui, scale=0.42,
             color=color.rgba(0.7, 0.8, 0.9, 0.8), origin=(-0.5, 0), position=(-0.755, -0.47, -0.1),
         )
+        self._build_command_bar()
         self.status = Text(text="", parent=camera.ui, position=(-0.29, -0.47, -0.1),
                            scale=0.5, color=color.orange, origin=(0.5, 0))
 
@@ -148,6 +153,42 @@ class OrbitalHUD:
             return True
         return False
 
+    def _build_command_bar(self) -> None:
+        """Mouse-first actions along the bottom. Hidden on title / pause."""
+        if self.on_command is None:
+            return
+        n = len(COMMAND_BAR)
+        for i, (label, action) in enumerate(COMMAND_BAR):
+            x = -0.36 + i * (0.72 / max(1, n - 1))
+            button = Button(
+                text=label,
+                parent=camera.ui,
+                scale=(0.105, 0.042),
+                position=(x, -0.385, -0.2),
+                color=color.rgba(0.07, 0.14, 0.22, 0.92),
+                highlight_color=color.rgb(0.18, 0.42, 0.52),
+                pressed_color=color.rgb(0.25, 0.55, 0.45),
+                on_click=lambda a=action: self.on_command(a),
+            )
+            try:
+                button.text_entity.scale = 0.6
+            except Exception:
+                pass
+            self.command_buttons.append(button)
+
+    def set_commands_visible(self, visible: bool) -> None:
+        for button in self.command_buttons:
+            button.enabled = bool(visible)
+
+    def apply_style(self, contrast: bool = True) -> None:
+        """High-contrast panels for the accessibility toggle."""
+        if contrast:
+            fill = color.rgba(0.02, 0.03, 0.06, 0.94)
+        else:
+            fill = color.rgba(0.045, 0.06, 0.10, 0.82)
+        self.panel.color = fill
+        self.ops_panel.color = fill
+
     # -- refresh -------------------------------------------------------------
     def update(self, sim, colony_state: dict | None = None, message: str = "",
                extra: dict | None = None) -> None:
@@ -163,7 +204,9 @@ class OrbitalHUD:
             self._clear_ops_panel()
 
         target_key = self.selected_target()
-        target_name = BODIES[target_key].name
+        body = getattr(sim, "bodies", BODIES).get(target_key) or BODIES.get(target_key)
+        target_name = body.name if body is not None else target_key
+        semi = body.elements.a if body is not None else 0.0
         window = sim.launch_window("colony", target_key)
         self.plan_header.text = f"TRANSFER PLAN -> {target_name.upper()}"
         if window is None:
@@ -174,7 +217,7 @@ class OrbitalHUD:
             wait_days = max(0.0, (window.departure_time - sim.time) / SIM_SECONDS_PER_DAY)
             if extra is not None:
                 rows = [
-                    ("Target", f"{target_name}  (a={BODIES[target_key].elements.a:.2f} AU)"),
+                    ("Target", f"{target_name}  (a={semi:.2f} AU)"),
                     ("Window opens in", f"{wait_days:,.0f} d"),
                     ("Time of flight", f"{window.tof / SIM_SECONDS_PER_DAY:,.0f} d"),
                     ("Departure burn", f"{sim.delta_v_km_s(window.dv_depart) * 1000.0:,.0f} m/s"),
@@ -185,13 +228,13 @@ class OrbitalHUD:
                 ]
             else:
                 rows = [
-                    ("Target", f"{target_name}  (a={BODIES[target_key].elements.a:.2f} AU)"),
+                    ("Target", f"{target_name}  (a={semi:.2f} AU)"),
                     ("Window opens in", f"{wait_days:,.0f} d"),
                     ("Time of flight", f"{window.tof / SIM_SECONDS_PER_DAY:,.0f} d"),
                     ("Departure burn", f"{sim.delta_v_km_s(window.dv_depart) * 1000.0:,.0f} m/s"),
                     ("Arrival match", f"{sim.delta_v_km_s(window.dv_arrive) * 1000.0:,.0f} m/s"),
                     ("Round-trip cost", f"{sim.delta_v_km_s(window.total_delta_v) * 1000.0 * 2:,.0f} m/s (est.)"),
-                    ("Cargo", f"{SHIP_CARGO_CAPACITY:.0f} t of iron / components / water / ice"),
+                    ("Cargo", f"{SHIP_CARGO_CAPACITY:.0f} t hold"),
                 ]
             for line, (label, value) in zip(self.plan_lines, rows):
                 line.text = f"{label:<17}{value}"
@@ -214,6 +257,7 @@ class OrbitalHUD:
                 f"{report['name']:<8}{report['status']:<9}{report['at']:<18}"
                 f"{report['delta_v_left']:>6,.0f}{bar}{eta}{hull}{tag}"
             )
+            selected = extra.get("selected_ship") if extra else None
             line.color = (
                 color.orange if report["status"] in ("outbound", "inbound")
                 else color.red if report["delta_v_left"] < 2000.0
@@ -221,6 +265,10 @@ class OrbitalHUD:
             )
             if "hull" in report and report["hull"] < 40.0:
                 line.color = color.red
+            if selected and report["name"] == selected:
+                line.color = color.rgb(0.45, 1.0, 0.75)
+                if not line.text.startswith(">"):
+                    line.text = "> " + line.text
 
         for line in self.log_lines:
             line.text = ""
@@ -231,9 +279,9 @@ class OrbitalHUD:
         if colony_state is not None:
             delivered = sim.stats["mass_delivered"]
             self.help.text = (
-                f"[/]warp TAB field ENTER go  D swarm  , view  / map  . surface  ; hops  S sell  R barn"
-                f"      |      colony storage used {colony_state.get('used', 0):,.0f} / "
-                f"{colony_state.get('capacity', 0):,.0f}    lifetime delivered {delivered:,.0f} t"
+                f"{help_line()}"
+                f"      |      storage {colony_state.get('used', 0):,.0f}/"
+                f"{colony_state.get('capacity', 0):,.0f}    hauled {delivered:,.0f} t"
             )
         self.status.text = message
 
@@ -260,13 +308,23 @@ class OrbitalHUD:
         self.credits.text = (f"Treasury  {extra.get('credits', 0.0):,.0f} cr"
                              f"   Firsts {firsts_done}/{firsts_total}")
         self.spark.text = extra.get("credits_spark", "")[:46]
-        for line, (res, price, trend) in zip(self.price_lines, extra.get("prices", [])):
+        prices = list(extra.get("prices", []))
+        focus = list(extra.get("price_focus") or [])
+        by_res = {row[0]: row for row in prices}
+        ordered = []
+        for ore in focus:
+            if ore in by_res:
+                ordered.append(by_res.pop(ore))
+        ordered.extend(sorted(by_res.values(), key=lambda row: -float(row[1])))
+        for line, (res, price, trend) in zip(self.price_lines, ordered):
             line.text = f"{res:<11}{price:>7,.1f} cr/t  {trend}"
             line.color = (
                 color.yellow if trend == "^"
                 else color.orange if trend == "v"
                 else color.white
             )
+        for line in self.price_lines[len(ordered):]:
+            line.text = ""
         mode = extra.get("mode", "scrape")
         mode_label = "core drilling" if mode == "drill" else "surface scraping"
         lines = self.ops_lines
@@ -370,64 +428,7 @@ class MenuOverlay:
 
     MAIN_ITEMS = ("NEW HARVEST", "CONTINUE", "LOAD LAST SAVE", "SETTINGS", "HOW TO PLAY", "QUIT")
     PAUSE_ITEMS = ("RESUME", "SAVE", "YEAR REPORT", "SETTINGS", "QUIT TO TITLE")
-    HOWTO_PAGES = (
-        ("THE HARVEST", (
-            "Space Harvest is orbital farming: asteroids are your fields,",
-            "launch windows are the seasons. TAB or click a rock to target it.",
-            "Watch NEXT WINDOWS -- rides are cheap only when geometry lines up.",
-            "The HUD chimes LAUNCH WINDOW OPEN -- press ENTER (twice to confirm).",
-            "",
-            "Warp with [ and ]. Sell the harvest with S. Dump one market and",
-            "its price floods for a while -- stagger sales like a good farmer.",
-        )),
-        ("BARNS AND THE FAR RING", (
-            "Every burn costs delta-v from a finite tank. Press R to build a",
-            "refuel depot (your barn) at any body: ISRU cooks propellant from",
-            "local ice so deep freighters can top up for the ride home.",
-            "",
-            "E builds a refinery (processing plant). Deep Belt, Derelict Zone",
-            "and Comet Vigil are depot runs -- a depot plus a scout opens all.",
-        )),
-        ("CREWS AND TOOLS", (
-            "Crews get tired and sullen: tired crews refuse to fly and crash",
-            "drills. They earn morale from captures and payday.",
-            "",
-            "T Drop Tanks, Y Deep Drill, U Crew Quarters, P depot drone bay --",
-            "prices swing with the seasons, so buy cheap. Drone bays fill a",
-            "waiting ship's hold automatically. L spends research in the lab.",
-        )),
-        ("MULTI-STOP DELIVERIES", (
-            "Long harvests (Outer Reach, Cinder, deep comet runs) often need",
-            "more delta-v than one tank holds. Build a depot (R) as a barn on",
-            "the way -- the planner will insert REFUELhops automatically.",
-            "",
-            "ENTER previews the route: colony → barn → field → barn → home.",
-            "Press ; to toggle hop planning. Drones (P) load holds while you",
-            "wait at a barn for the next window -- KSP-style logistics.",
-        )),
-        ("SURFACE AND MAP", (
-            "Three views: network 3-D, system chart, and surface survey.",
-            "Comma (,) cycles views. Slash (/) opens the system map.",
-            "Period (.) lands on the selected field's surface.",
-            "Backspace returns to the network overview.",
-            "",
-            "On a GO window press D to launch a harvest drone swarm -- up to",
-            "100 designed drones dive the field. Build drone bays (P) first.",
-            "On the surface: = surveys veins (+yield), - plants an ISRU spike",
-            "(permanent barn boost). 5/6 sell 50%/25% to avoid flooding.",
-        )),
-        ("CAMPAIGN AND GRAPHICS", (
-            "SETTINGS picks difficulty (Director / Tight / Ironman) and a",
-            "victory mode (Endless / Charter / Legacy) before NEW HARVEST.",
-            "Ironman disables mid-run loads; critical hulls can wreck.",
-            "",
-            "Graphics: Low / Medium / High / Ultra. K cycles them live.",
-            "0 commissions a Tanker (fills barns). 7/8/9/' build station",
-            "modules (observatory, warehouse, drill yard, shield mast).",
-            "New drillable ores: cobalt, magnetite, xenonite. Frost Ring field.",
-            "F6/F7/F8: Ore Scanner / Shield Weave / Mag-Clamps.",
-        )),
-    )
+    HOWTO_PAGES = CONTROL_HOWTO_PAGES
 
     # Settings rows: (settings-dict key, label, kind)
     # kind: cycle_list | toggle | cycle_num

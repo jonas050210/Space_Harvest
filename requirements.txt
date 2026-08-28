@@ -1,4 +1,4 @@
-# Asteroid Colony Proto - Orbital Supply Chains
+# Space Harvest — orbital farming on real launch windows.
 # Verified with Python 3.11-3.13 and Ursina 8.3.0 (Panda3D 1.10.16).
 ursina>=6.0.0
 numpy>=1.26

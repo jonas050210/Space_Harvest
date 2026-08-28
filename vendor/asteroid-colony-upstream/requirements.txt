@@ -1,3 +1,0 @@
-ursina>=6.0.0
-pyinstaller>=6.0.0
-# No additional dependencies are required. Shortcuts use PowerShell without pywin32.
