@@ -18,4 +18,4 @@ settings.json
 src/saves/
 packaging/__pycache__/
 _tmp_create_sc.ps1
-*.egg-info/.github/
+*.egg-info/
