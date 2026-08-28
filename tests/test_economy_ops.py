@@ -35,7 +35,7 @@ from src.mining import (  # noqa: E402
     plan_extraction,
     vein_size,
 )
-from src.operations import OpsSimulation  # noqa: E402
+from src.ops.simulation import OpsSimulation  # noqa: E402
 from src.simulation.orbital_sim import Leg  # noqa: E402
 from src.simulation.bodies import BODIES, TRADE_TARGETS  # noqa: E402
 
@@ -606,7 +606,7 @@ def test_auto_dispatch_chooses_a_target_and_skips_worked_out_veins():
 
 
 def test_tutorial_walks_the_whole_checklist(monkeypatch, tmp_path):
-    from src.game import savegame as colony_savegame
+    from src.colony import savegame as colony_savegame
     from src.main import Game
 
     monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
@@ -899,7 +899,6 @@ def test_planning_knobs_survive_a_json_round_trip():
 # --------------------------------------------------------------------------
 
 def test_depot_enables_a_run_the_ship_cannot_afford_alone():
-    from src.config import SIM_SECONDS_PER_DAY
 
     sim = OpsSimulation(ship_names=("Hauler",), ship_classes={"Hauler": "hauler"})
     rt_cost = sim.round_trip_cost_ms("colony", "deep_belt")
@@ -1090,7 +1089,6 @@ def test_game_buy_part_bills_and_installs():
 
 
 def test_depot_drones_fill_a_waiting_ship():
-    from src.config import SIM_SECONDS_PER_DAY
 
     sim = OpsSimulation(ship_names=("Hauler",), ship_classes={"Hauler": "hauler"})
     ship = sim.ships[0]
@@ -1173,7 +1171,7 @@ def test_menu_navigation_is_self_consistent(ursina_app):
 
 
 def test_settings_persist_through_the_upstream_save_slots(tmp_path, monkeypatch, ursina_app):
-    from src.game import savegame as colony_savegame
+    from src.colony import savegame as colony_savegame
     from src.main import Game
 
     monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
@@ -1247,7 +1245,6 @@ def test_rare_ores_have_market_prices_and_store_cleanly():
 # --------------------------------------------------------------------------
 
 def test_refinery_smelts_the_arrival_payload():
-    from src.config import SIM_SECONDS_PER_DAY
 
     sim = OpsSimulation(ship_names=("Hauler",), ship_classes={"Hauler": "hauler"})
     sim.build_refinery("inner_belt")
@@ -1307,7 +1304,7 @@ def test_firsts_fire_once_with_rewards():
 
 
 def test_firsts_survive_a_json_round_trip(monkeypatch, tmp_path):
-    from src.game import savegame as colony_savegame
+    from src.colony import savegame as colony_savegame
     from src.main import Game
 
     monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
@@ -1342,7 +1339,7 @@ def test_tech_purchases_deduct_research_and_apply_effects():
 
 
 def test_techs_reapply_on_load(tmp_path, monkeypatch):
-    from src.game import savegame as colony_savegame
+    from src.colony import savegame as colony_savegame
     from src.main import Game
 
     monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
@@ -1437,7 +1434,7 @@ def test_vertical_slice_mine_deliver_sell_buy():
 
 
 def test_game_save_and_load_round_trip(monkeypatch, tmp_path):
-    from src.game import savegame as colony_savegame
+    from src.colony import savegame as colony_savegame
     from src.main import Game
 
     monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
@@ -1482,7 +1479,7 @@ def test_difficulty_modes_change_starting_credits_and_wear():
     from src.campaign import apply_difficulty_to_sim, starting_credits
     from src.config import START_CREDITS
     from src.main import Game
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
 
     assert starting_credits("director") == pytest.approx(START_CREDITS)
     assert starting_credits("tight") < START_CREDITS
@@ -1592,7 +1589,7 @@ def test_settings_menu_cycles_all_rows(ursina_app):
 
 
 def test_campaign_survives_save_round_trip(monkeypatch, tmp_path):
-    from src.game import savegame as colony_savegame
+    from src.colony import savegame as colony_savegame
     from src.main import Game
 
     monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
@@ -1632,7 +1629,7 @@ def test_steam_bridge_writes_manifest(tmp_path):
 
 
 def test_ironman_blocks_mid_run_load(monkeypatch, tmp_path):
-    from src.game import savegame as colony_savegame
+    from src.colony import savegame as colony_savegame
     from src.main import Game
 
     monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
@@ -1642,7 +1639,6 @@ def test_ironman_blocks_mid_run_load(monkeypatch, tmp_path):
     game.screen = "play"
     game.paused = True
     # try_load should refuse while paused mid-run on ironman
-    before = game.credits
     game.credits = 1.0
     game.try_load("quick")
     # Still at the diverged value because load was blocked.
@@ -1656,7 +1652,7 @@ def test_ironman_blocks_mid_run_load(monkeypatch, tmp_path):
 
 def test_campaign_fields_exist_and_have_fingerprints():
     from src.mining import body_fingerprint
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
 
     sim = OpsSimulation()
     for key in ("trojan_field", "cinder_moon", "outer_reach", "frost_ring",
@@ -1684,7 +1680,7 @@ def test_new_ores_price_and_store():
 
 
 def test_route_planner_direct_and_hop():
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
     from src.routes import plan_direct, plan_route, plan_via_depot
 
     sim = OpsSimulation()
@@ -1703,7 +1699,7 @@ def test_route_planner_direct_and_hop():
 
 
 def test_dispatch_route_queues_legs_and_continues():
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
 
     sim = OpsSimulation(ship_names=("Kestrel",))
     sim.build_depot("deep_belt")
@@ -1752,7 +1748,7 @@ def test_game_dispatch_uses_planner_for_deep_targets():
 
 def test_swarm_capacity_scales_with_drone_bays():
     from src.config import SWARM_MAX_DRONES
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
 
     sim = OpsSimulation()
     assert sim.swarm_capacity() >= 1
@@ -1826,7 +1822,7 @@ def test_quality_presets_include_new_fx_flags():
 
 
 def test_surface_survey_boosts_extraction_and_expires_path():
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
 
     sim = OpsSimulation()
     ok, _ = sim.plant_survey("inner_belt")
@@ -1836,7 +1832,7 @@ def test_surface_survey_boosts_extraction_and_expires_path():
 
 
 def test_isru_spike_boosts_depot_generation():
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
 
     sim = OpsSimulation()
     sim.build_depot("deep_belt")
@@ -1852,7 +1848,7 @@ def test_isru_spike_boosts_depot_generation():
 
 
 def test_rival_mines_and_can_flag_dump():
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
 
     sim = OpsSimulation()
     assert sim.rival_enabled is False  # quiet unless game opts in
@@ -1904,7 +1900,7 @@ def test_techs_include_swarm_and_longshore():
 def test_new_drillable_ores_have_prices_and_fingerprints():
     from src.config import MARKET_BASE_PRICES, MINING_ORES
     from src.mining import body_fingerprint
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
 
     for ore in ("cobalt", "magnetite", "xenonite"):
         assert ore in MINING_ORES
@@ -1919,7 +1915,7 @@ def test_new_drillable_ores_have_prices_and_fingerprints():
 
 def test_tanker_class_and_depot_fill():
     from src.config import SHIP_CLASSES
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
 
     assert "tanker" in SHIP_CLASSES
     sim = OpsSimulation()
@@ -1929,8 +1925,7 @@ def test_tanker_class_and_depot_fill():
     sim.build_depot("inner_belt")
     before = sim.depots["inner_belt"].fuel_ms
     # Park tanker as WAITING at depot via fake mission-like origin
-    from src.simulation.orbital_sim import Leg, Mission
-    import numpy as np
+    from src.simulation.orbital_sim import Leg
     # simpler: call _tanker_fill_depot with a crafted waiting state
     ship.origin = "inner_belt"
     # put ship in missions WAITING
@@ -1943,7 +1938,7 @@ def test_tanker_class_and_depot_fill():
 
 
 def test_station_modules_drill_yard_and_observatory():
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
 
     sim = OpsSimulation()
     ok, _ = sim.build_station_module("inner_belt", "drill_yard")
@@ -1957,7 +1952,7 @@ def test_station_modules_drill_yard_and_observatory():
 
 
 def test_new_parts_scanner_shield_magclamp():
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
 
     sim = OpsSimulation()
     ship = sim.ships[0]
@@ -2036,7 +2031,7 @@ def test_hud_survives_campaign_only_targets(ursina_app):
 
 
 def test_save_root_is_repo_saves_not_src(tmp_path, monkeypatch):
-    from src.game import savegame as colony_savegame
+    from src.colony import savegame as colony_savegame
     from src.main import Game
 
     monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
@@ -2095,7 +2090,7 @@ def test_game_version_is_current():
 
 def test_far_charter_bodies_and_unique_ores():
     from src.mining import body_fingerprint
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
     from src.simulation.bodies import BODIES as MODULE
 
     sim = OpsSimulation()
@@ -2112,7 +2107,7 @@ def test_far_charter_bodies_and_unique_ores():
 
 def test_clipper_class_and_icebox_capacity():
     from src.config import SHIP_CLASSES
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
 
     assert "clipper" in SHIP_CLASSES
     sim = OpsSimulation()
@@ -2142,7 +2137,7 @@ def test_greenhouse_drinks_ice_and_raises_garden():
 
 
 def test_foundry_speeds_waiting_smelt():
-    from src.operations import OpsSimulation
+    from src.ops.simulation import OpsSimulation
     from src.simulation.orbital_sim import Leg
 
     sim = OpsSimulation()

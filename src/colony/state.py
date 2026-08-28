@@ -35,25 +35,6 @@ def initial_state():
     }
 
 
-def get_diff_factor(state):
-    name = state.get("difficulty", config.DEFAULT_DIFFICULTY)
-    return config.DIFFICULTY.get(name, 1.0)
-
-
-def resource_ok(state, cost_dict, factor=1.0):
-    mult = get_diff_factor(state) * factor
-    for key, value in cost_dict.items():
-        if state["resources"].get(key, 0) < value * mult:
-            return False
-    return True
-
-
-def deduct_resources(state, cost_dict, factor=1.0):
-    mult = get_diff_factor(state) * factor
-    for key, value in cost_dict.items():
-        state["resources"][key] = state["resources"].get(key, 0) - value * mult
-
-
 def add_resources(state, res_dict):
     for key, value in res_dict.items():
         state["resources"][key] = state["resources"].get(key, 0) + value

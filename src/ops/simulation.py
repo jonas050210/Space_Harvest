@@ -41,10 +41,8 @@ from src.config import (
     STATION_MODULE_CATALOG,
     SWARM_BASE_DRONES,
     SWARM_COOLDOWN_DAYS,
-    SWARM_CREDIT_COST_PER_DRONE,
     SWARM_DRONES_PER_BAY,
     SWARM_DURATION_DAYS,
-    SWARM_ENERGY_COST_PER_DRONE,
     SWARM_MAX_DRONES,
     SWARM_YIELD_T_PER_DRONE_DAY,
     SURFACE_ISRU_DEPOT_GEN_BONUS,
@@ -52,13 +50,9 @@ from src.config import (
     SURFACE_SURVEY_BONUS,
     SURFACE_SURVEY_DAYS,
     RIVAL_DUMP_PERIOD_DAYS,
-    RIVAL_DUMP_TONNES,
     RIVAL_MINE_T_PER_DAY,
-    RIVAL_NAME,
-    SIM_SECONDS_PER_DAY,
     COMET_ELEMENTS,
     COMET_KEY,
-    COMET_VEIN_BONUS,
     CREW_BOTANIST_SAVING_CAP,
     MINING_EXTRA_SPAWNS,
     CREW_BOTANIST_WATER_SAVING,
@@ -733,10 +727,8 @@ class OpsSimulation(OrbitalSimulation):
                     f"{ship.name} tops up at {self.bodies[ship.origin].name} "
                     f"depot (+{draw:,.0f} m/s) before the next hop."
                 )
-        cargo = None
         if purpose == "harvest":
-            cargo = None  # let dispatch plan extraction
-            ok, message = self.dispatch(ship, dest, cargo=None)
+            ok, message = self.dispatch(ship, dest, cargo=None)  # let dispatch plan extraction
         else:
             ok, message = super().dispatch(ship, dest, cargo={"ice": 0.0})
             if ok:

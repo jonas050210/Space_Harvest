@@ -7,7 +7,7 @@ toolkit.
 
 from __future__ import annotations
 
-from ursina import Button, Entity, Text, Vec3, camera, color
+from ursina import Button, Entity, Text, camera, color
 
 from src.app.controls import COMMAND_BAR, HOWTO_PAGES as CONTROL_HOWTO_PAGES, help_line
 

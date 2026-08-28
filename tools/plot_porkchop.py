@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Plot a departure-time x time-of-flight delta-v (porkchop) map.
 
-    python scripts/plot_porkchop.py metallic_belt out.png
+    python tools/plot_porkchop.py metallic_belt out.png
 
 Uses the same grid the game's window search scores, so the contours you see
 are exactly what the planner searches.

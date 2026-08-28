@@ -3,7 +3,7 @@
 
 Entry point. Runs the patched-conic simulation from ``src.simulation`` inside a
 Ursina window and books every freighter delivery into the colony economy
-(``src/game/logistics.py``), so storage, research and life support respond to
+(``src/colony/logistics.py``), so storage, research and life support respond to
 what the harvest brings home.
 
     python -m src.main                    # play
@@ -43,30 +43,23 @@ from src.config import (  # noqa: E402
     LIFE_START_WATER,
     LIFE_WATER_PER_CREW_DAY,
     LIFE_WATER_RECYCLE_FRACTION,
-    CREW_BOTANIST_SAVING_CAP,
-    CREW_BOTANIST_WATER_SAVING,
     CREW_HIRE_COST,
     DEFAULT_DIFFICULTY,
     DEFAULT_SETTINGS,
     DEFAULT_VICTORY,
-    DEPOT_BUILD_COST,
     DIFFICULTY_MODES,
     FIRSTS,
-    GAME_NAME,
-    GAME_TAGLINE,
     GAME_VERSION,
     GARDEN_SCORE_PER_ICE,
     HULL_CRITICAL_PCT,
     PARTS_CATALOG,
     QUALITY_ORDER,
     QUALITY_PRESETS,
-    SAVE_SLOTS,
     TECHS,
     MARKET_BASE_PRICES,
     REDISPATCH_SCAN_DAYS,
     SWARM_CREDIT_COST_PER_DRONE,
     SWARM_ENERGY_COST_PER_DRONE,
-    SWARM_MAX_DRONES,
     VIEW_MODES,
     DEFAULT_VIEW_MODE,
     RIVAL_NAME,
@@ -79,7 +72,6 @@ from src.config import (  # noqa: E402
     START_CREDITS,
     TIME_WARP_STEPS,
     VICTORY_MODES,
-    WINDOW_SIZE,
     WINDOW_TITLE,
 )
 from src.simulation.bodies import TRADE_TARGETS  # noqa: E402
@@ -101,8 +93,7 @@ from src.campaign import (  # noqa: E402
 from src.display import apply_window_settings, volume_from_settings  # noqa: E402
 from src.mining import assay_lines, body_fingerprint, plan_extraction  # noqa: E402
 from src.market import Contracts, Market  # noqa: E402
-from src.operations import OpsSimulation  # noqa: E402
-from src.simulation.orbital_sim import OrbitalSimulation  # noqa: E402
+from src.ops.simulation import OpsSimulation  # noqa: E402
 from src.steam_bridge import SteamClient, cloud_root  # noqa: E402
 from src.routes import plan_route, route_preview_lines  # noqa: E402
 
@@ -114,9 +105,9 @@ except Exception:  # pragma: no cover
 
 from src.app.audio import setup_game_audio  # noqa: E402
 from src.app.controls import action_for_key  # noqa: E402
-from src.game import logistics as colony_logistics  # noqa: E402
-from src.game import savegame as colony_savegame  # noqa: E402
-from src.game import state as colony_state  # noqa: E402
+from src.colony import logistics as colony_logistics  # noqa: E402
+from src.colony import savegame as colony_savegame  # noqa: E402
+from src.colony import state as colony_state  # noqa: E402
 
 BUY_MENU = ("scout", "freighter", "refinery", "hauler", "tanker", "clipper")
 CREDITS_HISTORY_POINTS = 240
@@ -2176,7 +2167,7 @@ def run_windowed() -> None:
     game = Game(headless=False)
     game.build_scene(ursina_scene)
     _setup_audio(game)
-    from src.game import savegame as colony_savegame
+    from src.colony import savegame as colony_savegame
     from src.ui.orbital_hud import MenuOverlay
 
     menus = MenuOverlay(continue_available=bool(colony_savegame.list_saves()))

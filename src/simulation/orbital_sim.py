@@ -23,7 +23,6 @@ propellant.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -31,7 +30,6 @@ import numpy as np
 
 from ..config import (
     MU_SUN,
-    REDISPATCH_SCAN_DAYS,
     ROUND_TRIP_CACHE_DAYS,
     SHIP_CARGO_CAPACITY,
     SHIP_START_DELTA_V,
@@ -376,7 +374,6 @@ class OrbitalSimulation:
 
     def _default_payload(self, target_key: str, capacity: float) -> dict[str, float]:
         """Load the hold with whatever the destination's economy wants."""
-        body = self.bodies[target_key]
         wanted = [r for r in ("iron", "components", "water", "ice") if r in ("iron", "components", "water", "ice")]
         if not wanted:
             return {"iron": capacity}

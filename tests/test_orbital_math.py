@@ -168,7 +168,6 @@ def test_lambert_solution_actually_arrives(a1, a2, inclination):
     trajectory it returns really reaches the target at the stated time.
     """
     r1 = np.array([a1 * AU, 0.0, 0.0])
-    v1_circ = math.sqrt(MU_SUN / (a1 * AU))
     # Target sits ahead on an inclined orbit.
     ang = math.radians(110.0)
     r2 = a2 * AU * np.array([math.cos(ang), math.sin(ang) * math.cos(inclination), math.sin(ang) * math.sin(inclination)])
