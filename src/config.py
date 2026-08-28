@@ -101,18 +101,25 @@ HULL_REPAIR_COST_PER_PCT = 12.0  # credits per percentage point restored
 # --- mining: ore fingerprints, depletion, extraction modes -------------------
 MINING_SEED = 20260826         # combined with the body key, deterministic
 MINING_ORES = ("ice", "iron", "silver", "gold", "platinum", "components", "electronics",
-               "thorite", "aurellium")
+               "thorite", "aurellium", "silicates", "obsidian", "helium3")
 # Vein size per ore in tonnes: after extracting one vein-size the yield is at
 # 1/e, forcing expansion to fresh rocks while slow recovery keeps the game
 # from dead-ending.
 MINING_VEIN_SIZE_T = {"ice": 1200.0, "iron": 1600.0, "silver": 700.0,
                       "gold": 450.0, "platinum": 300.0, "components": 500.0, "electronics": 250.0,
-                      "thorite": 380.0, "aurellium": 140.0}
+                      "thorite": 380.0, "aurellium": 140.0,
+                      "silicates": 900.0, "obsidian": 220.0, "helium3": 90.0}
 # Campaign-only ore spawns, appended to a body's module-declared resources.
 # The deep belt and the derelict hull carry radioactive thorite in their slag;
 # aurellium exists ONLY in the comet -- the jackpot that makes the chase pay.
-MINING_EXTRA_SPAWNS = {"deep_belt": ("thorite",), "derelict_zone": ("thorite",),
-                       "comet_vigil": ("thorite", "aurellium")}
+MINING_EXTRA_SPAWNS = {
+    "deep_belt": ("thorite", "silicates"),
+    "derelict_zone": ("thorite",),
+    "comet_vigil": ("thorite", "aurellium", "helium3"),
+    "trojan_field": ("ice", "silicates", "silver"),
+    "cinder_moon": ("platinum", "obsidian", "gold"),
+    "outer_reach": ("helium3", "thorite", "platinum"),
+}
 MINING_DRILL_YIELD_BONUS = 1.6   # core drilling multiplier per run
 MINING_DRILL_WEAR_PCT = 6.0      # hull cost of drilling on every drilled run
 MINING_LOW_HULL_YIELD_PCT = 40.0  # below this hull %, yield scales with hull
@@ -130,17 +137,20 @@ MARKET_BASE_PRICES = {  # credits per tonne
     "ice": 8.0, "iron": 12.0, "silver": 40.0, "gold": 90.0,
     "platinum": 220.0, "components": 65.0, "electronics": 160.0,
     "thorite": 70.0, "aurellium": 480.0,
+    "silicates": 18.0, "obsidian": 310.0, "helium3": 520.0,
 }
 # Tonnes the Earth market absorbs before the price visibly sags; rare ores
 # flood much faster, so dumping a hauler load of platinum crashes its price.
 MARKET_ABSORPTION_T = {"ice": 400.0, "iron": 320.0, "silver": 140.0, "gold": 60.0,
                        "platinum": 30.0, "components": 80.0, "electronics": 40.0,
-                       "thorite": 45.0, "aurellium": 12.0}
+                       "thorite": 45.0, "aurellium": 12.0,
+                       "silicates": 200.0, "obsidian": 22.0, "helium3": 10.0}
 MARKET_FLOOD_HALF_LIFE_DAYS = 30.0
 MARKET_SEASONAL_AMPLITUDE = 0.22
 MARKET_SEASONAL_PERIOD_DAYS = {"ice": 240.0, "iron": 300.0, "silver": 360.0,
                                "gold": 420.0, "platinum": 480.0, "components": 390.0, "electronics": 450.0,
-                               "thorite": 330.0, "aurellium": 540.0}
+                               "thorite": 330.0, "aurellium": 540.0,
+                               "silicates": 280.0, "obsidian": 400.0, "helium3": 600.0}
 MARKET_NOISE_SIGMA = 0.05           # random-walk strength, per sqrt(day)
 MARKET_NOISE_MEAN_REVERSION = 0.02  # per day toward demand 1.0
 MARKET_PRICE_FLOOR_FRACTION = 0.15  # price never drops below this share of base
@@ -371,7 +381,58 @@ FIRSTS = (
     ("rich_100k", "Treasury passes 100,000 cr", 0.0, 25.0),
     ("thorite_1", "First thorite harvest", 500.0, 6.0),
     ("aurellium_1", "First aurellium sale -- Earth is stunned", 2000.0, 30.0),
+    ("first_capture_trojan", "First harvest: Trojan Field (Aurelia L4)", 700.0, 8.0),
+    ("first_capture_cinder", "First harvest: Cinder Moon", 900.0, 10.0),
+    ("first_capture_outer", "First harvest: Outer Reach -- the far farm", 1500.0, 20.0),
+    ("first_multihop", "First multi-stop delivery (refuel hop)", 800.0, 10.0),
+    ("helium3_1", "First helium-3 harvest", 1200.0, 15.0),
+    ("obsidian_1", "First cinder obsidian shipment", 900.0, 10.0),
 )
+
+
+# --- campaign deep fields (installed by OpsSimulation, not the module BODIES table) ---
+# Trojan Field sits near Aurelia's L4; Cinder is a volcanic moon-analogue on a
+# tight Aurelia-like orbit; Outer Reach is the multi-hop endgame rock.
+CAMPAIGN_BODIES = {
+    "trojan_field": {
+        "name": "Trojan Field",
+        "elements": {"a": 2.80, "e": 0.04, "i_deg": 2.2, "raan_deg": 40.0,
+                     "argp_deg": 20.0, "nu_deg": 330.0},  # ~L4 leading Aurelia
+        "radius_km": 14.0, "soi_km": 32000.0,
+        "palette": (0.78, 0.88, 0.72),
+        "resources": ("ice", "silicates", "silver"),
+        "description": "Aurelia L4 trojans -- stable ice and silicate fields.",
+        "render_scale": 0.7,
+    },
+    "cinder_moon": {
+        "name": "Cinder Moon",
+        "elements": {"a": 2.95, "e": 0.08, "i_deg": 5.5, "raan_deg": 55.0,
+                     "argp_deg": 100.0, "nu_deg": 40.0},
+        "radius_km": 9.0, "soi_km": 22000.0,
+        "palette": (0.92, 0.35, 0.22),
+        "resources": ("platinum", "obsidian", "gold"),
+        "description": "Volcanic rock -- hazard-rich, obsidian and platinum veins.",
+        "render_scale": 0.5,
+    },
+    "outer_reach": {
+        "name": "Outer Reach",
+        "elements": {"a": 5.10, "e": 0.22, "i_deg": 9.0, "raan_deg": 280.0,
+                     "argp_deg": 160.0, "nu_deg": 20.0},
+        "radius_km": 22.0, "soi_km": 50000.0,
+        "palette": (0.35, 0.55, 0.95),
+        "resources": ("helium3", "thorite", "platinum"),
+        "description": "Far-system prospect -- multi-hop depot runs required.",
+        "render_scale": 0.85,
+    },
+}
+
+# --- multi-stop delivery planner (KSP-style refuel hops) --------------------
+# Planner may insert player depots as intermediate stops so a ship that cannot
+# afford a direct round trip still reaches deep fields. Max hops caps the
+# search; cost_slack lets a slightly dearer hop route win if it opens sooner.
+ROUTE_MAX_HOPS = 2
+ROUTE_COST_SLACK = 1.08          # hop route may cost up to 8% more than direct
+ROUTE_PREFER_DEPOT_HOPS = True   # default standing policy
 
 # --- science unlocks -------------------------------------------------------------
 # Research points (from deliveries, Firsts, observatories) buy one-shot colony
@@ -526,6 +587,7 @@ DEFAULT_SETTINGS = {
     "victory": DEFAULT_VICTORY,
     "show_dossier": True,
     "confirm_dispatch": True,
+    "prefer_hops": True,
 }
 
 # Named save slots exposed in the pause menu (plus "quick" for F5).

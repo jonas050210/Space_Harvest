@@ -93,6 +93,7 @@ from src.market import Contracts, Market  # noqa: E402
 from src.operations import OpsSimulation  # noqa: E402
 from src.simulation.orbital_sim import OrbitalSimulation  # noqa: E402
 from src.steam_bridge import SteamClient, cloud_root  # noqa: E402
+from src.routes import plan_route, route_preview_lines  # noqa: E402
 
 try:  # windowed-only import; headless keeps working without Ursina
     from ursina import Vec3, lerp  # noqa: E402
@@ -303,9 +304,21 @@ class Game:
         want_confirm = bool(self.settings.get("confirm_dispatch", True)) and not self.headless
         if want_confirm and not confirm:
             preview = dispatch_preview(self.sim, idle, target)
-            self._pending_dispatch = {"ship": idle.name, "target": target, "preview": preview}
-            if preview["blocked"]:
+            prefer = bool(self.settings.get("prefer_hops", True))
+            plan = plan_route(self.sim, idle, target, prefer_hops=prefer)
+            route_lines = route_preview_lines(plan, self.sim.bodies) if plan else []
+            self._pending_dispatch = {
+                "ship": idle.name, "target": target, "preview": preview,
+                "route": route_lines, "plan_direct": bool(plan.direct) if plan else True,
+            }
+            if preview["blocked"] and (plan is None or plan.direct):
                 self.say("HOLD: " + "; ".join(preview["blocked"]), seconds=7.0)
+            elif plan is not None and not plan.direct:
+                self.say(
+                    f"CONFIRM multi-stop {idle.name}: {plan.summary_line()}  "
+                    f"(ENTER again / ESC cancel)",
+                    seconds=10.0,
+                )
             else:
                 self.say(
                     f"CONFIRM {idle.name} -> {preview['target_name']}: "
@@ -323,7 +336,16 @@ class Game:
                 self._pending_dispatch = None
                 return self.dispatch_selected(confirm=False)
         self._pending_dispatch = None
-        _, message = self.sim.dispatch(idle, target)
+        prefer = bool(self.settings.get("prefer_hops", True))
+        self.sim.standing_orders["prefer_hops"] = prefer
+        # Multi-stop when direct will not fit; else normal dispatch.
+        plan = plan_route(self.sim, idle, target, prefer_hops=prefer)
+        if plan is not None and not plan.direct and plan.hop_count > 0:
+            ok, message = self.sim.dispatch_route(idle, target)
+            if ok:
+                self.sim.stats["multihop_runs"] = int(self.sim.stats.get("multihop_runs", 0)) + 1
+        else:
+            ok, message = self.sim.dispatch(idle, target)
         self.say(message, seconds=8.0)
 
     def cancel_pending_dispatch(self) -> None:
@@ -726,6 +748,8 @@ class Game:
             "difficulty": self.difficulty,
             "quality": self.settings.get("quality", "medium"),
             "version": GAME_VERSION,
+            "route_line": self._route_hud_line(),
+            "prefer_hops": bool(self.settings.get("prefer_hops", True)),
         }
 
     # -- "Firsts": one-shot milestones ------------------------------------------
@@ -753,6 +777,12 @@ class Game:
             "rich_100k": self.credits >= 100_000.0,
             "thorite_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("thorite", 0.0) > 0.0,
             "aurellium_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("aurellium", 0.0) > 0.0,
+            "first_capture_trojan": captures.get("trojan_field", 0) >= 1,
+            "first_capture_cinder": captures.get("cinder_moon", 0) >= 1,
+            "first_capture_outer": captures.get("outer_reach", 0) >= 1,
+            "first_multihop": int(self.sim.stats.get("multihop_runs", 0)) >= 1,
+            "helium3_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("helium3", 0.0) > 0.0,
+            "obsidian_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("obsidian", 0.0) > 0.0,
         }
 
     def _tick_firsts(self) -> None:
@@ -858,6 +888,34 @@ class Game:
         days_left = max(0.0, contract.deadline_day - self.market.day)
         return (f"Order: {contract.resource} {pct:.0f}% by {days_left:,.0f} d "
                 f"({contract.faction})")
+
+    def _route_hud_line(self) -> str:
+        """Active multi-stop routes + planner hint for the selected target."""
+        bits = []
+        for name, legs in self.sim.routes.items():
+            if not legs:
+                continue
+            nxt = legs[0]
+            dest = self.sim.bodies.get(nxt.destination)
+            label = dest.name if dest else nxt.destination
+            bits.append(f"{name}→{label}({nxt.purpose})")
+        if self.hud is not None:
+            target = self.hud.selected_target()
+            idle = next((s for s in self.sim.ships if s.name not in self.sim.missions), None)
+            if idle is not None:
+                plan = plan_route(self.sim, idle, target,
+                                  prefer_hops=bool(self.settings.get("prefer_hops", True)))
+                if plan is not None and not plan.direct:
+                    via = ",".join(self.sim.bodies[k].name for k in plan.via if k in self.sim.bodies)
+                    bits.append(f"plan via {via}" if via else "multi-stop plan")
+        return "Route: " + " | ".join(bits) if bits else ""
+
+    def toggle_prefer_hops(self) -> None:
+        self.settings["prefer_hops"] = not bool(self.settings.get("prefer_hops", True))
+        self.sim.standing_orders["prefer_hops"] = self.settings["prefer_hops"]
+        self.save_settings()
+        state = "ON" if self.settings["prefer_hops"] else "OFF"
+        self.say(f"Multi-stop refuel hops {state}.", seconds=5.0)
 
     def _station_hint_line(self) -> str:
         if self.hud is None:
@@ -1457,7 +1515,14 @@ class Game:
             target = self._choose_auto_target(ship)
             if target is None:
                 continue
-            self.sim.dispatch(ship, target)
+            prefer = bool(self.settings.get("prefer_hops", True))
+            plan = plan_route(self.sim, ship, target, prefer_hops=prefer)
+            if plan is not None and not plan.direct and plan.hop_count > 0:
+                ok, _ = self.sim.dispatch_route(ship, target)
+                if ok:
+                    self.sim.stats["multihop_runs"] = int(self.sim.stats.get("multihop_runs", 0)) + 1
+            else:
+                self.sim.dispatch(ship, target)
 
     def _life_ice_premium(self) -> float:
         """Extra credits-per-tonne on ice while the pantry runs low.

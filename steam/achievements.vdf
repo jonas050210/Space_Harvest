@@ -26,3 +26,9 @@
     "secret_charter_clear"        "Charter sealed"
     "secret_ironman_year"         "Ironman year survived"
 }
+    "first_capture_trojan"        "First harvest: Trojan Field"
+    "first_capture_cinder"        "First harvest: Cinder Moon"
+    "first_capture_outer"         "First harvest: Outer Reach"
+    "first_multihop"              "First multi-stop delivery"
+    "helium3_1"                   "First helium-3 harvest"
+    "obsidian_1"                  "First cinder obsidian shipment"

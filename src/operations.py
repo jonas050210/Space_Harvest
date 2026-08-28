@@ -37,6 +37,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 
 from .config import (
+    CAMPAIGN_BODIES,
     COMET_ELEMENTS,
     COMET_KEY,
     COMET_VEIN_BONUS,
@@ -233,6 +234,10 @@ class OpsSimulation(OrbitalSimulation):
         self.tech_mults: dict[str, float] = {}
         #: hull never drops below this (Ironman can set 0.0 for wrecks)
         self.hull_floor = HULL_MIN_PCT
+        #: ship name -> remaining RoutePlan legs (multi-stop delivery)
+        self.routes: dict[str, list] = {}
+        #: standing auto-dispatch orders (destinations + hop policy)
+        self.standing_orders: dict = {"prefer_hops": True, "destinations": [], "min_depot_fuel": 4000.0}
         #: body key -> refuel depot (player-built)
         self.depots: dict[str, Depot] = {}
         #: body key -> refinery station (player-built)
@@ -270,6 +275,11 @@ class OpsSimulation(OrbitalSimulation):
         self._install_comet()
 
     def _install_comet(self) -> None:
+        """Install campaign-only bodies (comet + deep fields) into this sim copy."""
+        self._install_campaign_body_comet()
+        self._install_campaign_fields()
+
+    def _install_campaign_body_comet(self) -> None:
         """Add "Vigil", a long-period comet only this campaign can see.
 
         It lives in the campaign body table; the verified module table stays
@@ -300,6 +310,31 @@ class OpsSimulation(OrbitalSimulation):
         self.stats.setdefault("captures_by_body", {})
 
     # -- construction --------------------------------------------------------
+    def _install_campaign_fields(self) -> None:
+        """Trojan Field, Cinder Moon, Outer Reach -- multi-hop endgame rocks."""
+        for key, spec in CAMPAIGN_BODIES.items():
+            if key in self.bodies:
+                continue
+            el_spec = spec["elements"]
+            el = OrbitalElements(
+                a=el_spec["a"], e=el_spec["e"],
+                i=math.radians(el_spec["i_deg"]),
+                raan=math.radians(el_spec["raan_deg"]),
+                argp=math.radians(el_spec["argp_deg"]),
+                nu=math.radians(el_spec["nu_deg"]),
+            )
+            self.bodies[key] = Body(
+                key=key, name=spec["name"], elements=el,
+                radius_km=float(spec["radius_km"]), soi_km=float(spec["soi_km"]),
+                palette=tuple(spec["palette"]),
+                resources=tuple(spec.get("resources", ())),
+                description=str(spec.get("description", "")),
+                render_scale=float(spec.get("render_scale", 1.0)),
+            )
+            register_body_ores(key, tuple(spec.get("resources", ())))
+            if key not in self.trade_targets:
+                self.trade_targets = tuple(self.trade_targets) + (key,)
+
     def _parked_ship(self, name: str, body_key: str) -> Ship:
         ship = super()._parked_ship(name, body_key)
         cls = self._pending_classes.pop(name, DEFAULT_SHIP_CLASS)
@@ -563,10 +598,107 @@ class OpsSimulation(OrbitalSimulation):
     def recover_mines(self, dt_days: float) -> None:
         self.ledger.recover(dt_days, MINING_RECOVERY_TAU_DAYS)
 
+
+    # -- multi-stop delivery planner -------------------------------------------
+    def plan_delivery(self, ship: Ship, target_key: str, prefer_hops: bool | None = None):
+        """Return the best RoutePlan for ``ship`` → ``target_key`` (or None)."""
+        from src.routes import plan_route
+        if prefer_hops is None:
+            prefer_hops = bool(self.standing_orders.get("prefer_hops", True))
+        return plan_route(self, ship, target_key, prefer_hops=prefer_hops)
+
+    def dispatch_route(self, ship: Ship, target_key: str,
+                       cargo: dict[str, float] | None = None) -> tuple[bool, str]:
+        """Dispatch using the multi-stop planner when a direct run will not fit.
+
+        Direct-capable runs still go through the normal single-leg dispatch.
+        Otherwise the first hop is flown now and the remaining legs are queued
+        on ``self.routes[ship.name]``; each completed hop auto-continues.
+        """
+        from src.routes import plan_route, route_preview_lines
+
+        if ship.name in self.missions:
+            return False, f"{ship.name} is already flying a mission."
+        plan = plan_route(self, ship, target_key)
+        if plan is None:
+            return False, f"No route to {self.bodies.get(target_key, target_key)}."
+        if plan.direct or plan.hop_count == 0:
+            return self.dispatch(ship, target_key, cargo=cargo)
+
+        # Multi-hop: fly the first leg; queue the rest.
+        first = plan.legs[0]
+        if first.purpose == "harvest":
+            ok, message = self.dispatch(ship, first.destination, cargo=cargo)
+        else:
+            # Pure transfer / refuel hop: fly empty so veins are not reserved.
+            ok, message = super().dispatch(ship, first.destination, cargo={"ice": 0.01})
+            if ok:
+                ship.cargo = {}
+                mission = self.missions.get(ship.name)
+                if mission is not None:
+                    mission.cargo = {}
+                self._inflight.pop(ship.name, None)
+        if not ok:
+            return False, message
+        # Stash remaining legs (after the one just started).
+        remaining = list(plan.legs[1:])
+        self.routes[ship.name] = remaining
+        via = "/".join(self.bodies[k].name if k in self.bodies else k for k in plan.via)
+        self.note(
+            f"{ship.name} flies a multi-stop harvest to "
+            f"{self.bodies[target_key].name} via {via} "
+            f"({plan.hop_count} hop(s), {plan.total_ms:,.0f} m/s billed)."
+        )
+        preview = route_preview_lines(plan, self.bodies)
+        return True, f"{ship.name} multi-stop: {preview[1]}"
+
+    def _continue_route(self, ship: Ship) -> None:
+        """After a hop completes, launch the next queued leg if any."""
+        queue = self.routes.get(ship.name) or []
+        if not queue:
+            self.routes.pop(ship.name, None)
+            return
+        if ship.name in self.missions:
+            return
+        nxt = queue.pop(0)
+        self.routes[ship.name] = queue
+        purpose = nxt.purpose
+        dest = nxt.destination
+        # Top up from a depot if we are sitting on one.
+        depot = self.depots.get(ship.origin)
+        if depot is not None:
+            full = self.effective_delta_v(ship.name)
+            headroom = full - ship.delta_v
+            draw = min(headroom, depot.fuel_ms)
+            if draw > 1.0:
+                ship.delta_v += draw
+                depot.fuel_ms -= draw
+                self.note(
+                    f"{ship.name} tops up at {self.bodies[ship.origin].name} "
+                    f"depot (+{draw:,.0f} m/s) before the next hop."
+                )
+        cargo = None
+        if purpose == "harvest":
+            cargo = None  # let dispatch plan extraction
+            ok, message = self.dispatch(ship, dest, cargo=None)
+        else:
+            ok, message = super().dispatch(ship, dest, cargo={"ice": 0.0})
+            if ok:
+                ship.cargo = {}
+                mission = self.missions.get(ship.name)
+                if mission is not None:
+                    mission.cargo = {}
+                self._inflight.pop(ship.name, None)
+        if ok:
+            self.note(f"{ship.name} continues route: {purpose} → {self.bodies.get(dest, dest).name if dest in self.bodies else dest}.")
+        else:
+            self.note(f"{ship.name} route stalled at {ship.origin}: {message}")
+            self.routes.pop(ship.name, None)
+
     # -- refuel depots ---------------------------------------------------------
     def build_depot(self, body_key: str) -> tuple[bool, str]:
         """Raise a depot at ``body_key`` (caller pays the credits)."""
-        if body_key not in TRADE_TARGETS:
+        if body_key not in self.trade_targets and body_key not in TRADE_TARGETS:
             return False, "Pick a trade body to build at."
         if body_key in self.depots:
             depot = self.depots[body_key]
@@ -1089,6 +1221,13 @@ class OpsSimulation(OrbitalSimulation):
         self._pilot_refund(ship, spent)
         self._apply_wear(ship, spent * (1.0 - self.pilots_discount(ship.name)))
 
+        # Multi-stop transfer: after arriving at a hop body, chain the next leg
+        # instead of flying the auto-return the core planned.
+        if mission.leg is Leg.WAITING and self.routes.get(ship.name):
+            # Only chain when this arrival was a hop (queue still has legs).
+            if self._abort_return_and_continue(ship, mission):
+                return
+
         delivered_now = (
             len(self.pending_deliveries) > 0
             and self.pending_deliveries[-1].ship == ship.name
@@ -1139,6 +1278,21 @@ class OpsSimulation(OrbitalSimulation):
             )
         self._release_reservation(body_key, payload)
 
+
+    def _abort_return_and_continue(self, ship: Ship, mission: Mission) -> bool:
+        """If a multi-stop queue remains, cancel the auto-return and hop onward."""
+        queue = self.routes.get(ship.name) or []
+        if not queue:
+            return False
+        # Ship is WAITING at mission.target with a return_window home -- drop it.
+        if ship.name in self.missions:
+            # Treat capture as a successful hop endpoint; clear mission so we can re-dispatch.
+            # Mass already counted by core if cargo was delivered; transfer hops had empty cargo.
+            self.missions.pop(ship.name, None)
+        ship.origin = mission.target
+        self._continue_route(ship)
+        return True
+
     def _complete_run(self, ship: Ship, mission: Mission) -> None:
         before = ship.delta_v
         super()._complete_run(ship, mission)
@@ -1146,6 +1300,9 @@ class OpsSimulation(OrbitalSimulation):
         self._pilot_refund(ship, spent)
         self._apply_wear(ship, spent * (1.0 - self.pilots_discount(ship.name)))
         self.last_active[ship.name] = self.time
+        # Multi-stop: if more legs remain, depart the next hop immediately.
+        if self.routes.get(ship.name):
+            self._continue_route(ship)
 
     # -- reporting -----------------------------------------------------------
     def ship_report(self, ship: Ship) -> dict:
@@ -1231,6 +1388,9 @@ class OpsSimulation(OrbitalSimulation):
                      for name, roster in self.crew.items()},
             "depots": [depot.to_json() for depot in self.depots.values()],
             "tech_mults": dict(self.tech_mults),
+            "routes": {name: [leg.__dict__ if hasattr(leg, "__dict__") else leg for leg in legs]
+                       for name, legs in self.routes.items()},
+            "standing_orders": dict(self.standing_orders),
             "hull_floor": float(getattr(self, "hull_floor", HULL_MIN_PCT)),
             "refineries": [r.to_json() for r in self.refineries.values()],
             "botanists": self.botanists,
@@ -1286,6 +1446,8 @@ class OpsSimulation(OrbitalSimulation):
         sim.crew = {}
         sim.upgrades = {}
         sim.tech_mults = {}
+        sim.routes = {}
+        sim.standing_orders = {"prefer_hops": True, "destinations": [], "min_depot_fuel": 4000.0}
         sim.last_active = {}
         sim.trade_targets = tuple(TRADE_TARGETS)
         sim.bodies = dict(sim.bodies)
@@ -1293,6 +1455,12 @@ class OpsSimulation(OrbitalSimulation):
         sim.depots = {d["body_key"]: Depot.from_json(d) for d in data.get("depots", [])}
         sim.tech_mults = {k: float(v) for k, v in data.get("tech_mults", {}).items()}
         sim.hull_floor = float(data.get("hull_floor", HULL_MIN_PCT))
+        from src.routes import RouteLeg
+        sim.routes = {}
+        for name, legs in data.get("routes", {}).items():
+            sim.routes[name] = [RouteLeg(**leg) if isinstance(leg, dict) else leg for leg in legs]
+        sim.standing_orders = dict(data.get("standing_orders", {
+            "prefer_hops": True, "destinations": [], "min_depot_fuel": 4000.0}))
         sim.refineries = {r["body_key"]: Refinery.from_json(r) for r in data.get("refineries", [])}
         sim.botanists = int(data.get("botanists", 0))
         sim._perturb_timer = float(data.get("perturb_timer",

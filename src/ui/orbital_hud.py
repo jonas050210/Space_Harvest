@@ -89,9 +89,9 @@ class OrbitalHUD:
         self.spark = Text(text="", parent=camera.ui, position=(0.485, 0.345, -0.1),
                           scale=0.62, color=color.gray, origin=(-0.5, 0))
         self.price_lines = [
-            Text(text="", parent=camera.ui, position=(0.485, 0.30 - i * 0.026, -0.1),
-                 scale=0.62, origin=(-0.5, 0))
-            for i in range(7)
+            Text(text="", parent=camera.ui, position=(0.485, 0.30 - i * 0.022, -0.1),
+                 scale=0.55, origin=(-0.5, 0))
+            for i in range(10)
         ]
         self.ops_title = Text(text="FLEET OPS", parent=camera.ui, position=(0.485, 0.085, -0.1),
                               scale=0.72, color=color.yellow, origin=(-0.5, 0))
@@ -230,7 +230,7 @@ class OrbitalHUD:
         if colony_state is not None:
             delivered = sim.stats["mass_delivered"]
             self.help.text = (
-                f"[ / ] warp   TAB target   ENTER dispatch   S sell   X drill   M repair   1-4 buy   F5/F9 save"
+                f"[ / ] warp  TAB field  ENTER dispatch  ; hops  S sell  R barn  E mill  F5/F9 save"
                 f"      |      colony storage used {colony_state.get('used', 0):,.0f} / "
                 f"{colony_state.get('capacity', 0):,.0f}    lifetime delivered {delivered:,.0f} t"
             )
@@ -316,6 +316,9 @@ class OrbitalHUD:
                                                 extra.get("station_hint", ""), parts_hint)))
         lines[7].color = color.cyan if "No depots" not in depot_line else color.white
         summary = "  ".join(filter(None, (extra.get("rep_line", ""), extra.get("life_line", ""))))
+        route = extra.get("route_line", "")
+        if route:
+            summary = f"{summary}  |  {route}" if summary else route
         lines[6].text = summary
         if "ALERT" in summary:
             lines[6].color = color.red
@@ -384,6 +387,15 @@ class MenuOverlay:
             "T Drop Tanks, Y Deep Drill, U Crew Quarters, P depot drone bay --",
             "prices swing with the seasons, so buy cheap. Drone bays fill a",
             "waiting ship's hold automatically. L spends research in the lab.",
+        )),
+        ("MULTI-STOP DELIVERIES", (
+            "Long harvests (Outer Reach, Cinder, deep comet runs) often need",
+            "more delta-v than one tank holds. Build a depot (R) as a barn on",
+            "the way -- the planner will insert REFUELhops automatically.",
+            "",
+            "ENTER previews the route: colony → barn → field → barn → home.",
+            "Press ; to toggle hop planning. Drones (P) load holds while you",
+            "wait at a barn for the next window -- KSP-style logistics.",
         )),
         ("CAMPAIGN AND GRAPHICS", (
             "SETTINGS picks difficulty (Director / Tight / Ironman) and a",

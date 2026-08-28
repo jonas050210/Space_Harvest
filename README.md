@@ -69,6 +69,15 @@ python3 -m venv .venv
 - ESC: pause or cancel dispatch confirm
 - Mouse wheel: zoom
 
+## Multi-stop deliveries (KSP-style)
+
+Deep fields (Outer Reach, Cinder Moon, Trojan Field, Comet) often need more
+delta-v than one tank. Build a **depot barn (R)** on the way; the planner
+inserts **refuel hops** automatically (`colony → barn → field → barn → home`).
+Press **;** to toggle hop planning. **ENTER** previews the full route.
+
+New ores: **silicates**, **obsidian** (Cinder), **helium-3** (Outer Reach / comet).
+
 ## The loop
 
 Wait for geometry → GO → dispatch → mine the field → depot/refinery on deep runs → home → sell without flooding → pay crews → reinvest → chase thorite → comet aurellium → clear Charter/Legacy or play Endless.
