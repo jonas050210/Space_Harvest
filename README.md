@@ -22,6 +22,22 @@ python3 -m venv .venv
 .venv/bin/python -m src.main
 ```
 
+### Windows EXE (setup.py + PyInstaller)
+
+You do **not** hand-write an `.exe`. On a Windows 11 machine with Python:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt
+.\.venv\Scripts\python setup.py --test --build
+# → dist\SpaceHarvest\SpaceHarvest.exe
+.\.venv\Scripts\python setup.py --shortcut   # desktop icon
+```
+
+`setup.py --build` runs PyInstaller (via `scripts/build_steam.py`) on `start.py`,
+bundling Python + Ursina + assets. Cross-building a Windows EXE from Linux is
+not supported here — build on the target OS (or CI).
+
 ### Steam / Windows package
 
 ```bash

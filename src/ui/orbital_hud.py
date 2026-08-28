@@ -320,7 +320,9 @@ class OrbitalHUD:
         route = extra.get("route_line", "")
         swarm = extra.get("swarm_line", "")
         view = extra.get("view_mode", "")
-        extras = "  ".join(filter(None, (route, swarm, f"view:{view}" if view else "")))
+        survey = extra.get("survey_line", "")
+        rival = extra.get("rival_line", "")
+        extras = "  ".join(filter(None, (route, swarm, survey, rival, f"view:{view}" if view else "")))
         if extras:
             summary = f"{summary}  |  {extras}" if summary else extras
         lines[6].text = summary
@@ -411,7 +413,8 @@ class MenuOverlay:
             "",
             "On a GO window press D to launch a harvest drone swarm -- up to",
             "100 designed drones dive the field. Build drone bays (P) first.",
-            "Watch them from the surface. Swarm cools down per body after.",
+            "On the surface: = surveys veins (+yield), - plants an ISRU spike",
+            "(permanent barn boost). 5/6 sell 50%/25% to avoid flooding.",
         )),
         ("CAMPAIGN AND GRAPHICS", (
             "SETTINGS picks difficulty (Director / Tight / Ironman) and a",
@@ -442,6 +445,8 @@ class MenuOverlay:
         ("show_map_grid", "System map grid", "toggle", None),
         ("show_surface_hud", "Surface HUD", "toggle", None),
         ("drone_fx", "Drone swarm FX", "toggle", None),
+        ("rival_enabled", "Rival charter", "toggle", None),
+        ("show_route_overlay", "Route overlay", "toggle", None),
         ("ui_contrast", "High-contrast UI", "toggle", None),
         ("difficulty", "Difficulty", "cycle_list", DIFFICULTY_ORDER),
         ("victory", "Victory mode", "cycle_list", VICTORY_ORDER),

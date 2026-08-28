@@ -1,6 +1,6 @@
 # Steam readiness — Space Harvest
 
-Version **1.1.0**. Ship PC: **i7-12700F / 32 GB DDR4 / RTX 4060 Ti 8 GB**.
+Version **1.2.0**. Ship PC: **i7-12700F / 32 GB DDR4 / RTX 4060 Ti 8 GB**.
 
 **Space Harvest** = orbital farming on real launch windows.
 
@@ -17,6 +17,13 @@ Version **1.1.0**. Ship PC: **i7-12700F / 32 GB DDR4 / RTX 4060 Ti 8 GB**.
 | Package | `scripts/build_steam.py` → `dist/SpaceHarvest/` |
 
 ## Build (Windows 11)
+
+```powershell
+python setup.py --test --build
+# or: python scripts/build_steam.py
+```
+
+## Build (Windows 11) — detailed
 
 ```powershell
 py -3.11 -m venv .venv

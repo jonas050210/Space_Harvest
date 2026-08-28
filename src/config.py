@@ -390,6 +390,8 @@ FIRSTS = (
     ("first_swarm", "First hundred-drone window harvest", 1000.0, 12.0),
     ("first_surface", "First surface survey of a field", 300.0, 4.0),
     ("first_system_map", "System chart opened -- the whole farm at once", 200.0, 2.0),
+    ("first_survey", "First surface survey -- veins charted", 350.0, 5.0),
+    ("first_isru_spike", "ISRU spike planted -- the barn drinks deeper", 500.0, 6.0),
 )
 
 
@@ -446,6 +448,9 @@ TECHS = (
     ("crew_rotation", "Crew Rotation Programme", 50, {"fatigue": 0.75}),
     ("isru_catalysts", "ISRU Catalysts", 55, {"depot_generation": 1.5}),
     ("plasma_lances", "Plasma Smelting Lances", 70, {"refinery": 1.5}),
+    ("swarm_doctrine", "Swarm Doctrine", 80, {"swarm_yield": 1.35}),
+    ("longshore_auto", "Longshore Automation", 60, {"depot_generation": 1.25}),
+    ("cryo_tankers", "Cryo Tanker Protocols", 65, {"refuel_rate": 1.20}),
 )
 
 # --- campaign difficulty -------------------------------------------------------
@@ -626,11 +631,34 @@ DEFAULT_SETTINGS = {
     "show_surface_hud": True,
     "drone_fx": True,
     "ui_contrast": True,
+    "rival_enabled": True,
+    "show_route_overlay": True,
 }
 
 # Named save slots exposed in the pause menu (plus "quick" for F5).
 SAVE_SLOTS = ("quick", "slot1", "slot2", "slot3")
 
+
+
+# --- surface survey / ISRU spikes ---------------------------------------------
+# Landing on a field is not only spectacle: Survey reveals richer veins for a
+# while; planting an ISRU spike permanently boosts that body's depot generation
+# if a barn exists (or the next barn built there).
+SURFACE_SURVEY_COST_CR = 150.0
+SURFACE_SURVEY_BONUS = 0.20          # +20% extraction on that body
+SURFACE_SURVEY_DAYS = 400.0          # bonus duration
+SURFACE_ISRU_COST_CR = 1200.0
+SURFACE_ISRU_DEPOT_GEN_BONUS = 2.5   # extra m/s per day on that body's depot
+SURFACE_ISRU_MAX_PER_BODY = 2
+
+# --- rival charter (light antagonist) ----------------------------------------
+# A competing outfit quietly mines the same veins. They do not fly visible
+# ships; they accelerate depletion and occasionally dump ore on Earth.
+RIVAL_ENABLED_DEFAULT = True
+RIVAL_MINE_T_PER_DAY = 0.35          # tonnes drawn from a random trade body / day
+RIVAL_DUMP_PERIOD_DAYS = 180.0
+RIVAL_DUMP_TONNES = (20.0, 80.0)
+RIVAL_NAME = "Helios Syndicate"
 
 # --- window / UI ------------------------------------------------------------
 # Product name: Space Harvest — orbital farming on real launch windows.
@@ -641,5 +669,5 @@ WINDOW_SIZE = (1440, 900)
 # Steamworks app id placeholder (replace before store launch). Zero means
 # "no Steam"; steam_appid.txt is written beside the executable by the packager.
 STEAM_APP_ID = 0
-GAME_VERSION = "1.1.0"
+GAME_VERSION = "1.2.0"
 EXECUTABLE_NAME = "SpaceHarvest"

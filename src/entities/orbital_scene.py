@@ -68,6 +68,8 @@ class OrbitalScene:
         self.map_grid_lines: list = []
         self.atmospheres: dict = {}
         self.swarms: dict = {}  # body_key -> DroneSwarm
+        self.route_overlay_lines: list = []
+        self._route_keys: list = []
         self._map_grid_root = None
         self.build()
 
@@ -461,6 +463,35 @@ class OrbitalScene:
                       rotation_x=90, color=color.rgba(0.4, 0.9, 1.0, 0.5), unlit=True)
         self.surface_props.append(pad)
 
+    def set_route_overlay(self, body_keys: list[str], sim=None) -> None:
+        """Draw polyline hops on the system map / network view."""
+        from ursina import destroy, Mesh
+        for line in self.route_overlay_lines:
+            try:
+                destroy(line)
+            except Exception:
+                pass
+        self.route_overlay_lines.clear()
+        self._route_keys = list(body_keys)
+        if not body_keys or len(body_keys) < 2:
+            return
+        pts = []
+        for key in body_keys:
+            ent = self.body_entities.get(key)
+            if ent is not None:
+                pts.append(ent.position + Vec3(0, 0.4, 0))
+        if len(pts) < 2:
+            return
+        mesh = Mesh(vertices=pts, mode="line", thickness=3.0)
+        line = Entity(parent=self.parent, model=mesh,
+                      color=color.rgba(0.35, 1.0, 0.65, 0.85), unlit=True)
+        self.route_overlay_lines.append(line)
+        # Nodes
+        for pt in pts:
+            node = Entity(parent=self.parent, model="sphere", scale=0.35,
+                          position=pt, color=color.rgb(0.4, 1.0, 0.7), unlit=True)
+            self.route_overlay_lines.append(node)
+
     def spawn_swarm(self, body_key: str, count: int, seed: int = 0) -> None:
         """Start or refresh a harvest drone swarm around ``body_key``."""
         entity = self.body_entities.get(body_key)
@@ -521,6 +552,9 @@ class OrbitalScene:
                                  report["cargo"] / max(1.0, sim_ship.capacity))
             ship_mesh.set_thrusting(report["status"] in ("pending", "outbound", "inbound"))
         # Drone swarms (window harvest).
+        # Keep route overlay glued to moving bodies.
+        if self._route_keys and self.route_overlay_lines:
+            self.set_route_overlay(self._route_keys, sim)
         for key, swarm in list(self.swarms.items()):
             ent = self.body_entities.get(key)
             if ent is not None:

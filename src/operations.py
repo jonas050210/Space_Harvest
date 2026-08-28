@@ -46,6 +46,15 @@ from .config import (
     SWARM_ENERGY_COST_PER_DRONE,
     SWARM_MAX_DRONES,
     SWARM_YIELD_T_PER_DRONE_DAY,
+    SURFACE_ISRU_DEPOT_GEN_BONUS,
+    SURFACE_ISRU_MAX_PER_BODY,
+    SURFACE_SURVEY_BONUS,
+    SURFACE_SURVEY_DAYS,
+    RIVAL_DUMP_PERIOD_DAYS,
+    RIVAL_DUMP_TONNES,
+    RIVAL_MINE_T_PER_DAY,
+    RIVAL_NAME,
+    SIM_SECONDS_PER_DAY,
     COMET_ELEMENTS,
     COMET_KEY,
     COMET_VEIN_BONUS,
@@ -250,6 +259,12 @@ class OpsSimulation(OrbitalSimulation):
         self.swarms: dict[str, dict] = {}
         #: body_key -> sim-day when next swarm is allowed
         self.swarm_cooldown: dict[str, float] = {}
+        #: body -> {bonus, expires_day}
+        self.survey_bonus: dict[str, dict] = {}
+        #: body -> ISRU spike count
+        self.isru_spikes: dict[str, int] = {}
+        self.rival_enabled = False  # game layer opts in via settings
+        self._rival_dump_timer = float(RIVAL_DUMP_PERIOD_DAYS)
         #: body key -> refuel depot (player-built)
         self.depots: dict[str, Depot] = {}
         #: body key -> refinery station (player-built)
@@ -550,7 +565,7 @@ class OpsSimulation(OrbitalSimulation):
                 capacity_t=ship.capacity,
                 mode=self.mining_mode,
                 mine_bonus=spec["mine_bonus"] * self.crew_yield_factor(ship.name)
-                * self.ship_mine_bonus(ship.name),
+                * self.ship_mine_bonus(ship.name) * self.survey_mult(target_key),
                 hull_pct=self.mining_hull(ship),
             )
             if sum(payload.values()) < 1.0:
@@ -708,6 +723,80 @@ class OpsSimulation(OrbitalSimulation):
             self.routes.pop(ship.name, None)
 
 
+
+    def plant_survey(self, body_key: str) -> tuple[bool, str]:
+        """Chart veins on a body: temporary extraction bonus."""
+        if body_key not in self.bodies or body_key == "colony":
+            return False, "Survey a harvest field."
+        day = self.time / SIM_SECONDS_PER_DAY
+        self.survey_bonus[body_key] = {
+            "bonus": float(SURFACE_SURVEY_BONUS),
+            "expires_day": day + float(SURFACE_SURVEY_DAYS),
+        }
+        self.stats["surveys"] = int(self.stats.get("surveys", 0)) + 1
+        self.note(
+            f"Surface survey complete at {self.bodies[body_key].name}: "
+            f"+{SURFACE_SURVEY_BONUS*100:.0f}% yield for {SURFACE_SURVEY_DAYS:.0f} d."
+        )
+        return True, (
+            f"{self.bodies[body_key].name} surveyed — "
+            f"+{SURFACE_SURVEY_BONUS*100:.0f}% harvest for {SURFACE_SURVEY_DAYS:.0f} d."
+        )
+
+    def plant_isru_spike(self, body_key: str) -> tuple[bool, str]:
+        """Permanent depot-generation boost on this body (needs/creates barn synergy)."""
+        if body_key not in self.bodies or body_key == "colony":
+            return False, "Plant the spike on a harvest field."
+        owned = int(self.isru_spikes.get(body_key, 0))
+        if owned >= SURFACE_ISRU_MAX_PER_BODY:
+            return False, f"{self.bodies[body_key].name} already has {owned} ISRU spikes."
+        self.isru_spikes[body_key] = owned + 1
+        self.stats["isru_spikes"] = int(self.stats.get("isru_spikes", 0)) + 1
+        self.note(
+            f"ISRU spike planted at {self.bodies[body_key].name} "
+            f"(+{SURFACE_ISRU_DEPOT_GEN_BONUS:.1f} m/s/day when a barn is online)."
+        )
+        return True, (
+            f"ISRU spike #{owned+1} online at {self.bodies[body_key].name}."
+        )
+
+    def survey_mult(self, body_key: str) -> float:
+        info = self.survey_bonus.get(body_key)
+        if not info:
+            return 1.0
+        day = self.time / SIM_SECONDS_PER_DAY
+        if day > float(info.get("expires_day", 0.0)):
+            self.survey_bonus.pop(body_key, None)
+            return 1.0
+        return 1.0 + float(info.get("bonus", 0.0))
+
+    def tick_rival(self, dt_days: float) -> None:
+        """Competing charter quietly mines veins and dumps on Earth occasionally."""
+        if not getattr(self, "rival_enabled", True) or dt_days <= 0.0:
+            return
+        targets = [k for k in self.trade_targets if k in self.bodies]
+        if not targets:
+            return
+        # Deterministic pick from RNG already on the sim.
+        key = self.rng.choice(sorted(targets))
+        pull = float(RIVAL_MINE_T_PER_DAY) * dt_days
+        try:
+            from .mining import plan_extraction
+            payload = plan_extraction(
+                key, self.ledger, self.reserved.get(key),
+                capacity_t=pull, mode="scrape", mine_bonus=0.7, hull_pct=100.0,
+            )
+        except Exception:
+            payload = {}
+        if payload:
+            self.ledger.commit(key, payload)
+            self.stats["rival_mined_t"] = float(self.stats.get("rival_mined_t", 0.0)) + sum(payload.values())
+        self._rival_dump_timer = float(getattr(self, "_rival_dump_timer", RIVAL_DUMP_PERIOD_DAYS)) - dt_days
+        if self._rival_dump_timer <= 0.0:
+            self._rival_dump_timer = float(RIVAL_DUMP_PERIOD_DAYS) * self.rng.uniform(0.8, 1.3)
+            # Signal the game layer via stats flag; market dump applied there.
+            self.stats["rival_dump_pending"] = 1
+
     # -- harvest drone swarms (window GO moment) --------------------------------
     def total_drone_bays(self) -> int:
         return sum(int(d.upgrades.get("drones", 0)) for d in self.depots.values())
@@ -773,13 +862,14 @@ class OpsSimulation(OrbitalSimulation):
             swarm = self.swarms[key]
             count = int(swarm["count"])
             # Ore pull into a virtual hold then committed via ledger-aware plan.
-            pull = count * SWARM_YIELD_T_PER_DRONE_DAY * dt_days
+            swarm_mult = float(self.tech_mults.get("swarm_yield", 1.0))
+            pull = count * SWARM_YIELD_T_PER_DRONE_DAY * swarm_mult * dt_days
             try:
                 from .mining import plan_extraction
                 payload = plan_extraction(
                     key, self.ledger, self.reserved.get(key),
                     capacity_t=pull, mode=self.mining_mode,
-                    mine_bonus=1.0 + 0.05 * self.total_drone_bays(),
+                    mine_bonus=(1.0 + 0.05 * self.total_drone_bays()) * self.survey_mult(key),
                     hull_pct=100.0,
                 )
             except Exception:
@@ -881,8 +971,10 @@ class OpsSimulation(OrbitalSimulation):
             return
         gen_mult = self.tech_mults.get("depot_generation", 1.0)
         for depot in self.depots.values():
-            depot.fuel_ms = min(depot.capacity,
-                                depot.fuel_ms + depot.generation_per_day * gen_mult * dt_days)
+            spikes = int(self.isru_spikes.get(depot.body_key, 0))
+            extra = spikes * SURFACE_ISRU_DEPOT_GEN_BONUS
+            gen = (depot.generation_per_day + extra) * gen_mult
+            depot.fuel_ms = min(depot.capacity, depot.fuel_ms + gen * dt_days)
 
     def _depot_refuel_waiting(self, dt_days: float) -> float:
         """Top up ships holding at a depot body; returns m/s transferred."""
@@ -1254,6 +1346,7 @@ class OpsSimulation(OrbitalSimulation):
         self._depot_drones_load(dt_days)
         self._refinery_smelt_waiting(dt_days)
         self.tick_swarms(dt_days)
+        self.tick_rival(dt_days)
         return entries
 
     # -- mission hooks (wear, depletion, incidents) --------------------------
@@ -1506,6 +1599,10 @@ class OpsSimulation(OrbitalSimulation):
             "standing_orders": dict(self.standing_orders),
             "swarms": {k: dict(v) for k, v in self.swarms.items()},
             "swarm_cooldown": dict(self.swarm_cooldown),
+            "survey_bonus": {k: dict(v) for k, v in self.survey_bonus.items()},
+            "isru_spikes": dict(self.isru_spikes),
+            "rival_enabled": bool(self.rival_enabled),
+            "rival_dump_timer": float(getattr(self, "_rival_dump_timer", RIVAL_DUMP_PERIOD_DAYS)),
             "hull_floor": float(getattr(self, "hull_floor", HULL_MIN_PCT)),
             "refineries": [r.to_json() for r in self.refineries.values()],
             "botanists": self.botanists,
@@ -1565,6 +1662,10 @@ class OpsSimulation(OrbitalSimulation):
         sim.standing_orders = {"prefer_hops": True, "destinations": [], "min_depot_fuel": 4000.0}
         sim.swarms = {}
         sim.swarm_cooldown = {}
+        sim.survey_bonus = {}
+        sim.isru_spikes = {}
+        sim.rival_enabled = False
+        sim._rival_dump_timer = float(RIVAL_DUMP_PERIOD_DAYS)
         sim.last_active = {}
         sim.trade_targets = tuple(TRADE_TARGETS)
         sim.bodies = dict(sim.bodies)
@@ -1580,6 +1681,10 @@ class OpsSimulation(OrbitalSimulation):
             "prefer_hops": True, "destinations": [], "min_depot_fuel": 4000.0}))
         sim.swarms = {k: dict(v) for k, v in data.get("swarms", {}).items()}
         sim.swarm_cooldown = {k: float(v) for k, v in data.get("swarm_cooldown", {}).items()}
+        sim.survey_bonus = {k: dict(v) for k, v in data.get("survey_bonus", {}).items()}
+        sim.isru_spikes = {k: int(v) for k, v in data.get("isru_spikes", {}).items()}
+        sim.rival_enabled = bool(data.get("rival_enabled", False))
+        sim._rival_dump_timer = float(data.get("rival_dump_timer", RIVAL_DUMP_PERIOD_DAYS))
         sim.refineries = {r["body_key"]: Refinery.from_json(r) for r in data.get("refineries", [])}
         sim.botanists = int(data.get("botanists", 0))
         sim._perturb_timer = float(data.get("perturb_timer",

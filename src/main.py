@@ -68,6 +68,10 @@ from src.config import (  # noqa: E402
     SWARM_MAX_DRONES,
     VIEW_MODES,
     DEFAULT_VIEW_MODE,
+    RIVAL_NAME,
+    RIVAL_DUMP_TONNES,
+    SURFACE_ISRU_COST_CR,
+    SURFACE_SURVEY_COST_CR,
     SHIP_CLASSES,
     SHIP_REFUEL_ENERGY_PER_MS,
     START_CREDITS,
@@ -212,6 +216,7 @@ class Game:
             path=os.path.join(cloud_root(), "achievements_progress.json"))
         self.steam = SteamClient()
         self._apply_campaign_rules()
+        self.sim.rival_enabled = bool(self.settings.get("rival_enabled", True))
 
     # -- messaging -----------------------------------------------------------
     def say(self, text: str, seconds: float = 6.0) -> None:
@@ -400,6 +405,58 @@ class Game:
         except Exception:
             pass
 
+
+    def surface_survey(self) -> None:
+        target = self.hud.selected_target() if self.hud is not None else "inner_belt"
+        if self.view_mode != "surface":
+            self.set_view_mode("surface")
+        cost = float(SURFACE_SURVEY_COST_CR)
+        if self.credits < cost:
+            self.say(f"Survey costs {cost:,.0f} cr; treasury {self.credits:,.0f} cr.")
+            return
+        ok, message = self.sim.plant_survey(target)
+        if not ok:
+            self.say(message)
+            return
+        self.credits -= cost
+        self._play_alert("build")
+        self.say(message + f"  Bill {cost:,.0f} cr.", seconds=7.0)
+
+    def surface_isru(self) -> None:
+        target = self.hud.selected_target() if self.hud is not None else "inner_belt"
+        if self.view_mode != "surface":
+            self.set_view_mode("surface")
+        cost = float(SURFACE_ISRU_COST_CR)
+        if self.credits < cost:
+            self.say(f"ISRU spike costs {cost:,.0f} cr; treasury {self.credits:,.0f} cr.")
+            return
+        ok, message = self.sim.plant_isru_spike(target)
+        if not ok:
+            self.say(message)
+            return
+        self.credits -= cost
+        self._play_alert("build")
+        self.say(message + f"  Bill {cost:,.0f} cr.", seconds=7.0)
+
+    def _tick_rival_market(self) -> None:
+        if not int(self.sim.stats.get("rival_dump_pending", 0)):
+            return
+        self.sim.stats["rival_dump_pending"] = 0
+        if not self.settings.get("rival_enabled", True):
+            return
+        ores = [o for o in MARKET_BASE_PRICES if o not in ("components", "electronics")]
+        if not ores:
+            return
+        ore = ores[int(self.market.day * 7) % len(ores)]
+        lo, hi = RIVAL_DUMP_TONNES
+        tonnes = float(lo + (hi - lo) * 0.5)
+        self.market.flood[ore] = self.market.flood.get(ore, 0.0) + tonnes
+        if not self.headless:
+            self.say(
+                f"{RIVAL_NAME} dumped {tonnes:,.0f} t of {ore} on Earth — prices sag.",
+                seconds=7.0,
+            )
+
     def launch_swarm_selected(self) -> None:
         """Launch up to 100 harvest drones on the selected field while GO is open."""
         target = self.hud.selected_target() if self.hud is not None else "inner_belt"
@@ -476,6 +533,7 @@ class Game:
         self._tick_window_moments()
         self._tick_firsts()
         self._tick_victory()
+        self._tick_rival_market()
         if is_ironman(self.difficulty):
             self.ironman_days += dt_days
             if self.ironman_days >= 365.0:
@@ -498,6 +556,8 @@ class Game:
             for key, swarm in self.sim.swarms.items():
                 if self.settings.get("drone_fx", True):
                     self.scene.spawn_swarm(key, int(swarm.get("count", 0)))
+            if self.settings.get("show_route_overlay", True):
+                self.scene.set_route_overlay(self._route_overlay_points(), self.sim)
             if self.screen == "title":
                 self._drift_camera()
             else:
@@ -593,6 +653,8 @@ class Game:
                 except Exception:
                     pass
         self.muted = bool(self.settings.get("muted", False))
+        if hasattr(self, "sim"):
+            self.sim.rival_enabled = bool(self.settings.get("rival_enabled", True))
         # Re-assert view mode after quality changes.
         if self.scene is not None:
             target = self.hud.selected_target() if self.hud is not None else None
@@ -684,13 +746,12 @@ class Game:
                  seconds=9.0)
 
     # -- market & fleet actions ----------------------------------------------
-    def sell_all(self) -> None:
+    def sell_all(self, fraction: float = 1.0) -> None:
         """Sell marketable ore at today's prices, honouring the ice reserve.
 
-        The colonists eat ice (melted into water for oxygen and food), so the
-        reserve is never put on the market. Standing with Earth factions moves
-        the prices; a sale also pays the fleet, which crews appreciate.
+        ``fraction`` (0..1) sells 25/50/100% — skill ceiling against flooding.
         """
+        fraction = max(0.0, min(1.0, float(fraction)))
         resources = self.colony.state.get("resources", {})
         lots: dict[str, float] = {}
         for res, amount in resources.items():
@@ -698,8 +759,9 @@ class Game:
                 continue
             if res == "ice":
                 amount = max(0.0, amount - LIFE_ICE_RESERVE_T)
+            amount = float(amount) * fraction
             if amount >= 1.0:
-                lots[res] = float(amount)
+                lots[res] = amount
         if not lots:
             self.say("No ore in colony storage worth selling (ice reserve held back).")
             return
@@ -856,6 +918,9 @@ class Game:
             "view_mode": self.view_mode,
             "swarm_line": self._swarm_hud_line(),
             "swarm_capacity": self.sim.swarm_capacity(),
+            "route_overlay": self._route_overlay_points(),
+            "survey_line": self._survey_hud_line(),
+            "rival_line": (RIVAL_NAME + " active") if self.settings.get("rival_enabled", True) else "",
         }
 
     # -- "Firsts": one-shot milestones ------------------------------------------
@@ -892,6 +957,8 @@ class Game:
             "first_swarm": int(self.sim.stats.get("swarm_drones_peak", 0)) >= 40,
             "first_surface": len(self._surface_visited) >= 1,
             "first_system_map": bool(self._map_opened),
+            "first_survey": int(self.sim.stats.get("surveys", 0)) >= 1,
+            "first_isru_spike": int(self.sim.stats.get("isru_spikes", 0)) >= 1,
         }
 
     def _tick_firsts(self) -> None:
@@ -997,6 +1064,43 @@ class Game:
         days_left = max(0.0, contract.deadline_day - self.market.day)
         return (f"Order: {contract.resource} {pct:.0f}% by {days_left:,.0f} d "
                 f"({contract.faction})")
+
+    def _route_overlay_points(self) -> list[str]:
+        if not self.settings.get("show_route_overlay", True) or self.hud is None:
+            return []
+        idle = next((s for s in self.sim.ships if s.name not in self.sim.missions), None)
+        if idle is None:
+            for _name, legs in self.sim.routes.items():
+                keys = ["colony"]
+                for leg in legs:
+                    if leg.destination not in keys:
+                        keys.append(leg.destination)
+                return keys
+            return []
+        plan = plan_route(
+            self.sim, idle, self.hud.selected_target(),
+            prefer_hops=bool(self.settings.get("prefer_hops", True)),
+        )
+        if plan is None:
+            return []
+        keys = ["colony"]
+        for leg in plan.legs:
+            if leg.destination not in keys:
+                keys.append(leg.destination)
+        return keys
+
+    def _survey_hud_line(self) -> str:
+        if self.hud is None:
+            return ""
+        key = self.hud.selected_target()
+        mult = self.sim.survey_mult(key) if hasattr(self.sim, "survey_mult") else 1.0
+        spikes = int(getattr(self.sim, "isru_spikes", {}).get(key, 0))
+        bits = []
+        if mult > 1.01:
+            bits.append(f"survey x{mult:.2f}")
+        if spikes:
+            bits.append(f"ISRU x{spikes}")
+        return "  ".join(bits)
 
     def _swarm_hud_line(self) -> str:
         if not self.sim.swarms:
@@ -1957,6 +2061,14 @@ def run_windowed() -> None:
             game.sim.cycle_warp(1)
         elif key == "s":
             game.sell_all()
+        elif key == "5":
+            game.sell_all(0.5)
+        elif key == "6":
+            game.sell_all(0.25)
+        elif key == "=":
+            game.surface_survey()
+        elif key == "-":
+            game.surface_isru()
         elif key == "x":
             game.toggle_drill()
         elif key == "m":

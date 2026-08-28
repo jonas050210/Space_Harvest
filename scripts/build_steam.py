@@ -51,7 +51,8 @@ def build(onefile: bool = False) -> str:
     spec_dist = os.path.join(DIST, "_pyi")
     os.makedirs(DIST, exist_ok=True)
 
-    entry = os.path.join(ROOT, "src", "main.py")
+    # start.py is the frozen entry (resolves assets next to the EXE).
+    entry = os.path.join(ROOT, "start.py")
     sep = os.pathsep
     add_data = [
         f"assets{sep}assets",
@@ -69,9 +70,15 @@ def build(onefile: bool = False) -> str:
         "--hidden-import=panda3d",
         "--hidden-import=numpy",
         "--hidden-import=PIL",
+        "--hidden-import=src.main",
+        "--hidden-import=src.config",
+        "--hidden-import=src.operations",
+        "--hidden-import=src.routes",
         "--collect-all", "ursina",
         "--collect-all", "panda3d",
     ]
+    if sys.platform.startswith("win"):
+        cmd.append("--windowed")
     for item in add_data:
         cmd += ["--add-data", item]
     cmd.append("--onefile" if onefile else "--onedir")
