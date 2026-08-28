@@ -26,6 +26,7 @@ CLASS_TINTS = {
     "freighter": (1.00, 1.00, 1.00),
     "refinery": (1.00, 0.92, 0.72),
     "hauler": (1.00, 0.85, 0.85),
+    "tanker": (0.55, 0.85, 1.00),
 }
 
 
@@ -44,6 +45,8 @@ class Freighter(Entity):
             hull_s = Vec3(0.30, 0.30, 0.40)
         elif class_key == "refinery":
             hull_s = Vec3(0.24, 0.24, 0.46)
+        elif class_key == "tanker":
+            hull_s, nose_s, nose_z = Vec3(0.18, 0.18, 0.70), Vec3(0.16, 0.16, 0.20), 0.48
         self.hull = Entity(parent=self, model="cube", scale=hull_s,
                            color=color.rgb(0.95, 0.97, 1.0))
         self.nose = Entity(parent=self, model="sphere", scale=nose_s,
@@ -63,6 +66,10 @@ class Freighter(Entity):
             self.extra_parts.append(Entity(
                 parent=self, model="cube", scale=Vec3(0.16, 0.24, 0.36),
                 position=(0.26, 0, 0.0), color=color.rgb(0.85, 0.88, 0.95)))
+        if class_key == "tanker":  # long cryo tank
+            self.extra_parts.append(Entity(
+                parent=self, model="sphere", scale=Vec3(0.22, 0.22, 0.50),
+                position=(0, 0.14, -0.05), color=color.rgb(0.45, 0.75, 0.95)))
         if class_key == "refinery":  # processing drum
             self.extra_parts.append(Entity(
                 parent=self, model="sphere", scale=Vec3(0.20, 0.20, 0.34),

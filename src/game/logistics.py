@@ -11,6 +11,7 @@ def capacity_for(state, resource_key):
     capacity = BASE_STORAGE_CAPACITY + state.get("modules", []).count("storage") * STORAGE_MODULE_CAPACITY
     if research.unlocked(state, "logistics_protocols"):
         capacity += 150
+    capacity += float(state.get("warehouse_bonus_t", 0.0) or 0.0)
     return capacity
 
 
@@ -53,7 +54,7 @@ def deliver_drone_cargo(state, drone_state):
 def summary(state):
     """Return UI-friendly logistics metrics."""
     resources = state.get("resources", {})
-    used = sum(resources.get(key, 0) for key in ("ice", "iron", "gold", "silver", "platinum", "components", "electronics", "thorite", "aurellium", "silicates", "obsidian", "helium3"))
+    used = sum(resources.get(key, 0) for key in ("ice", "iron", "gold", "silver", "platinum", "components", "electronics", "thorite", "aurellium", "silicates", "obsidian", "helium3", "cobalt", "magnetite", "xenonite"))
     capacity = capacity_for(state, "shared") * 5
     return {"used": used, "capacity": capacity, "delivered": sum(state.get("logistics", {}).get("lifetime_delivered", {}).values())}
 

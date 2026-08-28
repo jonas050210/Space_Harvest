@@ -104,7 +104,9 @@ delta-v than one tank. Build a **depot barn (R)** on the way; the planner
 inserts **refuel hops** automatically (`colony → barn → field → barn → home`).
 Press **;** to toggle hop planning. **ENTER** previews the full route.
 
-New ores: **silicates**, **obsidian** (Cinder), **helium-3** (Outer Reach / comet).
+New ores: **silicates**, **obsidian**, **helium-3**, **cobalt**, **magnetite**, **xenonite**.
+New field: **Frost Ring**. Ship: **Tanker** (key `0`). Station modules: `7/8/9/'`.
+Parts: F6 scanner, F7 shield, F8 mag-clamps.
 
 ## The loop
 

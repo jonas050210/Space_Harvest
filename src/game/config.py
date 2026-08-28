@@ -22,6 +22,9 @@ RESOURCES = {
     "electronics": {"name": "Electronics", "value": 15},
     "thorite": {"name": "Thorite", "value": 10},
     "aurellium": {"name": "Aurellium", "value": 40},
+    "cobalt": {"name": "Cobalt", "value": 12},
+    "magnetite": {"name": "Magnetite", "value": 7},
+    "xenonite": {"name": "Xenonite", "value": 50},
 }
 
 # Research tree kept so logistics capacity bonuses still resolve.

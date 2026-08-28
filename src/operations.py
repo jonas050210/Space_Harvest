@@ -38,6 +38,7 @@ import numpy as np
 
 from .config import (
     CAMPAIGN_BODIES,
+    STATION_MODULE_CATALOG,
     SWARM_BASE_DRONES,
     SWARM_COOLDOWN_DAYS,
     SWARM_CREDIT_COST_PER_DRONE,
@@ -263,6 +264,8 @@ class OpsSimulation(OrbitalSimulation):
         self.survey_bonus: dict[str, dict] = {}
         #: body -> ISRU spike count
         self.isru_spikes: dict[str, int] = {}
+        #: body -> {module_key: count}
+        self.station_modules: dict[str, dict[str, int]] = {}
         self.rival_enabled = False  # game layer opts in via settings
         self._rival_dump_timer = float(RIVAL_DUMP_PERIOD_DAYS)
         #: body key -> refuel depot (player-built)
@@ -415,8 +418,26 @@ class OpsSimulation(OrbitalSimulation):
         return self.class_spec(ship_name)["delta_v"] + tanks * PARTS_CATALOG["tank"]["delta_v"]
 
     def ship_mine_bonus(self, ship_name: str) -> float:
-        drills = self.upgrades.get(ship_name, {}).get("drill", 0)
-        return 1.0 + drills * PARTS_CATALOG["drill"]["mine_bonus"]
+        ups = self.upgrades.get(ship_name, {})
+        bonus = 1.0
+        drills = ups.get("drill", 0)
+        bonus += drills * float(PARTS_CATALOG.get("drill", {}).get("mine_bonus", 0.0))
+        scanners = ups.get("scanner", 0)
+        bonus += scanners * float(PARTS_CATALOG.get("scanner", {}).get("mine_bonus", 0.0))
+        bonus *= float(self.tech_mults.get("mine_bonus", 1.0))
+        return bonus
+
+    def ship_capacity(self, ship_name: str) -> float:
+        spec = self.class_spec(ship_name)
+        clamps = self.upgrades.get(ship_name, {}).get("magclamp", 0)
+        extra = clamps * float(PARTS_CATALOG.get("magclamp", {}).get("capacity", 0.0))
+        return float(spec["capacity"]) + extra
+
+    def body_mine_bonus(self, body_key: str) -> float:
+        mods = self.station_modules.get(body_key, {})
+        yards = int(mods.get("drill_yard", 0))
+        info = STATION_MODULE_CATALOG.get("drill_yard", {})
+        return 1.0 + yards * float(info.get("mine_bonus", 0.0))
 
     def crew_rest_factor(self, ship_name: str) -> float:
         quarters = self.upgrades.get(ship_name, {}).get("quarters", 0)
@@ -430,6 +451,12 @@ class OpsSimulation(OrbitalSimulation):
         if owned.get(part_key, 0) >= info["max_per_ship"]:
             return False, f"{ship_name} already carries the maximum {info['name']}s."
         owned[part_key] = owned.get(part_key, 0) + 1
+        # Mag-clamps resize the live hold.
+        if part_key == "magclamp":
+            for ship in self.ships:
+                if ship.name == ship_name:
+                    ship.capacity = self.ship_capacity(ship_name)
+                    break
         return True, f"{info['name']} installed on {ship_name}."
 
     def install_depot_part(self, body_key: str, part_key: str) -> tuple[bool, str]:
@@ -452,6 +479,8 @@ class OpsSimulation(OrbitalSimulation):
         factor = self.class_spec(ship.name)["wear_factor"]
         # Difficulty (and future techs) scale wear via a generic multiplier.
         factor *= float(self.tech_mults.get("hull_wear", 1.0))
+        if self.upgrades.get(ship.name, {}).get("shield", 0):
+            factor *= float(PARTS_CATALOG.get("shield", {}).get("wear_factor", 1.0))
         current = self.hull.get(ship.name, HULL_MAX_PCT)
         floor = float(getattr(self, "hull_floor", HULL_MIN_PCT))
         self.hull[ship.name] = max(floor, current - dv_ms * HULL_WEAR_PCT_PER_MS * factor)
@@ -562,10 +591,11 @@ class OpsSimulation(OrbitalSimulation):
                 target_key,
                 self.ledger,
                 self.reserved.get(target_key),
-                capacity_t=ship.capacity,
+                capacity_t=self.ship_capacity(ship.name),
                 mode=self.mining_mode,
                 mine_bonus=spec["mine_bonus"] * self.crew_yield_factor(ship.name)
-                * self.ship_mine_bonus(ship.name) * self.survey_mult(target_key),
+                * self.ship_mine_bonus(ship.name) * self.survey_mult(target_key)
+                * self.body_mine_bonus(target_key),
                 hull_pct=self.mining_hull(ship),
             )
             if sum(payload.values()) < 1.0:
@@ -797,6 +827,45 @@ class OpsSimulation(OrbitalSimulation):
             # Signal the game layer via stats flag; market dump applied there.
             self.stats["rival_dump_pending"] = 1
 
+    def build_station_module(self, body_key: str, module_key: str) -> tuple[bool, str]:
+        """Install a body-side industry module (caller pays credits)."""
+        info = STATION_MODULE_CATALOG.get(module_key)
+        if info is None:
+            return False, f"Unknown station module '{module_key}'."
+        if body_key not in self.bodies or body_key == "colony":
+            return False, "Build modules on a harvest field."
+        owned = int(self.station_modules.setdefault(body_key, {}).get(module_key, 0))
+        if owned >= int(info.get("max_per_body", 1)):
+            return False, f"{self.bodies[body_key].name} already has max {info['name']}."
+        self.station_modules[body_key][module_key] = owned + 1
+        self.stats["modules_built"] = int(self.stats.get("modules_built", 0)) + 1
+        self.note(f"{info['name']} online at {self.bodies[body_key].name}.")
+        return True, f"{info['name']} online at {self.bodies[body_key].name}."
+
+    def body_weather_resist(self, body_key: str) -> float:
+        """0..1 fraction of flare/debris wear blocked while WAITING here."""
+        masts = int(self.station_modules.get(body_key, {}).get("shield_mast", 0))
+        if not masts:
+            return 0.0
+        return min(0.9, masts * float(STATION_MODULE_CATALOG["shield_mast"].get("weather_resist", 0.5)))
+
+    def tick_observatories(self, dt_days: float) -> float:
+        """Passive research from field observatories. Returns RP granted."""
+        total = 0.0
+        rate = float(STATION_MODULE_CATALOG.get("observatory", {}).get("research_per_day", 0.0))
+        for body_key, mods in self.station_modules.items():
+            n = int(mods.get("observatory", 0))
+            if n:
+                total += rate * n * dt_days
+        return total
+
+    def warehouse_storage_bonus(self) -> float:
+        total = 0.0
+        per = float(STATION_MODULE_CATALOG.get("warehouse", {}).get("storage_bonus", 0.0))
+        for mods in self.station_modules.values():
+            total += per * int(mods.get("warehouse", 0))
+        return total
+
     # -- harvest drone swarms (window GO moment) --------------------------------
     def total_drone_bays(self) -> int:
         return sum(int(d.upgrades.get("drones", 0)) for d in self.depots.values())
@@ -975,6 +1044,29 @@ class OpsSimulation(OrbitalSimulation):
             extra = spikes * SURFACE_ISRU_DEPOT_GEN_BONUS
             gen = (depot.generation_per_day + extra) * gen_mult
             depot.fuel_ms = min(depot.capacity, depot.fuel_ms + gen * dt_days)
+
+    def _tanker_fill_depot(self, dt_days: float) -> float:
+        """Tankers waiting at a barn pump propellant into the tank (logistics loop)."""
+        filled = 0.0
+        for ship in self.ships:
+            if self.ship_class.get(ship.name) != "tanker":
+                continue
+            mission = self.missions.get(ship.name)
+            if mission is None or mission.leg.value != "waiting":
+                continue
+            depot = self.depots.get(mission.target)
+            if depot is None:
+                continue
+            bonus = float(self.class_spec(ship.name).get("depot_fill_bonus", 1.0))
+            # Generate into depot from "tanker ISRU assist" using ship refuel rate * bonus.
+            rate = self.class_spec(ship.name)["refuel_rate"] * bonus * float(
+                self.tech_mults.get("refuel_rate", 1.0))
+            room = depot.capacity - depot.fuel_ms
+            add = min(room, rate * dt_days)
+            if add > 0.0:
+                depot.fuel_ms += add
+                filled += add
+        return filled
 
     def _depot_refuel_waiting(self, dt_days: float) -> float:
         """Top up ships holding at a depot body; returns m/s transferred."""
@@ -1214,7 +1306,13 @@ class OpsSimulation(OrbitalSimulation):
                 continue
             current = self.hull.get(ship.name, HULL_MAX_PCT)
             floor = float(getattr(self, "hull_floor", HULL_MIN_PCT))
-            self.hull[ship.name] = max(floor, current - wear * dt_days)
+            resist = 0.0
+            if mission is not None:
+                resist = max(
+                    self.body_weather_resist(mission.target),
+                    self.body_weather_resist(getattr(ship, "origin", "") or ""),
+                )
+            self.hull[ship.name] = max(floor, current - wear * (1.0 - resist) * dt_days)
 
     # -- gravitational perturbations ------------------------------------------
     def tick_perturbations(self, dt_days: float) -> None:
@@ -1343,10 +1441,15 @@ class OpsSimulation(OrbitalSimulation):
         self.tick_perturbations(dt_days)
         self.tick_depots(dt_days)
         self._depot_refuel_waiting(dt_days)
+        self._tanker_fill_depot(dt_days)
         self._depot_drones_load(dt_days)
         self._refinery_smelt_waiting(dt_days)
         self.tick_swarms(dt_days)
         self.tick_rival(dt_days)
+        # Observatories grant RP via stats side-channel for the game layer.
+        rp = self.tick_observatories(dt_days)
+        if rp > 0.0:
+            self.stats["observatory_rp"] = float(self.stats.get("observatory_rp", 0.0)) + rp
         return entries
 
     # -- mission hooks (wear, depletion, incidents) --------------------------
@@ -1601,6 +1704,7 @@ class OpsSimulation(OrbitalSimulation):
             "swarm_cooldown": dict(self.swarm_cooldown),
             "survey_bonus": {k: dict(v) for k, v in self.survey_bonus.items()},
             "isru_spikes": dict(self.isru_spikes),
+            "station_modules": {k: dict(v) for k, v in self.station_modules.items()},
             "rival_enabled": bool(self.rival_enabled),
             "rival_dump_timer": float(getattr(self, "_rival_dump_timer", RIVAL_DUMP_PERIOD_DAYS)),
             "hull_floor": float(getattr(self, "hull_floor", HULL_MIN_PCT)),
@@ -1664,6 +1768,7 @@ class OpsSimulation(OrbitalSimulation):
         sim.swarm_cooldown = {}
         sim.survey_bonus = {}
         sim.isru_spikes = {}
+        sim.station_modules = {}
         sim.rival_enabled = False
         sim._rival_dump_timer = float(RIVAL_DUMP_PERIOD_DAYS)
         sim.last_active = {}
@@ -1683,6 +1788,8 @@ class OpsSimulation(OrbitalSimulation):
         sim.swarm_cooldown = {k: float(v) for k, v in data.get("swarm_cooldown", {}).items()}
         sim.survey_bonus = {k: dict(v) for k, v in data.get("survey_bonus", {}).items()}
         sim.isru_spikes = {k: int(v) for k, v in data.get("isru_spikes", {}).items()}
+        sim.station_modules = {k: {mk: int(mv) for mk, mv in v.items()}
+                               for k, v in data.get("station_modules", {}).items()}
         sim.rival_enabled = bool(data.get("rival_enabled", False))
         sim._rival_dump_timer = float(data.get("rival_dump_timer", RIVAL_DUMP_PERIOD_DAYS))
         sim.refineries = {r["body_key"]: Refinery.from_json(r) for r in data.get("refineries", [])}

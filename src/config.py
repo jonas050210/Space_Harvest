@@ -82,6 +82,10 @@ SHIP_CLASSES = {
                   "refuel_rate": 160.0, "wear_factor": 0.70, "mine_bonus": 1.3},
     "hauler":    {"name": "Hauler",    "capacity": 520.0, "delta_v": 21.0e3, "price": 9000.0,
                   "refuel_rate": 200.0, "wear_factor": 1.10, "mine_bonus": 1.0},
+    # Logistics specialist: tops up barns fast, modest hold — the hop network's blood.
+    "tanker":    {"name": "Tanker",    "capacity": 80.0, "delta_v": 28.0e3, "price": 6200.0,
+                  "refuel_rate": 320.0, "wear_factor": 0.90, "mine_bonus": 0.6,
+                  "depot_fill_bonus": 1.75},
 }
 DEFAULT_SHIP_CLASS = "freighter"
 FLEET_NAME_POOL = ("Kestrel", "Petrel", "Harrier", "Osprey", "Falcon", "Condor",
@@ -101,24 +105,28 @@ HULL_REPAIR_COST_PER_PCT = 12.0  # credits per percentage point restored
 # --- mining: ore fingerprints, depletion, extraction modes -------------------
 MINING_SEED = 20260826         # combined with the body key, deterministic
 MINING_ORES = ("ice", "iron", "silver", "gold", "platinum", "components", "electronics",
-               "thorite", "aurellium", "silicates", "obsidian", "helium3")
+               "thorite", "aurellium", "silicates", "obsidian", "helium3",
+               "cobalt", "magnetite", "xenonite")
 # Vein size per ore in tonnes: after extracting one vein-size the yield is at
 # 1/e, forcing expansion to fresh rocks while slow recovery keeps the game
 # from dead-ending.
 MINING_VEIN_SIZE_T = {"ice": 1200.0, "iron": 1600.0, "silver": 700.0,
                       "gold": 450.0, "platinum": 300.0, "components": 500.0, "electronics": 250.0,
                       "thorite": 380.0, "aurellium": 140.0,
-                      "silicates": 900.0, "obsidian": 220.0, "helium3": 90.0}
+                      "silicates": 900.0, "obsidian": 220.0, "helium3": 90.0,
+                      "cobalt": 520.0, "magnetite": 640.0, "xenonite": 110.0}
 # Campaign-only ore spawns, appended to a body's module-declared resources.
 # The deep belt and the derelict hull carry radioactive thorite in their slag;
 # aurellium exists ONLY in the comet -- the jackpot that makes the chase pay.
 MINING_EXTRA_SPAWNS = {
-    "deep_belt": ("thorite", "silicates"),
-    "derelict_zone": ("thorite",),
-    "comet_vigil": ("thorite", "aurellium", "helium3"),
-    "trojan_field": ("ice", "silicates", "silver"),
-    "cinder_moon": ("platinum", "obsidian", "gold"),
-    "outer_reach": ("helium3", "thorite", "platinum"),
+    "deep_belt": ("thorite", "silicates", "cobalt"),
+    "derelict_zone": ("thorite", "cobalt"),
+    "comet_vigil": ("thorite", "aurellium", "helium3", "xenonite"),
+    "trojan_field": ("ice", "silicates", "silver", "magnetite"),
+    "cinder_moon": ("platinum", "obsidian", "gold", "magnetite"),
+    "outer_reach": ("helium3", "thorite", "platinum", "xenonite"),
+    "frost_ring": ("ice", "xenonite", "cobalt"),
+    "metallic_belt": ("magnetite",),
 }
 MINING_DRILL_YIELD_BONUS = 1.6   # core drilling multiplier per run
 MINING_DRILL_WEAR_PCT = 6.0      # hull cost of drilling on every drilled run
@@ -138,19 +146,22 @@ MARKET_BASE_PRICES = {  # credits per tonne
     "platinum": 220.0, "components": 65.0, "electronics": 160.0,
     "thorite": 70.0, "aurellium": 480.0,
     "silicates": 18.0, "obsidian": 310.0, "helium3": 520.0,
+    "cobalt": 95.0, "magnetite": 55.0, "xenonite": 610.0,
 }
 # Tonnes the Earth market absorbs before the price visibly sags; rare ores
 # flood much faster, so dumping a hauler load of platinum crashes its price.
 MARKET_ABSORPTION_T = {"ice": 400.0, "iron": 320.0, "silver": 140.0, "gold": 60.0,
                        "platinum": 30.0, "components": 80.0, "electronics": 40.0,
                        "thorite": 45.0, "aurellium": 12.0,
-                       "silicates": 200.0, "obsidian": 22.0, "helium3": 10.0}
+                       "silicates": 200.0, "obsidian": 22.0, "helium3": 10.0,
+                       "cobalt": 55.0, "magnetite": 120.0, "xenonite": 8.0}
 MARKET_FLOOD_HALF_LIFE_DAYS = 30.0
 MARKET_SEASONAL_AMPLITUDE = 0.22
 MARKET_SEASONAL_PERIOD_DAYS = {"ice": 240.0, "iron": 300.0, "silver": 360.0,
                                "gold": 420.0, "platinum": 480.0, "components": 390.0, "electronics": 450.0,
                                "thorite": 330.0, "aurellium": 540.0,
-                               "silicates": 280.0, "obsidian": 400.0, "helium3": 600.0}
+                               "silicates": 280.0, "obsidian": 400.0, "helium3": 600.0,
+                               "cobalt": 350.0, "magnetite": 310.0, "xenonite": 620.0}
 MARKET_NOISE_SIGMA = 0.05           # random-walk strength, per sqrt(day)
 MARKET_NOISE_MEAN_REVERSION = 0.02  # per day toward demand 1.0
 MARKET_PRICE_FLOOR_FRACTION = 0.15  # price never drops below this share of base
@@ -292,10 +303,16 @@ PARTS_CATALOG = {
     # trajectory-planning skill (like pilots), never a physics change.
     "navsuite": {"name": "Navigation Suite", "base_price": 5200.0, "refund": 0.05,
                  "max_per_ship": 1, "aurellium_t": 6},
+    # Ore Scanner: richer assay / slight mine bonus (ops layer).
+    "scanner": {"name": "Ore Scanner", "base_price": 2100.0, "mine_bonus": 0.12, "max_per_ship": 1},
+    # Shield weave: less hull wear per burn.
+    "shield": {"name": "Shield Weave", "base_price": 2800.0, "wear_factor": 0.75, "max_per_ship": 1},
+    # Mag-clamps: hold capacity bump without changing ship class.
+    "magclamp": {"name": "Mag-Clamps", "base_price": 1900.0, "capacity": 40.0, "max_per_ship": 2},
 }
 PARTS_PRICE_ESCALATION = 1.25
 PARTS_SEASON_DAYS = {"tank": 300.0, "drill": 340.0, "quarters": 260.0, "drones": 400.0,
-                     "navsuite": 600.0}
+                     "navsuite": 600.0, "scanner": 320.0, "shield": 380.0, "magclamp": 290.0}
 
 # --- the comet ----------------------------------------------------------------
 # "Vigil" is a long-period comet: perihelion inside the inner belt, aphelion
@@ -356,6 +373,8 @@ REFINERY_ARRIVAL_BATCHES = 14
 REFINERY_RECIPES = (
     {"output": "components", "amount": 2.0, "input": {"iron": 3.0, "silver": 1.0}},
     {"output": "electronics", "amount": 2.0, "input": {"gold": 3.0}},
+    {"output": "components", "amount": 3.0, "input": {"cobalt": 2.0, "magnetite": 2.0}},
+    {"output": "electronics", "amount": 2.0, "input": {"xenonite": 1.0, "gold": 1.0}},
 )
 
 # --- "Firsts": KSP-style one-shot milestones -------------------------------------
@@ -392,6 +411,13 @@ FIRSTS = (
     ("first_system_map", "System chart opened -- the whole farm at once", 200.0, 2.0),
     ("first_survey", "First surface survey -- veins charted", 350.0, 5.0),
     ("first_isru_spike", "ISRU spike planted -- the barn drinks deeper", 500.0, 6.0),
+    ("cobalt_1", "First cobalt shipment -- blue steel for Earth", 600.0, 8.0),
+    ("magnetite_1", "First magnetite haul", 400.0, 5.0),
+    ("xenonite_1", "First xenonite crystal — the lab goes quiet", 1800.0, 25.0),
+    ("first_tanker", "Tanker commissioned — the barns will drink", 700.0, 8.0),
+    ("first_observatory", "Field observatory online", 500.0, 10.0),
+    ("first_drill_yard", "Drill yard chewing bedrock", 600.0, 8.0),
+    ("first_capture_frost", "First harvest: Frost Ring", 1100.0, 14.0),
 )
 
 
@@ -425,9 +451,45 @@ CAMPAIGN_BODIES = {
                      "argp_deg": 160.0, "nu_deg": 20.0},
         "radius_km": 22.0, "soi_km": 50000.0,
         "palette": (0.35, 0.55, 0.95),
-        "resources": ("helium3", "thorite", "platinum"),
+        "resources": ("helium3", "thorite", "platinum", "xenonite"),
         "description": "Far-system prospect -- multi-hop depot runs required.",
         "render_scale": 0.85,
+    },
+    "frost_ring": {
+        "name": "Frost Ring",
+        "elements": {"a": 4.20, "e": 0.14, "i_deg": 7.5, "raan_deg": 190.0,
+                     "argp_deg": 80.0, "nu_deg": 100.0},
+        "radius_km": 16.0, "soi_km": 38000.0,
+        "palette": (0.70, 0.88, 1.0),
+        "resources": ("ice", "xenonite", "cobalt"),
+        "description": "Icy shepherd ring — xenonite snow and cobalt slag.",
+        "render_scale": 0.65,
+    },
+}
+
+
+# --- station modules (body-side industry) ------------------------------------
+# Built at a selected field with keys; effects are ops multipliers / storage.
+STATION_MODULE_CATALOG = {
+    "observatory": {
+        "name": "Field Observatory", "cost": 2800.0,
+        "research_per_day": 0.15, "max_per_body": 1,
+        "blurb": "Passive research while the barn watches the sky.",
+    },
+    "warehouse": {
+        "name": "Orbital Warehouse", "cost": 3600.0,
+        "storage_bonus": 200.0, "max_per_body": 2,
+        "blurb": "Colony storage capacity via bonded holds.",
+    },
+    "drill_yard": {
+        "name": "Drill Yard", "cost": 4100.0,
+        "mine_bonus": 0.15, "max_per_body": 1,
+        "blurb": "Surface rigs boost every freighter capture here.",
+    },
+    "shield_mast": {
+        "name": "Shield Mast", "cost": 3300.0,
+        "weather_resist": 0.5, "max_per_body": 1,
+        "blurb": "Halves flare/debris wear for ships waiting here.",
     },
 }
 
@@ -451,6 +513,8 @@ TECHS = (
     ("swarm_doctrine", "Swarm Doctrine", 80, {"swarm_yield": 1.35}),
     ("longshore_auto", "Longshore Automation", 60, {"depot_generation": 1.25}),
     ("cryo_tankers", "Cryo Tanker Protocols", 65, {"refuel_rate": 1.20}),
+    ("deep_core_bits", "Deep-Core Drill Bits", 75, {"mine_bonus": 1.20}),
+    ("xenon_capture", "Xenon Capture Nets", 90, {"swarm_yield": 1.15, "mine_bonus": 1.10}),
 )
 
 # --- campaign difficulty -------------------------------------------------------
@@ -669,5 +733,5 @@ WINDOW_SIZE = (1440, 900)
 # Steamworks app id placeholder (replace before store launch). Zero means
 # "no Steam"; steam_appid.txt is written beside the executable by the packager.
 STEAM_APP_ID = 0
-GAME_VERSION = "1.2.0"
+GAME_VERSION = "1.3.0"
 EXECUTABLE_NAME = "SpaceHarvest"

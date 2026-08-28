@@ -422,8 +422,10 @@ class MenuOverlay:
             "Ironman disables mid-run loads; critical hulls can wreck.",
             "",
             "Graphics: Low / Medium / High / Ultra. K cycles them live.",
-            "Ultra is tuned for RTX 4060 Ti. Low keeps Deck/iGPU playable.",
-            "F1 opens the year report -- your farm books.",
+            "0 commissions a Tanker (fills barns). 7/8/9/' build station",
+            "modules (observatory, warehouse, drill yard, shield mast).",
+            "New drillable ores: cobalt, magnetite, xenonite. Frost Ring field.",
+            "F6/F7/F8: Ore Scanner / Shield Weave / Mag-Clamps.",
         )),
     )
 

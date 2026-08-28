@@ -69,6 +69,7 @@ from src.config import (  # noqa: E402
     VIEW_MODES,
     DEFAULT_VIEW_MODE,
     RIVAL_NAME,
+    STATION_MODULE_CATALOG,
     RIVAL_DUMP_TONNES,
     SURFACE_ISRU_COST_CR,
     SURFACE_SURVEY_COST_CR,
@@ -116,7 +117,7 @@ from src.game import logistics as colony_logistics  # noqa: E402
 from src.game import savegame as colony_savegame  # noqa: E402
 from src.game import state as colony_state  # noqa: E402
 
-BUY_MENU = ("scout", "freighter", "refinery", "hauler")
+BUY_MENU = ("scout", "freighter", "refinery", "hauler", "tanker")
 CREDITS_HISTORY_POINTS = 240
 CREDITS_HISTORY_SAMPLE_DAYS = 2.0
 
@@ -406,6 +407,24 @@ class Game:
             pass
 
 
+    def build_station_module_selected(self, module_key: str) -> None:
+        target = self.hud.selected_target() if self.hud is not None else "inner_belt"
+        info = STATION_MODULE_CATALOG.get(module_key)
+        if info is None:
+            self.say(f"Unknown module '{module_key}'.")
+            return
+        cost = float(info["cost"])
+        if self.credits < cost:
+            self.say(f"{info['name']} costs {cost:,.0f} cr; treasury {self.credits:,.0f} cr.")
+            return
+        ok, message = self.sim.build_station_module(target, module_key)
+        if not ok:
+            self.say(message)
+            return
+        self.credits -= cost
+        self._play_alert("build")
+        self.say(f"{message} Bill: {cost:,.0f} cr.", seconds=7.0)
+
     def surface_survey(self) -> None:
         target = self.hud.selected_target() if self.hud is not None else "inner_belt"
         if self.view_mode != "surface":
@@ -437,6 +456,20 @@ class Game:
         self.credits -= cost
         self._play_alert("build")
         self.say(message + f"  Bill {cost:,.0f} cr.", seconds=7.0)
+
+    def _sync_warehouse_capacity(self) -> None:
+        """Mirror warehouse modules into colony module list for storage math."""
+        bonus_units = int(self.sim.warehouse_storage_bonus() // 250) if hasattr(self.sim, "warehouse_storage_bonus") else 0
+        modules = self.colony.state.setdefault("modules", [])
+        # Keep exactly bonus_units synthetic storage entries.
+        modules[:] = [m for m in modules if m != "storage_wh"]
+        modules.extend(["storage_wh"] * max(0, bonus_units))
+        # logistics.capacity_for counts "storage" only — map storage_wh:
+        # patch by also appending "storage"
+        modules[:] = [m for m in modules if m != "storage" or modules.count("storage") <= 1]
+        # simpler: set a direct capacity boost key
+        self.colony.state["warehouse_bonus_t"] = float(
+            self.sim.warehouse_storage_bonus() if hasattr(self.sim, "warehouse_storage_bonus") else 0.0)
 
     def _tick_rival_market(self) -> None:
         if not int(self.sim.stats.get("rival_dump_pending", 0)):
@@ -534,6 +567,14 @@ class Game:
         self._tick_firsts()
         self._tick_victory()
         self._tick_rival_market()
+        self._sync_warehouse_capacity()
+        # Field observatories trickle research into the colony.
+        obs_rp = float(self.sim.stats.get("observatory_rp", 0.0))
+        claimed = float(getattr(self, "_obs_rp_claimed", 0.0))
+        if obs_rp > claimed:
+            self.colony.state["research_points"] = float(
+                self.colony.state.get("research_points", 0.0)) + (obs_rp - claimed)
+            self._obs_rp_claimed = obs_rp
         if is_ironman(self.difficulty):
             self.ironman_days += dt_days
             if self.ironman_days >= 365.0:
@@ -959,6 +1000,13 @@ class Game:
             "first_system_map": bool(self._map_opened),
             "first_survey": int(self.sim.stats.get("surveys", 0)) >= 1,
             "first_isru_spike": int(self.sim.stats.get("isru_spikes", 0)) >= 1,
+            "cobalt_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("cobalt", 0.0) > 0.0,
+            "magnetite_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("magnetite", 0.0) > 0.0,
+            "xenonite_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("xenonite", 0.0) > 0.0,
+            "first_tanker": any(self.sim.ship_class.get(s.name) == "tanker" for s in self.sim.ships),
+            "first_observatory": any("observatory" in mods for mods in self.sim.station_modules.values()),
+            "first_drill_yard": any("drill_yard" in mods for mods in self.sim.station_modules.values()),
+            "first_capture_frost": self.sim.stats.get("captures_by_body", {}).get("frost_ring", 0) >= 1,
         }
 
     def _tick_firsts(self) -> None:
@@ -1162,9 +1210,9 @@ class Game:
         research = self.colony.state.get("research_points", 0.0)
         for key, name, cost, _effects in TECHS:
             if key not in self.techs:
-                return (f"Parts [T]ank [Y]drill [U]arters [I]nav [P]drones   "
+                return (f"Parts T/Y/U/I/F6scan/F7sh/F8mag  P drones  0 tanker  7-9/' modules   "
                         f"Lab [L]: {name} ({cost:.0f} RP, have {research:,.0f})")
-        return "Parts [T]ank [Y]drill [U]arters [I]nav [P]drones   Lab: all techs unlocked"
+        return "Parts T/Y/U/I/F6scan/F7sh/F8mag  P drones  0 tanker  7-9/' modules   Lab: all techs unlocked"
 
     def _depot_hud_line(self) -> str:
         if not self.sim.depots:
@@ -2069,12 +2117,22 @@ def run_windowed() -> None:
             game.surface_survey()
         elif key == "-":
             game.surface_isru()
+        elif key == "7":
+            game.build_station_module_selected("observatory")
+        elif key == "8":
+            game.build_station_module_selected("warehouse")
+        elif key == "9":
+            game.build_station_module_selected("drill_yard")
+        elif key == "'":
+            game.build_station_module_selected("shield_mast")
         elif key == "x":
             game.toggle_drill()
         elif key == "m":
             game.toggle_repair()
-        elif key in ("1", "2", "3", "4"):
-            game.buy_ship_class(BUY_MENU[int(key) - 1])
+        elif key in ("1", "2", "3", "4", "0"):
+            # 1-4 classic classes; 0 = tanker
+            idx = 4 if key == "0" else int(key) - 1
+            game.buy_ship_class(BUY_MENU[idx])
         elif key == "j":
             game.cycle_jump()
         elif key == "b":
@@ -2101,6 +2159,12 @@ def run_windowed() -> None:
             game.buy_drone_bay()
         elif key == "i":
             game.buy_part("navsuite")
+        elif key == "f6":
+            game.buy_part("scanner")
+        elif key == "f7":
+            game.buy_part("shield")
+        elif key == "f8":
+            game.buy_part("magclamp")
         elif key == "l":
             game.buy_tech()
         elif key == "k":

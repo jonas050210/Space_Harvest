@@ -16,6 +16,7 @@ def initial_state():
             "ice": 200, "iron": 150, "gold": 10, "silver": 5, "platinum": 0,
             "energy": 20, "water": 0, "components": 0, "electronics": 0,
             "thorite": 0, "aurellium": 0, "silicates": 0, "obsidian": 0, "helium3": 0,
+            "cobalt": 0, "magnetite": 0, "xenonite": 0,
         },
         "population": 3,
         "max_pop": 8,
