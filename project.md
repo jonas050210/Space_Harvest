@@ -53,6 +53,10 @@ art" render driven by the same `Game.update` path and the same committed texture
 
 ## 2. Architecture
 
+Product entry is **``setup.py``** only (play / shortcut / EXE). Package layout: ``src/ops`` (fleet), ``src/colony`` (economy bridge), ``src/config`` (knobs), sealed ``src/maths`` + ``src/simulation``, ``packaging/`` for PyInstaller. Shims: ``operations.py`` → ops, ``game/`` → colony.
+
+## 2. Architecture
+
 ### 2.1 Layering rule (the founding constraint)
 
 The game is built as strictly separated layers. **Nothing gameplay-related ever edits

@@ -20,7 +20,7 @@ Version **1.2.0**. Ship PC: **i7-12700F / 32 GB DDR4 / RTX 4060 Ti 8 GB**.
 
 ```powershell
 python setup.py --test --build
-# or: python scripts/build_steam.py
+# or: python setup.py --build
 ```
 
 ## Build (Windows 11) — detailed
@@ -36,7 +36,7 @@ Linux:
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python scripts/build_steam.py
+.venv/bin/python setup.py --build
 ```
 
 Before store launch: set `STEAM_APP_ID` in `src/config.py`, wire `steam/achievements.vdf` in the partner portal, mount Steam Cloud on `saves/*.json`.

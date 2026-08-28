@@ -1875,14 +1875,15 @@ def test_sell_fraction_only_sells_partial_stock():
     assert game.colony.state["resources"]["iron"] == pytest.approx(75.0, abs=1.0)
 
 
-def test_start_module_importable_and_setup_parses():
+def test_setup_and_packaging_entrypoints_parse():
     import ast
     from pathlib import Path
 
-    for rel in ("start.py", "setup.py", "scripts/build_steam.py"):
+    for rel in ("setup.py", "packaging/play_entry.py", "packaging/build_exe.py", "src/__main__.py"):
         ast.parse(Path(rel).read_text(encoding="utf-8"))
-    import start as start_mod
-    assert hasattr(start_mod, "main")
+    from src.app import run_game, prepare_runtime_paths
+    assert callable(run_game)
+    assert Path(prepare_runtime_paths()).is_dir()
 
 
 def test_techs_include_swarm_and_longshore():
