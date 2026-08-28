@@ -69,6 +69,18 @@ python3 -m venv .venv
 - ESC: pause or cancel dispatch confirm
 - Mouse wheel: zoom
 
+## Views & drone swarms
+
+| Key | View |
+|-----|------|
+| `,` | Cycle **network 3-D** → **system map** → **surface** |
+| `/` | System chart (top-down solar map + AU grid) |
+| `.` | Land on the selected field's **surface** (veins, pad, rocks) |
+| Backspace | Back to network overview |
+| **D** | Launch harvest **drone swarm** on GO window (up to **100** drones) |
+
+Build drone bays with **P** on depots to grow the swarm. Swarms only launch while the launch window is open, pull ore for ~14 days, then cool down.
+
 ## Multi-stop deliveries (KSP-style)
 
 Deep fields (Outer Reach, Cinder Moon, Trojan Field, Comet) often need more

@@ -63,6 +63,11 @@ from src.config import (  # noqa: E402
     TECHS,
     MARKET_BASE_PRICES,
     REDISPATCH_SCAN_DAYS,
+    SWARM_CREDIT_COST_PER_DRONE,
+    SWARM_ENERGY_COST_PER_DRONE,
+    SWARM_MAX_DRONES,
+    VIEW_MODES,
+    DEFAULT_VIEW_MODE,
     SHIP_CLASSES,
     SHIP_REFUEL_ENERGY_PER_MS,
     START_CREDITS,
@@ -200,6 +205,9 @@ class Game:
         self.clean_run_streak = 0
         self.ironman_days = 0.0
         self._pending_dispatch: dict | None = None
+        self.view_mode = self.settings.get("view_mode", DEFAULT_VIEW_MODE)
+        self._surface_visited: set = set()
+        self._map_opened = False
         self.achievements = AchievementTracker(
             path=os.path.join(cloud_root(), "achievements_progress.json"))
         self.steam = SteamClient()
@@ -257,6 +265,15 @@ class Game:
         from ursina import camera
 
         glide = 0.10 if self.settings.get("glide", True) else 1.0
+        # Map / surface modes own the camera; still glide to the goal.
+        if self.view_mode in ("map", "surface") and self.scene is not None:
+            target = self.hud.selected_target() if self.hud is not None else None
+            pos, look = self.scene.camera_for_view(self.view_mode, target)
+            self._camera_goal = pos
+            rate = 0.08 if self.settings.get("glide", True) else 1.0
+            camera.position = lerp(camera.position, pos, rate)
+            camera.look_at(look)
+            return
         if self.follow_target is None or self.scene is None:
             # Glide back to the network anchor when no ship is followed.
             if self._camera_goal is not None:
@@ -348,6 +365,70 @@ class Game:
             ok, message = self.sim.dispatch(idle, target)
         self.say(message, seconds=8.0)
 
+
+    def set_view_mode(self, mode: str | None = None) -> None:
+        """Cycle or set camera mode: network (3-D) / map (system chart) / surface."""
+        if mode is None:
+            order = VIEW_MODES
+            cur = self.view_mode if self.view_mode in order else "network"
+            mode = order[(order.index(cur) + 1) % len(order)]
+        target = None
+        if mode == "surface":
+            target = self.hud.selected_target() if self.hud is not None else "inner_belt"
+            self._surface_visited.add(target)
+        if mode == "map":
+            self._map_opened = True
+        self.view_mode = mode
+        self.settings["view_mode"] = mode
+        if self.scene is not None:
+            self.scene.set_view_mode(mode, body_key=target, sim=self.sim)
+            self._apply_view_camera()
+        labels = {"network": "Network 3-D", "map": "System chart", "surface": f"Surface ({target})"}
+        self.say(f"View: {labels.get(mode, mode)}.", seconds=5.0)
+
+    def _apply_view_camera(self) -> None:
+        if self.scene is None or Vec3 is None:
+            return
+        try:
+            from ursina import camera
+            target = self.hud.selected_target() if self.hud is not None else None
+            pos, look = self.scene.camera_for_view(self.view_mode, target)
+            self._camera_goal = pos
+            camera.position = pos
+            camera.look_at(look)
+            self.follow_target = None
+        except Exception:
+            pass
+
+    def launch_swarm_selected(self) -> None:
+        """Launch up to 100 harvest drones on the selected field while GO is open."""
+        target = self.hud.selected_target() if self.hud is not None else "inner_belt"
+        ok, message, count = self.sim.launch_swarm(target)
+        if not ok:
+            self.say(message, seconds=7.0)
+            return
+        cost = count * SWARM_CREDIT_COST_PER_DRONE
+        energy = count * SWARM_ENERGY_COST_PER_DRONE
+        if self.credits < cost:
+            # roll back
+            self.sim.swarms.pop(target, None)
+            self.say(f"Swarm needs {cost:,.0f} cr; treasury holds {self.credits:,.0f} cr.")
+            return
+        resources = self.colony.state.setdefault("resources", {})
+        if resources.get("energy", 0.0) < energy:
+            self.sim.swarms.pop(target, None)
+            self.say("Not enough colony energy to power the swarm.")
+            return
+        self.credits -= cost
+        resources["energy"] = resources.get("energy", 0.0) - energy
+        if self.scene is not None and self.settings.get("drone_fx", True):
+            self.scene.spawn_swarm(target, count, seed=hash(target) & 0xFFFF)
+            # Drop into surface view so the player *sees* the swarm.
+            if self.view_mode != "surface":
+                self.set_view_mode("surface")
+        self._play_alert("build")
+        self.say(message + f"  Bill {cost:,.0f} cr.", seconds=9.0)
+
     def cancel_pending_dispatch(self) -> None:
         if self._pending_dispatch is not None:
             self._pending_dispatch = None
@@ -409,6 +490,14 @@ class Game:
 
         if self.scene is not None:
             self.scene.update(self.sim)
+            # Keep visual swarms in sync with sim state.
+            active = set(self.sim.swarms)
+            for key in list(getattr(self.scene, "swarms", {})):
+                if key not in active:
+                    self.scene.clear_swarm(key)
+            for key, swarm in self.sim.swarms.items():
+                if self.settings.get("drone_fx", True):
+                    self.scene.spawn_swarm(key, int(swarm.get("count", 0)))
             if self.screen == "title":
                 self._drift_camera()
             else:
@@ -504,6 +593,12 @@ class Game:
                 except Exception:
                     pass
         self.muted = bool(self.settings.get("muted", False))
+        # Re-assert view mode after quality changes.
+        if self.scene is not None:
+            target = self.hud.selected_target() if self.hud is not None else None
+            self.scene.set_view_mode(self.view_mode,
+                                    body_key=target if self.view_mode == "surface" else None,
+                                    sim=self.sim)
         # Campaign defaults chosen in settings stick for the next NEW GAME.
         if "difficulty" in self.settings:
             pass  # applied in new_campaign from settings
@@ -557,6 +652,14 @@ class Game:
         self.frames += 1
         if self.scene is not None:
             self.scene.update(self.sim)
+            # Keep visual swarms in sync with sim state.
+            active = set(self.sim.swarms)
+            for key in list(getattr(self.scene, "swarms", {})):
+                if key not in active:
+                    self.scene.clear_swarm(key)
+            for key, swarm in self.sim.swarms.items():
+                if self.settings.get("drone_fx", True):
+                    self.scene.spawn_swarm(key, int(swarm.get("count", 0)))
             self._drift_camera()
         if self.hud is not None:
             self.hud.update(self.sim, self.colony.summary(),
@@ -750,6 +853,9 @@ class Game:
             "version": GAME_VERSION,
             "route_line": self._route_hud_line(),
             "prefer_hops": bool(self.settings.get("prefer_hops", True)),
+            "view_mode": self.view_mode,
+            "swarm_line": self._swarm_hud_line(),
+            "swarm_capacity": self.sim.swarm_capacity(),
         }
 
     # -- "Firsts": one-shot milestones ------------------------------------------
@@ -783,6 +889,9 @@ class Game:
             "first_multihop": int(self.sim.stats.get("multihop_runs", 0)) >= 1,
             "helium3_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("helium3", 0.0) > 0.0,
             "obsidian_1": self.colony.state.get("logistics", {}).get("lifetime_delivered", {}).get("obsidian", 0.0) > 0.0,
+            "first_swarm": int(self.sim.stats.get("swarm_drones_peak", 0)) >= 40,
+            "first_surface": len(self._surface_visited) >= 1,
+            "first_system_map": bool(self._map_opened),
         }
 
     def _tick_firsts(self) -> None:
@@ -888,6 +997,20 @@ class Game:
         days_left = max(0.0, contract.deadline_day - self.market.day)
         return (f"Order: {contract.resource} {pct:.0f}% by {days_left:,.0f} d "
                 f"({contract.faction})")
+
+    def _swarm_hud_line(self) -> str:
+        if not self.sim.swarms:
+            cap = self.sim.swarm_capacity()
+            return f"Swarm ready: {cap} drones (D on GO window)" if cap >= 4 else "Swarm: build drone bays (P)"
+        parts = []
+        for key, swarm in sorted(self.sim.swarms.items()):
+            name = self.sim.bodies[key].name if key in self.sim.bodies else key
+            parts.append(
+                f"{name} x{int(swarm['count'])} "
+                f"{float(swarm['remaining_days']):.0f}d "
+                f"{float(swarm.get('yield_t', 0)):.0f}t"
+            )
+        return "SWARM " + " | ".join(parts)
 
     def _route_hud_line(self) -> str:
         """Active multi-stop routes + planner hint for the selected target."""

@@ -22,6 +22,7 @@ from ..config import (
     UI_SCALE_ORDER,
     VICTORY_MODES,
     VICTORY_ORDER,
+    VIEW_MODES,
 )
 from ..simulation.bodies import BODIES
 
@@ -230,7 +231,7 @@ class OrbitalHUD:
         if colony_state is not None:
             delivered = sim.stats["mass_delivered"]
             self.help.text = (
-                f"[ / ] warp  TAB field  ENTER dispatch  ; hops  S sell  R barn  E mill  F5/F9 save"
+                f"[/]warp TAB field ENTER go  D swarm  , view  / map  . surface  ; hops  S sell  R barn"
                 f"      |      colony storage used {colony_state.get('used', 0):,.0f} / "
                 f"{colony_state.get('capacity', 0):,.0f}    lifetime delivered {delivered:,.0f} t"
             )
@@ -317,9 +318,14 @@ class OrbitalHUD:
         lines[7].color = color.cyan if "No depots" not in depot_line else color.white
         summary = "  ".join(filter(None, (extra.get("rep_line", ""), extra.get("life_line", ""))))
         route = extra.get("route_line", "")
-        if route:
-            summary = f"{summary}  |  {route}" if summary else route
+        swarm = extra.get("swarm_line", "")
+        view = extra.get("view_mode", "")
+        extras = "  ".join(filter(None, (route, swarm, f"view:{view}" if view else "")))
+        if extras:
+            summary = f"{summary}  |  {extras}" if summary else extras
         lines[6].text = summary
+        if "SWARM" in (swarm or ""):
+            lines[6].color = color.rgb(0.45, 1.0, 0.75)
         if "ALERT" in summary:
             lines[6].color = color.red
         elif "LOW" in summary:
@@ -397,6 +403,16 @@ class MenuOverlay:
             "Press ; to toggle hop planning. Drones (P) load holds while you",
             "wait at a barn for the next window -- KSP-style logistics.",
         )),
+        ("SURFACE AND MAP", (
+            "Three views: network 3-D, system chart, and surface survey.",
+            "Comma (,) cycles views. Slash (/) opens the system map.",
+            "Period (.) lands on the selected field's surface.",
+            "Backspace returns to the network overview.",
+            "",
+            "On a GO window press D to launch a harvest drone swarm -- up to",
+            "100 designed drones dive the field. Build drone bays (P) first.",
+            "Watch them from the surface. Swarm cools down per body after.",
+        )),
         ("CAMPAIGN AND GRAPHICS", (
             "SETTINGS picks difficulty (Director / Tight / Ironman) and a",
             "victory mode (Endless / Charter / Legacy) before NEW HARVEST.",
@@ -412,6 +428,7 @@ class MenuOverlay:
     # kind: cycle_list | toggle | cycle_num
     SETTINGS_ROWS = (
         ("quality", "Quality preset", "cycle_list", QUALITY_ORDER),
+        ("view_mode", "Default view", "cycle_list", VIEW_MODES),
         ("resolution", "Resolution", "cycle_list", RESOLUTION_ORDER),
         ("fullscreen", "Fullscreen", "toggle", None),
         ("vsync", "VSync", "toggle", None),
@@ -422,6 +439,10 @@ class MenuOverlay:
         ("glide", "Camera glide", "toggle", None),
         ("confirm_dispatch", "Confirm dispatch", "toggle", None),
         ("show_dossier", "Body dossier", "toggle", None),
+        ("show_map_grid", "System map grid", "toggle", None),
+        ("show_surface_hud", "Surface HUD", "toggle", None),
+        ("drone_fx", "Drone swarm FX", "toggle", None),
+        ("ui_contrast", "High-contrast UI", "toggle", None),
         ("difficulty", "Difficulty", "cycle_list", DIFFICULTY_ORDER),
         ("victory", "Victory mode", "cycle_list", VICTORY_ORDER),
     )

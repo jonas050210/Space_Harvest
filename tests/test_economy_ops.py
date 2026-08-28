@@ -1741,3 +1741,78 @@ def test_game_dispatch_uses_planner_for_deep_targets():
     ok, msg = game.sim.dispatch_route(ship, "cinder_moon")
     assert ok, msg
     assert game.sim.routes.get(ship.name) or ship.name in game.sim.missions
+
+
+
+# --------------------------------------------------------------------------
+# Surface / map views + window drone swarms
+# --------------------------------------------------------------------------
+
+
+def test_swarm_capacity_scales_with_drone_bays():
+    from src.config import SWARM_MAX_DRONES
+    from src.operations import OpsSimulation
+
+    sim = OpsSimulation()
+    assert sim.swarm_capacity() >= 1
+    sim.build_depot("inner_belt")
+    before = sim.swarm_capacity()
+    sim.install_depot_part("inner_belt", "drones")
+    assert sim.swarm_capacity() > before
+    # Cap at 100.
+    for _ in range(10):
+        sim.build_depot("deep_belt") if "deep_belt" not in sim.depots else None
+        if "deep_belt" in sim.depots:
+            sim.install_depot_part("deep_belt", "drones")
+    assert sim.swarm_capacity() <= SWARM_MAX_DRONES
+
+
+def test_swarm_launches_only_on_open_window_and_harvests():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.sim.build_depot("inner_belt")
+    game.sim.install_depot_part("inner_belt", "drones")
+    game.sim.install_depot_part("inner_belt", "drones")
+    ok, msg, n = game.sim.launch_swarm("inner_belt")
+    # Likely blocked until GO; advance.
+    if not ok:
+        for _ in range(300):
+            game.sim.step(8.0)
+            ok, msg, n = game.sim.launch_swarm("inner_belt")
+            if ok:
+                break
+    assert ok, msg
+    assert n >= 12
+    assert "inner_belt" in game.sim.swarms
+    mined_before = float(game.sim.stats.get("ore_mined_t", 0.0))
+    for _ in range(30):
+        game.update(1.0)
+    assert float(game.sim.stats.get("ore_mined_t", 0.0)) > mined_before
+    # Cooldown blocks immediate re-launch.
+    ok2, _, _ = game.sim.launch_swarm("inner_belt")
+    assert ok2 is False
+
+
+def test_view_mode_cycles_and_surface_tracks_visit():
+    from src.main import Game
+
+    game = Game(headless=True)
+    assert game.view_mode == "network"
+    game.set_view_mode("map")
+    assert game.view_mode == "map" and game._map_opened
+    game.set_view_mode("surface")
+    assert game.view_mode == "surface"
+    assert len(game._surface_visited) >= 1
+    game.set_view_mode("network")
+    assert game.view_mode == "network"
+
+
+def test_quality_presets_include_new_fx_flags():
+    from src.config import QUALITY_ORDER, QUALITY_PRESETS
+
+    for key in QUALITY_ORDER:
+        preset = QUALITY_PRESETS[key]
+        assert "drones_fx" in preset
+        assert "surface_detail" in preset
+        assert "atmosphere" in preset

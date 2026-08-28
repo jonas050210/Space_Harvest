@@ -38,6 +38,14 @@ import numpy as np
 
 from .config import (
     CAMPAIGN_BODIES,
+    SWARM_BASE_DRONES,
+    SWARM_COOLDOWN_DAYS,
+    SWARM_CREDIT_COST_PER_DRONE,
+    SWARM_DRONES_PER_BAY,
+    SWARM_DURATION_DAYS,
+    SWARM_ENERGY_COST_PER_DRONE,
+    SWARM_MAX_DRONES,
+    SWARM_YIELD_T_PER_DRONE_DAY,
     COMET_ELEMENTS,
     COMET_KEY,
     COMET_VEIN_BONUS,
@@ -238,6 +246,10 @@ class OpsSimulation(OrbitalSimulation):
         self.routes: dict[str, list] = {}
         #: standing auto-dispatch orders (destinations + hop policy)
         self.standing_orders: dict = {"prefer_hops": True, "destinations": [], "min_depot_fuel": 4000.0}
+        #: body_key -> active swarm dict {count, remaining_days, yield_t, launched_day}
+        self.swarms: dict[str, dict] = {}
+        #: body_key -> sim-day when next swarm is allowed
+        self.swarm_cooldown: dict[str, float] = {}
         #: body key -> refuel depot (player-built)
         self.depots: dict[str, Depot] = {}
         #: body key -> refinery station (player-built)
@@ -695,6 +707,106 @@ class OpsSimulation(OrbitalSimulation):
             self.note(f"{ship.name} route stalled at {ship.origin}: {message}")
             self.routes.pop(ship.name, None)
 
+
+    # -- harvest drone swarms (window GO moment) --------------------------------
+    def total_drone_bays(self) -> int:
+        return sum(int(d.upgrades.get("drones", 0)) for d in self.depots.values())
+
+    def swarm_capacity(self) -> int:
+        bays = max(0, self.total_drone_bays())
+        return int(min(SWARM_MAX_DRONES, SWARM_BASE_DRONES + SWARM_DRONES_PER_BAY * bays))
+
+    def launch_swarm(self, body_key: str) -> tuple[bool, str, int]:
+        """Flood a field with harvest drones while its window is open.
+
+        Returns (ok, message, drone_count). Caller bills credits/energy.
+        """
+        if body_key not in self.bodies or body_key == "colony":
+            return False, "Pick a harvest field.", 0
+        if body_key in self.swarms:
+            return False, f"A swarm is already working {self.bodies[body_key].name}.", 0
+        now_day = self.time / SIM_SECONDS_PER_DAY
+        ready = self.swarm_cooldown.get(body_key, -1e9)
+        if now_day < ready:
+            return False, (
+                f"Swarm systems cooling down at {self.bodies[body_key].name} "
+                f"({ready - now_day:,.0f} d left)."
+            ), 0
+        # Window must be open (or about to open within a day).
+        window = self.launch_window("colony", body_key)
+        if window is None:
+            return False, f"No launch window to {self.bodies[body_key].name}.", 0
+        wait = (window.departure_time - self.time) / SIM_SECONDS_PER_DAY
+        if wait > 1.0:
+            return False, (
+                f"Window to {self.bodies[body_key].name} opens in {wait:,.0f} d -- "
+                "swarm launches only on GO."
+            ), 0
+        count = self.swarm_capacity()
+        if count < 4:
+            return False, "Build depot drone bays (P) before launching a swarm.", 0
+        self.swarms[body_key] = {
+            "count": count,
+            "remaining_days": float(SWARM_DURATION_DAYS),
+            "yield_t": 0.0,
+            "launched_day": now_day,
+        }
+        self.swarm_cooldown[body_key] = now_day + SWARM_COOLDOWN_DAYS
+        self.stats["swarms_launched"] = int(self.stats.get("swarms_launched", 0)) + 1
+        self.stats["swarm_drones_peak"] = max(
+            int(self.stats.get("swarm_drones_peak", 0)), count)
+        self.note(
+            f"SWARM LAUNCH: {count} harvest drones dive on {self.bodies[body_key].name} "
+            f"(window GO, {SWARM_DURATION_DAYS:.0f} d burst)."
+        )
+        return True, (
+            f"{count} drones inbound to {self.bodies[body_key].name} -- "
+            f"harvest window {SWARM_DURATION_DAYS:.0f} d."
+        ), count
+
+    def tick_swarms(self, dt_days: float) -> list[dict]:
+        """Advance active swarms; return list of finished {body, yield_t, count}."""
+        finished = []
+        if dt_days <= 0.0 or not self.swarms:
+            return finished
+        for key in list(self.swarms):
+            swarm = self.swarms[key]
+            count = int(swarm["count"])
+            # Ore pull into a virtual hold then committed via ledger-aware plan.
+            pull = count * SWARM_YIELD_T_PER_DRONE_DAY * dt_days
+            try:
+                from .mining import plan_extraction
+                payload = plan_extraction(
+                    key, self.ledger, self.reserved.get(key),
+                    capacity_t=pull, mode=self.mining_mode,
+                    mine_bonus=1.0 + 0.05 * self.total_drone_bays(),
+                    hull_pct=100.0,
+                )
+            except Exception:
+                payload = {"ice": pull * 0.5, "iron": pull * 0.5}
+            if payload:
+                self.ledger.commit(key, payload)
+                tonnes = float(sum(payload.values()))
+                swarm["yield_t"] = float(swarm.get("yield_t", 0.0)) + tonnes
+                self.stats["ore_mined_t"] = float(self.stats.get("ore_mined_t", 0.0)) + tonnes
+                # Stage as a pending delivery into the colony.
+                self.pending_deliveries.append(
+                    Delivery(ship=f"swarm:{key}", body=key, time=self.time, cargo=dict(payload))
+                )
+            swarm["remaining_days"] = float(swarm["remaining_days"]) - dt_days
+            if swarm["remaining_days"] <= 0.0:
+                finished.append({
+                    "body": key,
+                    "yield_t": float(swarm.get("yield_t", 0.0)),
+                    "count": count,
+                })
+                self.note(
+                    f"Swarm over {self.bodies[key].name} recovered: "
+                    f"{swarm.get('yield_t', 0.0):,.0f} t hauled by {count} drones."
+                )
+                del self.swarms[key]
+        return finished
+
     # -- refuel depots ---------------------------------------------------------
     def build_depot(self, body_key: str) -> tuple[bool, str]:
         """Raise a depot at ``body_key`` (caller pays the credits)."""
@@ -1141,6 +1253,7 @@ class OpsSimulation(OrbitalSimulation):
         self._depot_refuel_waiting(dt_days)
         self._depot_drones_load(dt_days)
         self._refinery_smelt_waiting(dt_days)
+        self.tick_swarms(dt_days)
         return entries
 
     # -- mission hooks (wear, depletion, incidents) --------------------------
@@ -1391,6 +1504,8 @@ class OpsSimulation(OrbitalSimulation):
             "routes": {name: [leg.__dict__ if hasattr(leg, "__dict__") else leg for leg in legs]
                        for name, legs in self.routes.items()},
             "standing_orders": dict(self.standing_orders),
+            "swarms": {k: dict(v) for k, v in self.swarms.items()},
+            "swarm_cooldown": dict(self.swarm_cooldown),
             "hull_floor": float(getattr(self, "hull_floor", HULL_MIN_PCT)),
             "refineries": [r.to_json() for r in self.refineries.values()],
             "botanists": self.botanists,
@@ -1448,6 +1563,8 @@ class OpsSimulation(OrbitalSimulation):
         sim.tech_mults = {}
         sim.routes = {}
         sim.standing_orders = {"prefer_hops": True, "destinations": [], "min_depot_fuel": 4000.0}
+        sim.swarms = {}
+        sim.swarm_cooldown = {}
         sim.last_active = {}
         sim.trade_targets = tuple(TRADE_TARGETS)
         sim.bodies = dict(sim.bodies)
@@ -1461,6 +1578,8 @@ class OpsSimulation(OrbitalSimulation):
             sim.routes[name] = [RouteLeg(**leg) if isinstance(leg, dict) else leg for leg in legs]
         sim.standing_orders = dict(data.get("standing_orders", {
             "prefer_hops": True, "destinations": [], "min_depot_fuel": 4000.0}))
+        sim.swarms = {k: dict(v) for k, v in data.get("swarms", {}).items()}
+        sim.swarm_cooldown = {k: float(v) for k, v in data.get("swarm_cooldown", {}).items()}
         sim.refineries = {r["body_key"]: Refinery.from_json(r) for r in data.get("refineries", [])}
         sim.botanists = int(data.get("botanists", 0))
         sim._perturb_timer = float(data.get("perturb_timer",

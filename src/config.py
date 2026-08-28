@@ -387,6 +387,9 @@ FIRSTS = (
     ("first_multihop", "First multi-stop delivery (refuel hop)", 800.0, 10.0),
     ("helium3_1", "First helium-3 harvest", 1200.0, 15.0),
     ("obsidian_1", "First cinder obsidian shipment", 900.0, 10.0),
+    ("first_swarm", "First hundred-drone window harvest", 1000.0, 12.0),
+    ("first_surface", "First surface survey of a field", 300.0, 4.0),
+    ("first_system_map", "System chart opened -- the whole farm at once", 200.0, 2.0),
 )
 
 
@@ -539,24 +542,32 @@ QUALITY_PRESETS = {
         "corona": False, "flares": False, "reticle": True, "orbit_alpha": 0.25,
         "belt_density": 0.0, "ship_lod": "simple", "msaa": 0, "vsync": True,
         "bloom": False, "shadows": False, "particles": False,
+        "drones_fx": False, "surface_detail": False, "map_grid": True,
+        "star_twinkle": False, "atmosphere": False,
     },
     "medium": {
         "belt": True, "trails": True, "sky": True, "labels": True,
         "corona": True, "flares": True, "reticle": True, "orbit_alpha": 0.42,
         "belt_density": 0.55, "ship_lod": "full", "msaa": 2, "vsync": True,
         "bloom": False, "shadows": False, "particles": False,
+        "drones_fx": True, "surface_detail": True, "map_grid": True,
+        "star_twinkle": False, "atmosphere": True,
     },
     "high": {
         "belt": True, "trails": True, "sky": True, "labels": True,
         "corona": True, "flares": True, "reticle": True, "orbit_alpha": 0.55,
         "belt_density": 0.85, "ship_lod": "full", "msaa": 4, "vsync": True,
         "bloom": True, "shadows": False, "particles": True,
+        "drones_fx": True, "surface_detail": True, "map_grid": True,
+        "star_twinkle": True, "atmosphere": True,
     },
     "ultra": {
         "belt": True, "trails": True, "sky": True, "labels": True,
         "corona": True, "flares": True, "reticle": True, "orbit_alpha": 0.70,
         "belt_density": 1.0, "ship_lod": "full", "msaa": 8, "vsync": True,
         "bloom": True, "shadows": True, "particles": True,
+        "drones_fx": True, "surface_detail": True, "map_grid": True,
+        "star_twinkle": True, "atmosphere": True,
     },
 }
 QUALITY_ORDER = ("low", "medium", "high", "ultra")
@@ -571,6 +582,28 @@ UI_SCALE_ORDER = (0.85, 1.0, 1.15, 1.30)
 DEFAULT_UI_SCALE = 1.0
 MASTER_VOLUME_STEPS = (0.0, 0.25, 0.5, 0.75, 1.0)
 DEFAULT_MASTER_VOLUME = 0.75
+
+# --- camera / view modes -------------------------------------------------------
+# network = classic heliocentric 3-D; map = top-down system chart; surface = land
+# on the selected body and watch the harvest drones work the veins.
+VIEW_MODES = ("network", "map", "surface")
+DEFAULT_VIEW_MODE = "network"
+
+# --- harvest drone swarms ------------------------------------------------------
+# When a launch window is open, the director can flood a field with drones.
+# Drones are presentation + economy: they pull ore into colony storage over a
+# short window burst, gated by drone-bay levels across the network. Graphics
+# scale with quality presets (drones_fx).
+SWARM_BASE_DRONES = 12                 # visual count at 1 bay-level
+SWARM_DRONES_PER_BAY = 18              # extra visuals per total drone-bay level
+SWARM_MAX_DRONES = 100                 # hard cap (the "crazy 100" moment)
+SWARM_DURATION_DAYS = 14.0             # how long a swarm harvests after launch
+SWARM_YIELD_T_PER_DRONE_DAY = 0.85     # tonnes into colony storage per drone-day
+SWARM_CREDIT_COST_PER_DRONE = 8.0      # ops cost billed at launch
+SWARM_ENERGY_COST_PER_DRONE = 0.04
+SWARM_MIN_WINDOW_DAYS = 0.0            # may launch only while window is open (GO)
+SWARM_COOLDOWN_DAYS = 40.0             # per-body cooldown after a swarm
+
 
 # Default settings blob persisted in saves/_settings.json
 DEFAULT_SETTINGS = {
@@ -588,10 +621,16 @@ DEFAULT_SETTINGS = {
     "show_dossier": True,
     "confirm_dispatch": True,
     "prefer_hops": True,
+    "view_mode": DEFAULT_VIEW_MODE,
+    "show_map_grid": True,
+    "show_surface_hud": True,
+    "drone_fx": True,
+    "ui_contrast": True,
 }
 
 # Named save slots exposed in the pause menu (plus "quick" for F5).
 SAVE_SLOTS = ("quick", "slot1", "slot2", "slot3")
+
 
 # --- window / UI ------------------------------------------------------------
 # Product name: Space Harvest — orbital farming on real launch windows.
@@ -602,5 +641,5 @@ WINDOW_SIZE = (1440, 900)
 # Steamworks app id placeholder (replace before store launch). Zero means
 # "no Steam"; steam_appid.txt is written beside the executable by the packager.
 STEAM_APP_ID = 0
-GAME_VERSION = "1.0.0"
+GAME_VERSION = "1.1.0"
 EXECUTABLE_NAME = "SpaceHarvest"
