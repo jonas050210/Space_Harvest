@@ -1,7 +1,7 @@
 "AppBuild"
 {
     "AppID" "0"          // replace with the real Steam AppID before upload
-    "Desc" "Space Harvest 1.0.0"
+    "Desc" "Space Harvest 1.4.0"
     "ContentRoot" "..\\dist\\SpaceHarvest\\"
     "BuildOutput" "..\\dist\\steam_output\\"
 

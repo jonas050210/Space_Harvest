@@ -1646,7 +1646,7 @@ def test_ironman_blocks_mid_run_load(monkeypatch, tmp_path):
     game.credits = 1.0
     game.try_load("quick")
     # Still at the diverged value because load was blocked.
-    assert game.credits == 1.0 or game.credits == before
+    assert game.credits == 1.0
 
 
 # --------------------------------------------------------------------------
@@ -1974,3 +1974,114 @@ def test_refinery_accepts_cobalt_magnetite_recipe():
     outs = [(r["output"], r["input"]) for r in REFINERY_RECIPES]
     assert any("cobalt" in inp for _, inp in outs)
     assert any("xenonite" in inp for _, inp in outs)
+
+
+# --------------------------------------------------------------------------
+# v1.4 playable director: controls, no live autopilot, campaign HUD, saves
+# --------------------------------------------------------------------------
+
+
+def test_control_table_binds_the_missing_verbs():
+    from src.app.controls import COMMAND_BAR, PLAY_BINDINGS, action_for_key, help_line
+
+    actions = {b.action for b in PLAY_BINDINGS}
+    keys = {b.key for b in PLAY_BINDINGS}
+    for needed in ("swarm", "cycle_view", "view_map", "view_surface", "view_network",
+                   "toggle_hops", "cycle_ship", "dispatch", "sell", "depot"):
+        assert needed in actions
+    for key in ("d", ",", "/", ".", ";", "space", "backspace", "enter", "tab"):
+        assert key in keys
+        assert action_for_key(key)
+    bar = {action for _label, action in COMMAND_BAR}
+    assert {"dispatch", "cycle_ship", "sell", "swarm", "depot", "cycle_view"} <= bar
+    assert "ENTER" in help_line() and "SPACE" in help_line()
+
+
+def test_handle_action_cycles_ship_and_dispatches_selected():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.settings["confirm_dispatch"] = False
+    assert game.selected_idle_ship().name in ("Kestrel", "Petrel")
+    game.handle_action("cycle_ship")
+    first = game.selected_ship_name
+    game.handle_action("cycle_ship")
+    assert game.selected_ship_name != first
+    game.handle_action("dispatch")
+    assert game.sim.missions
+
+
+def test_windowed_game_does_not_autodispatch():
+    from src.main import Game
+
+    game = Game(headless=False)
+    game.screen = "play"
+    game.paused = False
+    for _ in range(40):
+        game.update(3.0)
+    assert game.sim.missions == {}
+
+
+def test_hud_survives_campaign_only_targets(ursina_app):
+    from src.main import Game
+    from src.ui.orbital_hud import OrbitalHUD
+
+    game = Game(headless=True)
+    hud = OrbitalHUD(game.sim.trade_targets)
+    assert "comet_vigil" in hud.targets
+    hud.set_target("comet_vigil")
+    hud.update(game.sim, game.colony.summary(), "", extra=game._ops_hud_data())
+    assert "Vigil" in hud.plan_header.text or "COMET" in hud.plan_header.text.upper() or "VIGIL" in hud.plan_header.text.upper()
+
+
+def test_save_root_is_repo_saves_not_src(tmp_path, monkeypatch):
+    from src.game import savegame as colony_savegame
+    from src.main import Game
+
+    monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
+    game = Game(headless=True)
+    game.save_game("ceo")
+    assert (tmp_path / "ceo.json").is_file()
+    # Meta files are not campaign slots.
+    (tmp_path / "achievements_progress.json").write_text("{}", encoding="utf-8")
+    names = colony_savegame.list_saves()
+    assert "ceo.json" in names
+    assert "achievements_progress.json" not in names
+
+
+def test_alert_wavs_cover_window_build_click(tmp_path):
+    import wave
+
+    from src.utils.procedural import make_alert_wav, make_build_wav, make_click_wav, make_window_chime_wav
+
+    for maker, name in (
+        (make_click_wav, "click.wav"),
+        (make_build_wav, "build.wav"),
+        (make_window_chime_wav, "window.wav"),
+    ):
+        path = maker(str(tmp_path / name))
+        with wave.open(path) as handle:
+            assert handle.getnframes() > 200
+    path = make_alert_wav("flare", str(tmp_path / "flare.wav"))
+    with wave.open(path) as handle:
+        assert handle.getnchannels() == 1
+
+
+def test_achievements_vdf_is_a_closed_table():
+    from pathlib import Path
+
+    from src.config import ACHIEVEMENTS
+
+    text = Path("steam/achievements.vdf").read_text(encoding="utf-8")
+    assert text.strip().endswith("}")
+    # Nothing hanging after the closing brace.
+    after = text[text.rfind("}"):].strip()
+    assert after == "}"
+    for key in ACHIEVEMENTS:
+        assert f'"{key}"' in text
+
+
+def test_game_version_is_140():
+    from src.config import GAME_VERSION
+
+    assert GAME_VERSION.startswith("1.4")

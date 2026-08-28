@@ -1,7 +1,0 @@
-.cache
-__pycache__
-*.pyc
-audio/*.ogg
-saves/
-archiv/
-

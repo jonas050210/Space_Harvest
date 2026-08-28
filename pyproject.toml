@@ -1,0 +1,11 @@
+[project]
+name = "space-harvest"
+version = "1.4.0"
+description = "Orbital farming on real launch windows."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

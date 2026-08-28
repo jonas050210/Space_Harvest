@@ -4,7 +4,7 @@ Only the keys the live game reads remain. The full upstream builder catalogue
 lived here once; it was trimmed when Space Harvest became the product.
 """
 
-VERSION = "1.0.0"
+VERSION = "1.4.0"
 GAME_NAME = "Space Harvest"
 
 DIFFICULTY = {"easy": 0.7, "medium": 1.0, "hard": 1.4}

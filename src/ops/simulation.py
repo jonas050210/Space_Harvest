@@ -133,7 +133,6 @@ from src.market import rng_from_json, rng_to_json
 from src.maths.elements import OrbitalElements
 from src.maths import windows as window_solver
 from src.mining import YieldLedger, plan_extraction, register_body_ores, register_extra_spawns
-from src.simulation.bodies import BODIES
 from src.simulation.bodies import BODIES, Body, TRADE_TARGETS
 from src.simulation.orbital_sim import Delivery, Leg, LogEntry, Mission, OrbitalSimulation, Ship
 
