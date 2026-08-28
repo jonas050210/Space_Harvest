@@ -1,7 +1,7 @@
 # Space Harvest — Project
 
 Orbital farming on real launch windows, with patched-conic astrodynamics
-underneath. Product name **Space Harvest** v1.5.0. Executable: `SpaceHarvest`.
+underneath. Product name **Space Harvest** v1.6.0. Executable: `SpaceHarvest`.
 
 Repository: https://github.com/jonas050210/Space_Harvest
 
@@ -49,7 +49,8 @@ Balance knobs live in `src/config/__init__.py`.
 
 ## Known limits
 
-* Multi-revolution Lambert exists but almost never wins on this near-coplanar network.
+* Multi-revolution Lambert exists and Vagrant (i = 48 deg) is the first
+  body inclined enough for its branches to compete on price.
 * Economy is deterministic per version (RNG state is saved).
 * Quality flags `bloom` / `shadows` / `particles` / `star_twinkle` are reserved; Ultra is denser belts, trails, flares, MSAA.
 * Steamworks is a soft-bridge until `STEAM_APP_ID` is set.
@@ -57,4 +58,5 @@ Balance knobs live in `src/config/__init__.py`.
 ## Parked
 
 Gamepad; localisation; contract negotiation panels; ship LOD imposters.
-Do not add more ores or bodies until the current loop is played through.
+Campaign bodies are data in `config.CAMPAIGN_BODIES` (installed per-campaign
+by the ops layer); add new ores only with market + mining + HUD in one pass.

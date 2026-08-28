@@ -145,11 +145,12 @@ class OrbitalScene:
         texture = _tex(f"{key}.png")
         if texture is not None:
             entity.texture = texture
-        if key == "gas_giant_orbit":
+        if key in ("gas_giant_orbit", "boreas"):
             # Ring plane: two flat circles, faintly tinted.
+            ring_tint = (0.88, 0.76, 0.96) if key == "gas_giant_orbit" else (0.72, 0.80, 1.0)
             for ring_scale, ring_opacity in ((3.4, 0.30), (4.3, 0.18)):
                 Entity(parent=entity, model="circle", scale=ring_scale,
-                       color=color.rgba(0.88, 0.76, 0.96, ring_opacity),
+                       color=color.rgba(ring_tint[0], ring_tint[1], ring_tint[2], ring_opacity),
                        rotation_x=78, unlit=True, double_sided=True)
         self.body_entities[key] = entity
         # Soft atmosphere shell (readable on high/ultra).

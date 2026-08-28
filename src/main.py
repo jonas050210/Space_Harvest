@@ -109,7 +109,7 @@ from src.colony import logistics as colony_logistics  # noqa: E402
 from src.colony import savegame as colony_savegame  # noqa: E402
 from src.colony import state as colony_state  # noqa: E402
 
-BUY_MENU = ("scout", "freighter", "refinery", "hauler", "tanker", "clipper")
+BUY_MENU = ("scout", "freighter", "refinery", "hauler", "tanker", "clipper", "courser", "argosy")
 CREDITS_HISTORY_POINTS = 240
 CREDITS_HISTORY_SAMPLE_DAYS = 2.0
 
@@ -903,7 +903,7 @@ class Game:
     def load_game(self, slot: str = "quick") -> None:
         data = colony_savegame.load_slot(slot)
         if not data:
-            self.say("No savegame found in saves/.")
+            self.say("No readable savegame found in saves/.")
             return
         self.credits = float(data.get("credits", START_CREDITS))
         self.auto_repair = bool(data.get("auto_repair", True))
@@ -1033,6 +1033,11 @@ class Game:
             "first_capture_l5": captures.get("l5_garden", 0) >= 1,
             "first_capture_hearthwreck": captures.get("hearthwreck", 0) >= 1,
             "first_capture_night": captures.get("night_well", 0) >= 1,
+            "first_capture_sungrazer": captures.get("sungrazer", 0) >= 1,
+            "first_capture_vagrant": captures.get("vagrant", 0) >= 1,
+            "first_capture_boreas": captures.get("boreas", 0) >= 1,
+            "first_courser": any(self.sim.ship_class.get(s.name) == "courser" for s in self.sim.ships),
+            "first_argosy": any(self.sim.ship_class.get(s.name) == "argosy" for s in self.sim.ships),
             "first_clipper": any(self.sim.ship_class.get(s.name) == "clipper" for s in self.sim.ships),
             "first_greenhouse": any("greenhouse" in mods for mods in self.sim.station_modules.values()),
             "first_foundry": any("foundry" in mods for mods in self.sim.station_modules.values()),
@@ -1965,6 +1970,7 @@ class Game:
         buys = {
             "buy_scout": "scout", "buy_freighter": "freighter", "buy_refinery": "refinery",
             "buy_hauler": "hauler", "buy_tanker": "tanker", "buy_clipper": "clipper",
+            "buy_courser": "courser", "buy_argosy": "argosy",
         }
         if action in buys:
             self.buy_ship_class(buys[action])

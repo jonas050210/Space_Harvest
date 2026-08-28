@@ -91,6 +91,7 @@ from src.config import (
     DEBRIS_WEAR_PCT_PER_DAY,
     FLEET_NAME_POOL,
     FLARE_DURATION_DAYS_RANGE,
+    FLARE_EXPOSURE_BY_BODY,
     FLARE_MORALE_DRAIN_PER_DAY,
     FLARE_QUIET_DAYS_RANGE,
     FLARE_WARNING_DAYS,
@@ -1300,12 +1301,9 @@ class OpsSimulation(OrbitalSimulation):
 
         # Weather wear applies only to ships actually in flight; docked ships
         # sit inside the colony's shielding.
-        wear = 0.0
-        if self.flare_state == "flare":
-            wear += FLARE_WEAR_PCT_PER_DAY
-        if self.debris_active:
-            wear += DEBRIS_WEAR_PCT_PER_DAY
-        if wear <= 0.0:
+        flare_wear = FLARE_WEAR_PCT_PER_DAY if self.flare_state == "flare" else 0.0
+        debris_wear = DEBRIS_WEAR_PCT_PER_DAY if self.debris_active else 0.0
+        if flare_wear <= 0.0 and debris_wear <= 0.0:
             return
         for ship in self.ships:
             mission = self.missions.get(ship.name)
@@ -1314,11 +1312,18 @@ class OpsSimulation(OrbitalSimulation):
             current = self.hull.get(ship.name, HULL_MAX_PCT)
             floor = float(getattr(self, "hull_floor", HULL_MIN_PCT))
             resist = 0.0
+            exposure = 1.0
             if mission is not None:
                 resist = max(
                     self.body_weather_resist(mission.target),
                     self.body_weather_resist(getattr(ship, "origin", "") or ""),
                 )
+                # Solar exposure: bodies that skim the sun ride flares harder.
+                exposure = max(
+                    FLARE_EXPOSURE_BY_BODY.get(mission.target, 1.0),
+                    FLARE_EXPOSURE_BY_BODY.get(getattr(ship, "origin", "") or "", 1.0),
+                )
+            wear = flare_wear * exposure + debris_wear
             self.hull[ship.name] = max(floor, current - wear * (1.0 - resist) * dt_days)
 
     # -- gravitational perturbations ------------------------------------------

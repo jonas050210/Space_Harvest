@@ -2080,7 +2080,7 @@ def test_achievements_vdf_is_a_closed_table():
 def test_game_version_is_current():
     from src.config import GAME_VERSION
 
-    assert GAME_VERSION.startswith("1.5")
+    assert GAME_VERSION.startswith("1.6")
 
 
 # --------------------------------------------------------------------------
@@ -2201,3 +2201,153 @@ def test_new_ores_price_and_store_far_charter():
     before = game.credits
     game.sell_all()
     assert game.credits > before
+
+
+# --------------------------------------------------------------------------
+# The Wide Sky (v1.6): Sungrazer Field, Vagrant, Boreas, courser, argosy
+# --------------------------------------------------------------------------
+
+
+def test_far_charter_bodies_install_and_have_fingerprints():
+    from src.mining import body_fingerprint
+    from src.ops.simulation import OpsSimulation
+
+    sim = OpsSimulation()
+    for key in ("sungrazer", "vagrant", "boreas"):
+        assert key in sim.bodies
+        assert key in sim.trade_targets
+        fp = body_fingerprint(key)
+        assert fp and abs(sum(fp.values()) - 1.0) < 1e-6
+        # Windows must actually exist: the solver prices every new field.
+        window = sim.launch_window("colony", key)
+        assert window is not None
+        assert window.total_delta_v > 0.0
+
+
+def test_vagrant_is_the_infrastructure_gate():
+    """48 degrees off the plane: no hull round-trips it; a barn opens it."""
+    from src.ops.simulation import OpsSimulation
+
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    courser = sim.buy_ship("courser")[0]
+    ok, message = sim.dispatch(courser, "vagrant")
+    assert ok is False and "36000" in message
+    assert sim.build_depot("vagrant")[0] is True
+    ok, message = sim.dispatch(courser, "vagrant")
+    assert ok is True
+
+
+def test_far_charter_ships_have_honest_specs_and_persist():
+    from src.config import SHIP_CLASSES
+    from src.ops.simulation import OpsSimulation
+
+    # The courser is the longest tank in the fleet; the argosy the widest hold.
+    assert SHIP_CLASSES["courser"]["delta_v"] > SHIP_CLASSES["clipper"]["delta_v"]
+    assert SHIP_CLASSES["argosy"]["capacity"] > SHIP_CLASSES["hauler"]["capacity"]
+    sim = OpsSimulation(ship_names=("Kestrel",))
+    courser = sim.buy_ship("courser")[0]
+    argosy = sim.buy_ship("argosy")[0]
+    assert courser.delta_v == SHIP_CLASSES["courser"]["delta_v"]
+    assert argosy.capacity == SHIP_CLASSES["argosy"]["capacity"]
+    restored = OpsSimulation.from_json(json.loads(json.dumps(sim.to_json())))
+    assert restored.ship_class[courser.name] == "courser"
+    assert restored.ship_class[argosy.name] == "argosy"
+
+
+def test_buy_courser_and_argosy_through_the_game():
+    from src.config import SHIP_CLASSES
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.credits = 100_000.0
+    game.buy_ship_class("courser")
+    assert "courser" in game.sim.ship_class.values()
+    assert game.credits == pytest.approx(100_000.0 - SHIP_CLASSES["courser"]["price"])
+    game.handle_action("buy_argosy")
+    assert "argosy" in game.sim.ship_class.values()
+    assert game.credits < 100_000.0 - SHIP_CLASSES["courser"]["price"]
+
+
+def test_new_ship_keys_are_bound():
+    from src.app.controls import action_for_key
+
+    assert action_for_key("q") == "buy_courser"
+    assert action_for_key("a") == "buy_argosy"
+
+
+def test_flare_exposure_bites_harder_at_the_sungrazer():
+    from src.config import FLARE_EXPOSURE_BY_BODY, FLARE_WEAR_PCT_PER_DAY
+    from src.ops.simulation import OpsSimulation
+
+    assert FLARE_EXPOSURE_BY_BODY.get("sungrazer", 1.0) > 1.0
+    sim = OpsSimulation(ship_names=("Kestrel", "Petrel"))
+    sim.flare_state = "flare"
+    sim._flare_duration = 1e9  # hold the flare open for the test
+    sim.debris_active = False
+    sim._debris_timer = 1e9    # keep the debris season out of the comparison
+    for ship, target in ((sim.ships[0], "inner_belt"), (sim.ships[1], "sungrazer")):
+        sim.missions[ship.name] = type(
+            "M", (), {"leg": Leg.OUTBOUND, "target": target, "return_window": None}
+        )()
+    sim.tick_weather(10.0)
+    wear_belt = 100.0 - sim.hull["Kestrel"]
+    wear_sun = 100.0 - sim.hull["Petrel"]
+    assert wear_belt == pytest.approx(FLARE_WEAR_PCT_PER_DAY * 10.0)
+    assert wear_sun == pytest.approx(FLARE_WEAR_PCT_PER_DAY * 10.0 * FLARE_EXPOSURE_BY_BODY["sungrazer"])
+
+
+def test_far_charter_firsts_fire():
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.update(1.0)
+    game.sim.stats["captures_by_body"]["sungrazer"] = 1
+    game.sim.stats["captures_by_body"]["vagrant"] = 1
+    game.sim.stats["captures_by_body"]["boreas"] = 1
+    game.sim.buy_ship("courser")
+    game.sim.buy_ship("argosy")
+    for _ in range(40):
+        game.update(3.0)
+    assert game.firsts.get("first_capture_sungrazer") is True
+    assert game.firsts.get("first_capture_vagrant") is True
+    assert game.firsts.get("first_capture_boreas") is True
+    assert game.firsts.get("first_courser") is True
+    assert game.firsts.get("first_argosy") is True
+
+
+def test_every_first_has_a_condition():
+    from src.config import FIRSTS
+    from src.main import Game
+
+    game = Game(headless=True)
+    game.update(1.0)
+    conditions = game._first_conditions()
+    missing = [key for key, *_ in FIRSTS if key not in conditions]
+    assert not missing
+
+
+def test_corrupt_save_returns_none_instead_of_raising(monkeypatch, tmp_path):
+    from src.colony import savegame as colony_savegame
+
+    monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
+    (tmp_path / "broken.json").write_text('{"timestamp": 1, "state": {"credits": ')
+    assert colony_savegame.load_slot("broken") is None
+    assert colony_savegame.load_slot("missing") is None
+
+
+def test_save_slot_is_atomic_and_keeps_a_backup(monkeypatch, tmp_path):
+    from src.colony import savegame as colony_savegame
+
+    monkeypatch.setattr(colony_savegame, "SAVE_DIR", str(tmp_path))
+    colony_savegame.save_slot("quick", {"credits": 1.0})
+    colony_savegame.save_slot("quick", {"credits": 2.0})
+    assert (tmp_path / "quick.json.bak").is_file()
+    assert colony_savegame.load_slot("quick") == {"credits": 2.0}
+    # The .bak holds the previous good save...
+    with open(tmp_path / "quick.json.bak", encoding="utf-8") as handle:
+        assert json.load(handle)["state"] == {"credits": 1.0}
+    # ...and a truncated primary falls back to it instead of dying.
+    (tmp_path / "quick.json").write_text("{oops")
+    assert colony_savegame.load_slot("quick") == {"credits": 1.0}
+    # No temp files left behind.
+    assert not (tmp_path / "quick.json.tmp").exists()

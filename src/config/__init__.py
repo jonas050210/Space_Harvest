@@ -89,6 +89,14 @@ SHIP_CLASSES = {
     # Window specialist: tiny hold, honest long tank — the far-field courier.
     "clipper":   {"name": "Clipper",   "capacity": 90.0, "delta_v": 32.0e3, "price": 7800.0,
                   "refuel_rate": 180.0, "wear_factor": 0.80, "mine_bonus": 0.85},
+    # Far-Charter workhorse (v1.6): the long tank that makes Night Well and
+    # Boreas routine. Pays for the reach with a slow refill and a lean hold.
+    "courser":   {"name": "Courser",   "capacity": 180.0, "delta_v": 36.0e3, "price": 11500.0,
+                  "refuel_rate": 150.0, "wear_factor": 0.95, "mine_bonus": 0.90},
+    # Bulk argosy (v1.6): a warehouse with an engine. Moves whole seasons of
+    # seedstock or silicates in one hold; crawls, drinks, and wears like one.
+    "argosy":    {"name": "Argosy",    "capacity": 720.0, "delta_v": 19.0e3, "price": 12500.0,
+                  "refuel_rate": 210.0, "wear_factor": 1.30, "mine_bonus": 0.85},
 }
 DEFAULT_SHIP_CLASS = "freighter"
 FLEET_NAME_POOL = ("Kestrel", "Petrel", "Harrier", "Osprey", "Falcon", "Condor",
@@ -136,6 +144,9 @@ MINING_EXTRA_SPAWNS = {
     "l5_garden": ("ice", "silicates", "seedstock"),
     "hearthwreck": ("components", "electronics", "memory_glass", "thorite"),
     "night_well": ("helium3", "xenonite", "thorite"),
+    "sungrazer": ("magnetite", "thorite", "helium3"),
+    "vagrant": ("platinum", "xenonite", "cobalt"),
+    "boreas": ("silver", "gold", "platinum"),
 }
 MINING_DRILL_YIELD_BONUS = 1.6   # core drilling multiplier per run
 MINING_DRILL_WEAR_PCT = 6.0      # hull cost of drilling on every drilled run
@@ -244,6 +255,12 @@ FLARE_WARNING_DAYS = 6.0                 # HUD-visible warning before it hits
 FLARE_DURATION_DAYS_RANGE = (2.0, 5.0)
 FLARE_WEAR_PCT_PER_DAY = 1.2             # extra hull wear for ships in flight
 FLARE_MORALE_DRAIN_PER_DAY = 0.8         # crews hate riding out a storm
+# Solar exposure by body (ops layer): ships flying to/from a listed body take
+# multiplied flare wear — the price of skimming the sun. 1.0 is the network
+# default; Sungrazer Field is the furnace that makes helium-3 a hazard pay.
+FLARE_EXPOSURE_BY_BODY = {
+    "sungrazer": 2.5,
+}
 DEBRIS_SEASON_PERIOD_DAYS = 300.0        # roughly periodic debris seasons
 DEBRIS_SEASON_DURATION_DAYS = 40.0
 DEBRIS_WEAR_PCT_PER_DAY = 0.35           # micrometeorite sandblasting in flight
@@ -438,7 +455,12 @@ FIRSTS = (
     ("first_capture_l5", "First harvest: L5 Garden — the quiet field", 700.0, 8.0),
     ("first_capture_hearthwreck", "HEARTHWRECK BOARDED — memory glass sings", 2200.0, 28.0),
     ("first_capture_night", "First harvest: Night Well", 1600.0, 18.0),
+    ("first_capture_sungrazer", "First harvest: Sungrazer Field — hazard pay", 1200.0, 14.0),
+    ("first_capture_vagrant", "First harvest: Vagrant — out of the plane", 2000.0, 24.0),
+    ("first_capture_boreas", "First harvest: Boreas — the rim is farmed", 2400.0, 30.0),
     ("first_clipper", "Clipper commissioned — the far windows open", 800.0, 8.0),
+    ("first_courser", "Courser commissioned — the rim is in reach", 1000.0, 12.0),
+    ("first_argosy", "Argosy launched — a season in one hold", 900.0, 10.0),
     ("first_greenhouse", "Greenhouse dome fogging the glass", 550.0, 8.0),
     ("first_foundry", "Field foundry online", 600.0, 8.0),
     ("seedstock_1", "First seedstock shipment — Earth wants a garden", 900.0, 12.0),
@@ -530,6 +552,37 @@ CAMPAIGN_BODIES = {
         "resources": ("helium3", "xenonite", "thorite"),
         "description": "A dark well past Outer Reach. Clippers and barns, or stay home.",
         "render_scale": 0.8,
+    },
+    # -- The Far Charter (v1.6): the empty inner system, the plane, and the rim --
+    "sungrazer": {
+        "name": "Sungrazer Field",
+        "elements": {"a": 0.95, "e": 0.28, "i_deg": 4.0, "raan_deg": 25.0,
+                     "argp_deg": 310.0, "nu_deg": 140.0},
+        "radius_km": 10.0, "soi_km": 24000.0,
+        "palette": (0.96, 0.66, 0.22),
+        "resources": ("magnetite", "thorite", "helium3"),
+        "description": "Sun-skimming slag. Cheap windows, hellish flares, helium-3 baked in.",
+        "render_scale": 0.5,
+    },
+    "vagrant": {
+        "name": "Vagrant",
+        "elements": {"a": 3.05, "e": 0.12, "i_deg": 48.0, "raan_deg": 95.0,
+                     "argp_deg": 210.0, "nu_deg": 240.0},
+        "radius_km": 15.0, "soi_km": 34000.0,
+        "palette": (0.40, 0.78, 0.72),
+        "resources": ("platinum", "xenonite", "cobalt"),
+        "description": "A planetesimal knocked out of the plane. Brutal plane-change burns.",
+        "render_scale": 0.7,
+    },
+    "boreas": {
+        "name": "Boreas",
+        "elements": {"a": 8.40, "e": 0.06, "i_deg": 2.6, "raan_deg": 150.0,
+                     "argp_deg": 90.0, "nu_deg": 200.0},
+        "radius_km": 52000.0, "soi_km": 4.0e6,
+        "palette": (0.55, 0.62, 0.95),
+        "resources": ("silver", "gold", "platinum"),
+        "description": "A cold giant on the far rim. Premium freight beyond the last barn.",
+        "render_scale": 2.2,
     },
 }
 
@@ -830,5 +883,5 @@ WINDOW_SIZE = (1440, 900)
 # Steamworks app id placeholder (replace before store launch). Zero means
 # "no Steam"; steam_appid.txt is written beside the executable by the packager.
 STEAM_APP_ID = 0
-GAME_VERSION = "1.5.0"
+GAME_VERSION = "1.6.0"
 EXECUTABLE_NAME = "SpaceHarvest"

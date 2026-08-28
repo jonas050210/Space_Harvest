@@ -7,6 +7,8 @@ toolkit.
 
 from __future__ import annotations
 
+import math
+
 from ursina import Button, Entity, Text, camera, color
 
 from src.app.controls import COMMAND_BAR, HOWTO_PAGES as CONTROL_HOWTO_PAGES, help_line
@@ -360,7 +362,7 @@ class OrbitalHUD:
             if is_open:
                 line.text = f"GO  {name}"
                 line.color = color.rgb(0.45, 1.0, 0.55)
-            elif days == days:  # finite
+            elif math.isfinite(days):
                 line.text = f"    {name:<20}{days:>6,.0f} d"
                 line.color = color.white
             else:

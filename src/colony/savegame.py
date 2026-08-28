@@ -43,6 +43,12 @@ def list_saves() -> list[str]:
 
 
 def save_slot(name: str, state_dict) -> str:
+    """Write a slot atomically: dump to a temp file, then replace in place.
+
+    A crash mid-write can no longer truncate the player's only copy (which
+    matters on Ironman), and the previous version is kept as ``<name>.bak``
+    so even a bad overwrite is recoverable.
+    """
     ensure_dir()
     path = os.path.join(SAVE_DIR, f"{name}.json")
     data = {
@@ -50,15 +56,34 @@ def save_slot(name: str, state_dict) -> str:
         "name": name,
         "state": state_dict,
     }
-    with open(path, "w", encoding="utf-8") as handle:
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2, ensure_ascii=False)
+        handle.flush()
+        os.fsync(handle.fileno())
+    if os.path.isfile(path):
+        try:
+            os.replace(path, f"{path}.bak")
+        except OSError:
+            pass
+    os.replace(tmp, path)
     return path
 
 
 def load_slot(name: str):
+    """Load a slot; a corrupt or unreadable save returns None, never raises.
+
+    The ``.bak`` left by the last successful save is tried as a fallback, so
+    a truncated primary file does not eat the campaign.
+    """
     path = os.path.join(SAVE_DIR, f"{name}.json")
-    if not os.path.isfile(path):
-        return None
-    with open(path, "r", encoding="utf-8") as handle:
-        data = json.load(handle)
-    return data.get("state", {})
+    for candidate in (path, f"{path}.bak"):
+        if not os.path.isfile(candidate):
+            continue
+        try:
+            with open(candidate, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            return data.get("state", {})
+        except (OSError, ValueError):
+            continue
+    return None

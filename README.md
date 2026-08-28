@@ -6,7 +6,7 @@ Asteroids are your fields. Geometry is the season. Wait for the window, dispatch
 a freighter (or a hundred-drone swarm), hop through refuel barns, and keep the
 colony breathing.
 
-Version **1.5.0**. Python 3.11–3.13, Ursina 8.x.
+Version **1.6.0**. Python 3.11–3.13, Ursina 8.x.
 
 ## One command: `setup.py`
 
@@ -35,6 +35,10 @@ python -m src.main --headless --sim-days 900
 
 The belt does **not** fly itself. Idle ships wait for you.
 
+**The Wide Sky (v1.6):** skim the sun at **Sungrazer Field** (flare-hot
+helium-3), crack the plane-change to **Vagrant** at 48° (barns mandatory),
+and push the depot chain out to **Boreas**, the ringed giant on the rim.
+
 | Input | Action |
 | --- | --- |
 | Click a rock / TAB | Target a field |
@@ -45,6 +49,7 @@ The belt does **not** fly itself. Idle ships wait for you.
 | R or **BARN** | Build / upgrade a refuel depot |
 | `,` `/` `.` Backspace | Cycle views / map / surface / network |
 | [ ] | Warp |
+| Q / A | Commission a courser / an argosy |
 | F5 / ESC | Save / pause |
 
 How-to-play is on the title menu. Full key list lives in `src/app/controls.py`
