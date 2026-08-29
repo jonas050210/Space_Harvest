@@ -112,22 +112,16 @@ def buy_tech(game) -> None:
 
 
 def buy_drone_bay(game) -> None:
-    from src.config import PARTS_CATALOG
-    info = PARTS_CATALOG.get("drones")
-    if info is None:
-        game.say("Drone bay not in catalog.")
-        return
-    if game.hud is None:
-        game.say("No target selected for drone bay.")
-        return
-    target = game.hud.selected_target()
-    owned = 0
+    """Install a drone bay at the selected target's depot."""
+    target = game.hud.selected_target() if game.hud is not None else "deep_belt"
     depot = game.sim.depots.get(target)
-    if depot is not None:
-        owned = depot.upgrades.get("drones", 0)
-    price = game.market.part_price("drones", owned) * (1.0 - game._parts_discount)
+    if depot is None:
+        game.say("Build a depot there first (R).")
+        return
+    owned = depot.upgrades.get("drones", 0)
+    price = game.market.part_price("drones", owned) * (1.0 - getattr(game, "_parts_discount", 0.0))
     if game.credits < price:
-        game.say(f"Drone bay costs {price:,.0f} cr; treasury {game.credits:,.0f} cr.")
+        game.say(f"A drone bay costs {price:,.0f} cr; treasury {game.credits:,.0f} cr.")
         return
     ok, msg = game.sim.install_depot_part(target, "drones")
     if not ok:
@@ -139,14 +133,16 @@ def buy_drone_bay(game) -> None:
 
 
 def build_depot_selected(game) -> None:
-    if game.hud is None:
-        game.say("No target selected for depot.")
-        return
-    target = game.hud.selected_target()
+    """Build (or upgrade) a refuel depot at the selected body.
+
+    Headless mode has no selection, so it defaults to the deep belt --
+    the depot site that unlocks the far network.
+    """
+    target = game.hud.selected_target() if game.hud is not None else "deep_belt"
     cost = game.sim.depot_upgrade_cost(target)
     if game.credits < cost:
         body_name = game.sim.bodies.get(target).name if target in game.sim.bodies else target
-        game.say(f"Depot at {body_name} costs {cost:,.0f} cr; treasury {game.credits:,.0f} cr.")
+        game.say(f"A depot at {body_name} costs {cost:,.0f} cr; the treasury holds {game.credits:,.0f} cr.")
         return
     ok, msg = game.sim.build_depot(target)
     if not ok:
@@ -154,4 +150,4 @@ def build_depot_selected(game) -> None:
         return
     game.credits -= cost
     game._play_alert("build")
-    game.say(f"{msg} Bill {cost:,.0f} cr.", seconds=7.0)
+    game.say(f"{msg} Bill {cost:,.0f} cr.", seconds=8.0)
