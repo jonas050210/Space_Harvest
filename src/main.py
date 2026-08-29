@@ -34,7 +34,6 @@ from src.config import (  # noqa: E402
     LIFE_ICE_PREMIUM_MAX,
     LIFE_ICE_RESERVE_T,
     LIFE_ICE_TO_WATER_YIELD,
-    LIFE_LOW_STOCK_FRACTION,
     LIFE_OXYGEN_PER_CREW_DAY,
     LIFE_SHORTAGE_MORALE_DRAIN_PER_DAY,
     LIFE_SOLAR_ENERGY_PER_DAY,
@@ -80,18 +79,16 @@ from src.campaign import (  # noqa: E402
     AchievementTracker,
     apply_difficulty_to_market,
     apply_difficulty_to_sim,
-    body_dossier,
     campaign_blob,
     check_victory,
     dispatch_preview,
     is_ironman,
     restore_campaign_blob,
     starting_credits,
-    victory_progress,
     year_report,
 )
 from src.display import apply_window_settings, volume_from_settings  # noqa: E402
-from src.mining import assay_lines, body_fingerprint, plan_extraction  # noqa: E402
+from src.mining import plan_extraction  # noqa: E402
 from src.market import Contracts, Market  # noqa: E402
 from src.ops.simulation import OpsSimulation  # noqa: E402
 from src.steam_bridge import SteamClient, cloud_root  # noqa: E402
@@ -108,6 +105,7 @@ from src.app.controls import action_for_key  # noqa: E402
 from src.colony import logistics as colony_logistics  # noqa: E402
 from src.colony import savegame as colony_savegame  # noqa: E402
 from src.colony import state as colony_state  # noqa: E402
+from src.ui import hud_feed  # noqa: E402
 
 BUY_MENU = ("scout", "freighter", "refinery", "hauler", "tanker", "clipper", "courser", "argosy")
 CREDITS_HISTORY_POINTS = 240
@@ -884,7 +882,7 @@ class Game:
     # -- save / load ----------------------------------------------------------
     def save_game(self, slot: str = "quick") -> None:
         payload = {
-            "version": 3,
+            "version": self.SAVE_VERSION,
             "credits": self.credits,
             "auto_repair": self.auto_repair,
             "market": self.market.to_json(),
@@ -900,10 +898,34 @@ class Game:
         self._tut["saved"] = True
         self.say(f"Game saved ({os.path.basename(path)}).")
 
+    # Bump this whenever the save payload shape changes and supply a migration
+    # in ``load_game`` below. v1.6 writes version 3; older saves (pre-1.5) are
+    # version 2 and lack fields added since (multi-hop routes, station modules,
+    # garden score, etc.) -- we refuse them with a clear message instead of
+    # silently misloading.
+    SAVE_VERSION = 3
+
     def load_game(self, slot: str = "quick") -> None:
         data = colony_savegame.load_slot(slot)
         if not data:
             self.say("No readable savegame found in saves/.")
+            return
+        save_version = data.get("version", 0)
+        if save_version > self.SAVE_VERSION:
+            self.say(
+                f"Save is from a newer version (v{save_version}); "
+                f"this build is v{self.SAVE_VERSION}. Update Space Harvest to load it.",
+                seconds=10.0,
+            )
+            return
+        if save_version < self.SAVE_VERSION:
+            # v2 saves (pre-1.5) are structurally missing too many fields
+            # (routes, station modules, garden score) to migrate safely.
+            self.say(
+                f"Save is v{save_version} (pre-1.5 format); this build reads "
+                f"v{self.SAVE_VERSION}. Start a new harvest.",
+                seconds=10.0,
+            )
             return
         self.credits = float(data.get("credits", START_CREDITS))
         self.auto_repair = bool(data.get("auto_repair", True))
@@ -933,58 +955,56 @@ class Game:
         self.load_game(slot)
 
     # -- HUD feed --------------------------------------------------------------
+    # Heavy data-shaping lives in ``src.ui.hud_feed``; these thin delegates
+    # keep names stable for tests and any external callers.
     def _ops_hud_data(self) -> dict:
-        prices = [
-            (res, self.market.price(res), self.market.trend(res))
-            for res in MARKET_BASE_PRICES
-        ]
-        target = self.hud.selected_target() if self.hud is not None else TRADE_TARGETS[0]
-        return {
-            "credits": self.credits,
-            "prices": prices,
-            "credits_spark": self._sparkline(self.credits_history),
-            "mode": self.sim.mining_mode,
-            "auto_repair": self.auto_repair,
-            "assay": assay_lines(target, self.sim.ledger, self.sim.reserved.get(target)),
-            "mined_t": float(self.sim.stats.get("ore_mined_t", 0.0)),
-            "incidents": int(self.sim.stats.get("incidents", 0)),
-            "hull": dict(self.sim.hull),
-            "crew_line": self._crew_hud_line(),
-            "weather": self.sim.weather_alert(),
-            "contract_line": self._contract_hud_line(),
-            "pending_line": self._pending_hud_line(),
-            "rep_line": self._reputation_hud_line(),
-            "life_line": self._life_hud_line(),
-            "window_line": self.window_line_text,
-            "window_open": self.window_is_open,
-            "windows_board": self._windows_board,
-            "firsts_count": (sum(1 for v in self.firsts.values() if v), len(FIRSTS)),
-            "quests": self._quest_goals(),
-            "depot_line": self._depot_hud_line(),
-            "parts_hint": self._parts_hint_line(),
-            "station_hint": self._station_hint_line(),
-            "depot_hint": self._depot_hint_line(),
-            "tutorial": self.tutorial_text,
-            "power_load": self.power_load,
-            "toasts": [text for _until, text in self.toasts],
-            "dossier": body_dossier(self.sim, target, self.market)
-            if self.settings.get("show_dossier", True) else [],
-            "pending_dispatch": self._pending_dispatch,
-            "victory": victory_progress(self),
-            "difficulty": self.difficulty,
-            "quality": self.settings.get("quality", "medium"),
-            "version": GAME_VERSION,
-            "route_line": self._route_hud_line(),
-            "prefer_hops": bool(self.settings.get("prefer_hops", True)),
-            "view_mode": self.view_mode,
-            "swarm_line": self._swarm_hud_line(),
-            "swarm_capacity": self.sim.swarm_capacity(),
-            "route_overlay": self._route_overlay_points(),
-            "survey_line": self._survey_hud_line(),
-            "rival_line": (RIVAL_NAME + " active") if self.settings.get("rival_enabled", True) else "",
-            "selected_ship": self.selected_idle_ship().name if self.selected_idle_ship() is not None else self.selected_ship_name,
-            "price_focus": list(body_fingerprint(target)),
-        }
+        return hud_feed.build(self)
+
+    def _crew_hud_line(self) -> str:
+        return hud_feed.crew_hud_line(self)
+
+    def _contract_hud_line(self) -> str:
+        return hud_feed.contract_hud_line(self)
+
+    def _pending_hud_line(self) -> str:
+        return hud_feed.pending_hud_line(self)
+
+    def _reputation_hud_line(self) -> str:
+        return hud_feed.reputation_hud_line(self)
+
+    def _life_hud_line(self) -> str:
+        return hud_feed.life_hud_line(self)
+
+    def _depot_hud_line(self) -> str:
+        return hud_feed.depot_hud_line(self)
+
+    def _depot_hint_line(self) -> str:
+        return hud_feed.depot_hint_line(self)
+
+    def _station_hint_line(self) -> str:
+        return hud_feed.station_hint_line(self)
+
+    def _parts_hint_line(self) -> str:
+        return hud_feed.parts_hint_line(self)
+
+    def _swarm_hud_line(self) -> str:
+        return hud_feed.swarm_hud_line(self)
+
+    def _route_hud_line(self) -> str:
+        return hud_feed.route_hud_line(self)
+
+    def _survey_hud_line(self) -> str:
+        return hud_feed.survey_hud_line(self)
+
+    def _route_overlay_points(self) -> list[str]:
+        return hud_feed.route_overlay_points(self)
+
+    def _quest_goals(self) -> list[str]:
+        return hud_feed.quest_goals(self)
+
+    @staticmethod
+    def _sparkline(history: list[tuple[float, float]]) -> str:
+        return hud_feed.sparkline(history)
 
     # -- "Firsts": one-shot milestones ------------------------------------------
     def _first_conditions(self) -> dict:
@@ -1090,31 +1110,6 @@ class Game:
         if self.achievements.unlock("secret_charter_clear"):
             self.steam.unlock("secret_charter_clear")
 
-    def _quest_goals(self) -> list[str]:
-        """Labels of the next few un-earned milestones: the active quest log."""
-        goals = []
-        progress = victory_progress(self)
-        if progress["mode"] != "endless" and not progress["achieved"]:
-            bits = []
-            if progress["credits_goal"]:
-                bits.append(f"cr {progress['credits']:,.0f}/{progress['credits_goal']:,.0f}")
-            if progress["tonnage_goal"]:
-                bits.append(f"t {progress['tonnage']:,.0f}/{progress['tonnage_goal']:,.0f}")
-            if progress["firsts_goal"]:
-                bits.append(f"firsts {progress['firsts']}/{progress['firsts_goal']}")
-            if progress["needs_aurellium"]:
-                bits.append("aurellium" + (" OK" if progress["aurellium"] > 0 else " --"))
-            if progress.get("garden_goal"):
-                bits.append(f"garden {progress.get('garden', 0):.0f}/{progress['garden_goal']:.0f}")
-            if progress.get("needs_seedstock"):
-                bits.append("seedstock" + (" OK" if progress.get("seedstock", 0) > 0 else " --"))
-            goals.append(f"GOAL {progress['label']}: " + " | ".join(bits))
-        for key, label, _credits, _research in FIRSTS:
-            if not self.firsts.get(key):
-                goals.append(label)
-                if len(goals) == 3:
-                    break
-        return goals
 
     def _update_windows_board(self) -> None:
         """Soonest-next launch windows across the whole network.
@@ -1137,98 +1132,6 @@ class Game:
         rows.sort(key=lambda row: row[1])
         self._windows_board = rows
 
-    def _crew_hud_line(self) -> str:
-        morale = self.sim.fleet_morale()
-        worst_name, worst_fatigue = "", 0.0
-        for ship in self.sim.ships:
-            _, fatigue = self.sim.crew_stats(ship.name)
-            if fatigue > worst_fatigue:
-                worst_name, worst_fatigue = ship.name, fatigue
-        base = f"Crew morale {morale:.0f}/100"
-        if worst_fatigue > 70.0:
-            return f"{base} | {worst_name} crew tired ({worst_fatigue:.0f}%)"
-        return base
-
-    def _contract_hud_line(self) -> str:
-        if not self.contracts.active:
-            return "No Earth orders (offers every ~40 d)"
-        contract = min(self.contracts.active, key=lambda c: c.deadline_day)
-        pct = 100.0 * contract.progress / max(1.0, contract.tonnes)
-        days_left = max(0.0, contract.deadline_day - self.market.day)
-        return (f"Order: {contract.resource} {pct:.0f}% by {days_left:,.0f} d "
-                f"({contract.faction})")
-
-    def _route_overlay_points(self) -> list[str]:
-        if not self.settings.get("show_route_overlay", True) or self.hud is None:
-            return []
-        idle = next((s for s in self.sim.ships if s.name not in self.sim.missions), None)
-        if idle is None:
-            for _name, legs in self.sim.routes.items():
-                keys = ["colony"]
-                for leg in legs:
-                    if leg.destination not in keys:
-                        keys.append(leg.destination)
-                return keys
-            return []
-        plan = plan_route(
-            self.sim, idle, self.hud.selected_target(),
-            prefer_hops=bool(self.settings.get("prefer_hops", True)),
-        )
-        if plan is None:
-            return []
-        keys = ["colony"]
-        for leg in plan.legs:
-            if leg.destination not in keys:
-                keys.append(leg.destination)
-        return keys
-
-    def _survey_hud_line(self) -> str:
-        if self.hud is None:
-            return ""
-        key = self.hud.selected_target()
-        mult = self.sim.survey_mult(key) if hasattr(self.sim, "survey_mult") else 1.0
-        spikes = int(getattr(self.sim, "isru_spikes", {}).get(key, 0))
-        bits = []
-        if mult > 1.01:
-            bits.append(f"survey x{mult:.2f}")
-        if spikes:
-            bits.append(f"ISRU x{spikes}")
-        return "  ".join(bits)
-
-    def _swarm_hud_line(self) -> str:
-        if not self.sim.swarms:
-            cap = self.sim.swarm_capacity()
-            return f"Swarm ready: {cap} drones (D on GO window)" if cap >= 4 else "Swarm: build drone bays (P)"
-        parts = []
-        for key, swarm in sorted(self.sim.swarms.items()):
-            name = self.sim.bodies[key].name if key in self.sim.bodies else key
-            parts.append(
-                f"{name} x{int(swarm['count'])} "
-                f"{float(swarm['remaining_days']):.0f}d "
-                f"{float(swarm.get('yield_t', 0)):.0f}t"
-            )
-        return "SWARM " + " | ".join(parts)
-
-    def _route_hud_line(self) -> str:
-        """Active multi-stop routes + planner hint for the selected target."""
-        bits = []
-        for name, legs in self.sim.routes.items():
-            if not legs:
-                continue
-            nxt = legs[0]
-            dest = self.sim.bodies.get(nxt.destination)
-            label = dest.name if dest else nxt.destination
-            bits.append(f"{name}→{label}({nxt.purpose})")
-        if self.hud is not None:
-            target = self.hud.selected_target()
-            idle = next((s for s in self.sim.ships if s.name not in self.sim.missions), None)
-            if idle is not None:
-                plan = plan_route(self.sim, idle, target,
-                                  prefer_hops=bool(self.settings.get("prefer_hops", True)))
-                if plan is not None and not plan.direct:
-                    via = ",".join(self.sim.bodies[k].name for k in plan.via if k in self.sim.bodies)
-                    bits.append(f"plan via {via}" if via else "multi-stop plan")
-        return "Route: " + " | ".join(bits) if bits else ""
 
     def toggle_prefer_hops(self) -> None:
         self.settings["prefer_hops"] = not bool(self.settings.get("prefer_hops", True))
@@ -1237,92 +1140,6 @@ class Game:
         state = "ON" if self.settings["prefer_hops"] else "OFF"
         self.say(f"Multi-stop refuel hops {state}.", seconds=5.0)
 
-    def _station_hint_line(self) -> str:
-        if self.hud is None:
-            return ""
-        target = self.hud.selected_target()
-        hints = []
-        if target not in self.sim.depots:
-            hints.append("R depot")
-        if target not in self.sim.refineries:
-            hints.append("E refinery")
-        return "Build: " + "  ".join(hints) if hints else ""
-
-    def _parts_hint_line(self) -> str:
-        ship = self._best_part_ship()
-        if ship is None:
-            return ""
-        research = self.colony.state.get("research_points", 0.0)
-        for key, name, cost, _effects in TECHS:
-            if key not in self.techs:
-                return (f"Parts T/Y/U/I/F6scan/F7sh/F8mag  P drones  0 tanker  7-9/' modules   "
-                        f"Lab [L]: {name} ({cost:.0f} RP, have {research:,.0f})")
-        return "Parts T/Y/U/I/F6scan/F7sh/F8mag  P drones  0 tanker  7-9/' modules   Lab: all techs unlocked"
-
-    def _depot_hud_line(self) -> str:
-        if not self.sim.depots:
-            return "No depots (R builds one: 3,500 cr)"
-        parts = []
-        for key, depot in sorted(self.sim.depots.items()):
-            drones = depot.upgrades.get("drones", 0)
-            parts.append(f"{self.sim.bodies[key].name} L{depot.level}"
-                         + (f" D{drones}" if drones else "")
-                         + f" {depot.fuel_ms / 1000:.1f}k/{depot.capacity / 1000:.0f}k")
-        return "Depots: " + "  ".join(parts)
-
-    def _depot_hint_line(self) -> str:
-        if self.hud is None:
-            return ""
-        target = self.hud.selected_target()
-        cost = self.sim.depot_upgrade_cost(target)
-        verb = "Upgrade" if target in self.sim.depots else "Build"
-        return f"{verb} depot at {self.sim.bodies[target].name}: {cost:,.0f} cr [R]"
-
-    def _pending_hud_line(self) -> str:
-        if not self.contracts.pending:
-            return ""
-        offer = self.contracts.pending[0]
-        return (f"OFFER {offer.tonnes:,.0f}t {offer.resource} "
-                f"{offer.reward_credits:,.0f}cr [B/V]")
-
-    def _reputation_hud_line(self) -> str:
-        avg = self.contracts.average_reputation()
-        mult = self.contracts.price_multiplier()
-        return f"Earth standing {avg:+.0f} (prices x{mult:.2f})"
-
-    def _life_hud_line(self) -> str:
-        resources = self.colony.state.get("resources", {})
-        low = LIFE_LOW_STOCK_FRACTION * 100.0
-
-        def pct(key: str, start: float) -> float:
-            return 100.0 * resources.get(key, 0.0) / max(1e-9, start)
-
-        line = (f"Life: O2 {pct('oxygen', LIFE_START_OXYGEN):.0f}% "
-                f"food {pct('food', LIFE_START_FOOD):.0f}% "
-                f"water {pct('water', LIFE_START_WATER):.0f}%")
-        if getattr(self, "_life_shortage_flag", False):
-            return "ALERT: LIFE SUPPORT SHORTAGE - crews suffering"
-        if min(pct('oxygen', LIFE_START_OXYGEN),
-               pct('food', LIFE_START_FOOD),
-               pct('water', LIFE_START_WATER)) < low:
-            return line + "  (LOW)"
-        return line
-
-    @staticmethod
-    def _sparkline(history: list[tuple[float, float]]) -> str:
-        """ASCII sparkline of the treasury, oldest to newest."""
-        if len(history) < 2:
-            return ""
-        values = [value for _, value in history]
-        low, high = min(values), max(values)
-        if high - low < 1e-9:
-            return "-" * min(len(values), 40)
-        ramps = "_.-=+*#@"
-        step = max(1, len(values) // 40)
-        return "".join(
-            ramps[int((value - low) / (high - low) * (len(ramps) - 1))]
-            for value in values[::step]
-        )
 
     # -- colony life support ---------------------------------------------------
     def _tick_life_support(self, dt_days: float) -> None:
