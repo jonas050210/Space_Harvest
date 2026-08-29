@@ -101,6 +101,7 @@ class SteamClient:
         self.available = False
         self._playtime_seconds = 0.0
         self._session_started = time.time()
+        self._last_tick = self._session_started
         self._stats_path = os.path.join(cloud_root(), "steam_stats.json")
         self._load_stats()
         ensure_steam_appid(self.app_id)
@@ -162,15 +163,29 @@ class SteamClient:
             pass
 
     def tick(self, dt_real: float) -> None:
-        self._playtime_seconds += max(0.0, float(dt_real))
+        """Accumulate real playtime.
+
+        The windowed loop calls this every frame with its frame delta; the
+        headless self-test calls ``tick(0.0)``. Time already counted here is
+        not added again in ``shutdown``.
+        """
+        now = time.time()
+        # Prefer wall-clock elapsed since the last tick (robust against a
+        # wrong/stale dt), but never below the explicit dt the caller passes
+        # and never negative.
+        wall = max(0.0, now - self._last_tick)
+        self._playtime_seconds += max(wall, max(0.0, float(dt_real)))
+        self._last_tick = now
 
     def unlock(self, achievement_id: str) -> None:
         """Unlock on Steam if available; always durable via achievements file."""
         _ = achievement_id
 
     def shutdown(self) -> None:
-        self._playtime_seconds += max(0.0, time.time() - self._session_started)
+        """Persist stats, adding only playtime not yet counted by ``tick``."""
+        self._playtime_seconds += max(0.0, time.time() - self._last_tick)
         self._session_started = time.time()
+        self._last_tick = self._session_started
         self._save_stats()
 
     def snapshot(self) -> dict[str, Any]:

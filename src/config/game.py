@@ -7,7 +7,7 @@ GAME_TAGLINE = "wait for the window  --  harvest the belt  --  keep the colony a
 WINDOW_TITLE = "Space Harvest"
 WINDOW_SIZE = (1440, 900)
 STEAM_APP_ID = 0
-GAME_VERSION = "1.6.1"
+GAME_VERSION = "1.6.2"
 EXECUTABLE_NAME = "SpaceHarvest"
 
 # Default settings blob persisted in saves/_settings.json
