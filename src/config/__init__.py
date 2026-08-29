@@ -883,5 +883,5 @@ WINDOW_SIZE = (1440, 900)
 # Steamworks app id placeholder (replace before store launch). Zero means
 # "no Steam"; steam_appid.txt is written beside the executable by the packager.
 STEAM_APP_ID = 0
-GAME_VERSION = "1.6.0"
+GAME_VERSION = "1.6.1"
 EXECUTABLE_NAME = "SpaceHarvest"

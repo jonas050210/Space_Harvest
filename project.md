@@ -1,7 +1,7 @@
 # Space Harvest — Project
 
 Orbital farming on real launch windows, with patched-conic astrodynamics
-underneath. Product name **Space Harvest** v1.6.0. Executable: `SpaceHarvest`.
+underneath. Product name **Space Harvest** v1.6.1. Executable: `SpaceHarvest`.
 
 Repository: https://github.com/jonas050210/Space_Harvest
 

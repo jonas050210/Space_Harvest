@@ -6,7 +6,7 @@ Asteroids are your fields. Geometry is the season. Wait for the window, dispatch
 a freighter (or a hundred-drone swarm), hop through refuel barns, and keep the
 colony breathing.
 
-Version **1.6.0**. Python 3.11–3.13, Ursina 8.x.
+Version **1.6.1**. Python 3.11–3.13, Ursina 8.x.
 
 ## One command: `setup.py`
 

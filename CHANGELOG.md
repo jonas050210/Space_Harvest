@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.6.1 — HUD feed extracted; save version gate
+
+### Safety
+
+- **Save version gate.** `load_game` now checks the save payload's
+  `version` field against `Game.SAVE_VERSION` (currently `3`). Newer
+  saves refuse to load with an update-required message; older
+  pre-1.5-format saves (v2) refuse instead of silently misloading and
+  corrupting state. Written saves always stamp the current version.
+
+### Housekeeping
+
+- Extracted the HUD feed assembly out of `src/main.py` into
+  `src/ui/hud_feed.py`. The god object shrank by ~180 lines; every
+  HUD line-helper (`_crew_hud_line`, `_life_hud_line`, `_parts_hint_line`,
+  etc.) and the `_ops_hud_data` dict builder now live next to the UI
+  package they feed. Thin delegates on `Game` keep all existing call
+  sites and tests working unchanged. Pure read-only — no behaviour
+  change; deterministic baseline still matches.
+
 ## 1.6.0 — The Wide Sky
 
 Three new fields, two new hulls, and the fixes that keep saves alive.

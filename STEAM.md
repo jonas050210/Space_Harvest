@@ -1,6 +1,6 @@
 # Steam readiness — Space Harvest
 
-Version **1.6.0**. Ship PC: **i7-12700F / 32 GB DDR4 / RTX 4060 Ti 8 GB**.
+Version **1.6.1**. Ship PC: **i7-12700F / 32 GB DDR4 / RTX 4060 Ti 8 GB**.
 
 **Space Harvest** = orbital farming on real launch windows.
 
