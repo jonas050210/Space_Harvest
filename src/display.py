@@ -5,7 +5,10 @@ Kept free of game logic so headless tests never import Ursina display code.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 
 def parse_resolution(text: str) -> tuple[int, int]:
@@ -13,6 +16,7 @@ def parse_resolution(text: str) -> tuple[int, int]:
         w, h = text.lower().split("x")
         return max(640, int(w)), max(480, int(h))
     except Exception:
+        log.debug("parse_resolution failed for %r, using fallback", text)
         return 1440, 900
 
 
@@ -21,21 +25,25 @@ def apply_window_settings(settings: dict[str, Any]) -> None:
 
     Safe no-op if Ursina is not imported or no window exists (headless).
     """
+
     try:
         from ursina import camera, window
-    except Exception:
+    except Exception as exc:
+        log.debug("Ursina not available for window settings: %s", exc)
         return
+
     try:
         w, h = parse_resolution(str(settings.get("resolution", "1440x900")))
         window.size = (w, h)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("Failed to apply resolution: %s", exc)
+
     try:
         window.fullscreen = bool(settings.get("fullscreen", False))
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("Failed to apply fullscreen: %s", exc)
+
     try:
-        # Panda3D vsync: 1 on, 0 off. Ursina surfaces it as window.vsync on 8.x.
         vsync = bool(settings.get("vsync", True))
         if hasattr(window, "vsync"):
             window.vsync = vsync
@@ -43,14 +51,16 @@ def apply_window_settings(settings: dict[str, Any]) -> None:
             try:
                 from panda3d.core import loadPrcFileData
                 loadPrcFileData("", f"sync-video {'true' if vsync else 'false'}")
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as exc:
+                log.debug("Failed to apply vsync via prc: %s", exc)
+    except Exception as exc:
+        log.debug("Failed to apply vsync: %s", exc)
+
     try:
         camera.fov = float(settings.get("fov", 55))
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("Failed to apply fov: %s", exc)
+
     # MSAA is a quality-preset concern; apply if the window exposes it.
     try:
         from src.config import QUALITY_PRESETS
@@ -58,8 +68,8 @@ def apply_window_settings(settings: dict[str, Any]) -> None:
         msaa = int(preset.get("msaa", 0) or 0)
         if hasattr(window, "render_mode") is False and hasattr(window, "msaa"):
             window.msaa = msaa
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("Failed to apply msaa: %s", exc)
 
 
 def volume_from_settings(settings: dict[str, Any]) -> float:

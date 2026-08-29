@@ -140,6 +140,15 @@ class Game:
     """Owns the simulation, the colony and -- when windowed -- the 3-D scene."""
 
     def __init__(self, headless: bool = False, ship_names: tuple[str, ...] = ("Kestrel", "Petrel")):
+        # Validate config early - fails fast on bad balance numbers
+        try:
+            from src.config.validation import validate_or_raise
+            validate_or_raise()
+        except Exception as exc:
+            # In headless/test mode, raise; in windowed, log and continue with warning
+            if headless:
+                raise
+            print(f"[config] validation warning: {exc}")
         self.headless = headless
         # OpsSimulation wraps the verified orbital sim with fleet classes,
         # hull wear and mining; the astrodynamics core is untouched.

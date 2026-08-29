@@ -53,7 +53,8 @@ def build(onefile: bool = False) -> str:
 
     # packaging/play_entry.py is the frozen entry (resolves assets next to the EXE).
     entry = os.path.join(ROOT, "packaging", "play_entry.py")
-    sep = os.pathsep
+    # PyInstaller --add-data separator is ";" on Windows, ":" elsewhere
+    sep = ";" if sys.platform.startswith("win") else ":"
     add_data = [
         f"assets{sep}assets",
         f"src{sep}src",
@@ -74,10 +75,27 @@ def build(onefile: bool = False) -> str:
         "--hidden-import=src.ops",
         "--hidden-import=src.ops.simulation",
         "--hidden-import=src.colony",
+        "--hidden-import=src.colony.savegame",
+        "--hidden-import=src.colony.state",
         "--hidden-import=src.app",
-
+        "--hidden-import=src.app.audio",
+        "--hidden-import=src.app.controls",
         "--hidden-import=src.config",
+        "--hidden-import=src.config.units",
+        "--hidden-import=src.config.ships",
+        "--hidden-import=src.config.mining",
+        "--hidden-import=src.config.market",
+        "--hidden-import=src.config.crew",
+        "--hidden-import=src.config.life",
+        "--hidden-import=src.config.parts",
+        "--hidden-import=src.config.depot",
+        "--hidden-import=src.config.campaign",
+        "--hidden-import=src.config.difficulty",
+        "--hidden-import=src.config.quality",
+        "--hidden-import=src.config.game",
         "--hidden-import=src.routes",
+        "--hidden-import=src.mining",
+        "--hidden-import=src.market",
         "--collect-all", "ursina",
         "--collect-all", "panda3d",
     ]
