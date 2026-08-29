@@ -191,46 +191,62 @@ class OrbitalScene:
                       double_sided=True, unlit=True)
         self.comet_tail = tail
 
+    # Class-level cache - built once per process, reused across new campaigns
+    _BELT_VERTICES_CACHE: list[Vec3] | None = None
+
     def _build_asteroid_belt(self) -> None:
         """A few hundred cheap rocks between the belt bodies, for depth.
 
         All rocks bake into ONE triangle mesh (one draw call, one entity) --
         hundreds of separate entities cost far more than their visual worth.
+        Vertices are cached at class level so new campaigns don't rebuild.
         """
         if self.belt_mesh is not None:
             return
-        rng = random.Random(11)
-        vertices: list[Vec3] = []
-        for _ in range(260):
-            a = rng.uniform(1.35, 2.25)
-            angle = rng.uniform(0.0, 2.0 * math.pi)
-            drift = rng.uniform(-0.05, 0.05)
-            centre = Vec3(a * math.cos(angle), drift, -a * math.sin(angle)) * SCENE_UNITS_PER_AU
-            radius = rng.uniform(0.03, 0.12)  # scene units: ~ the old entity scales
-            # A lumpy 6-ring sphere, rotated randomly, appended in world space.
-            cr, sr = math.cos(rng.uniform(0, 6.3)), math.sin(rng.uniform(0, 6.3))
-            tilt = rng.uniform(0.2, 1.0)
-            rings, sectors = 5, 8
-            grid: list[list[Vec3]] = []
-            for r_i in range(rings + 1):
-                phi = math.pi * r_i / rings
-                ring_row: list[Vec3] = []
-                for s_i in range(sectors):
-                    th = 2.0 * math.pi * s_i / sectors
-                    v = Vec3(math.sin(phi) * math.cos(th),
-                             math.cos(phi) * tilt,
-                             math.sin(phi) * math.sin(th))
-                    v = Vec3(v[0] * cr - v[2] * sr, v[1], v[0] * sr + v[2] * cr)
-                    lump = 1.0 + 0.25 * math.sin(5.0 * th + a * 37.0)
-                    ring_row.append(centre + v * (radius * lump))
-                grid.append(ring_row)
-            for r_i in range(rings):
-                for s_i in range(sectors):
-                    a0 = grid[r_i][s_i]
-                    b0 = grid[r_i + 1][s_i]
-                    a1 = grid[r_i][(s_i + 1) % sectors]
-                    b1 = grid[r_i + 1][(s_i + 1) % sectors]
-                    vertices += [a0, b0, a1, b0, b1, a1]
+        # Low quality disables belt entirely - don't even build mesh
+        if not self.quality.get("belt", True):
+            return
+
+        # Use cached vertices if available
+        if OrbitalScene._BELT_VERTICES_CACHE is not None:
+            vertices = OrbitalScene._BELT_VERTICES_CACHE
+        else:
+            rng = random.Random(11)
+            vertices: list[Vec3] = []
+            # Density scales rock count - low density builds fewer rocks
+            density = float(self.quality.get("belt_density", 0.55) or 0.55)
+            rock_count = int(260 * max(0.3, density))
+            for _ in range(rock_count):
+                a = rng.uniform(1.35, 2.25)
+                angle = rng.uniform(0.0, 2.0 * math.pi)
+                drift = rng.uniform(-0.05, 0.05)
+                centre = Vec3(a * math.cos(angle), drift, -a * math.sin(angle)) * SCENE_UNITS_PER_AU
+                radius = rng.uniform(0.03, 0.12)
+                cr, sr = math.cos(rng.uniform(0, 6.3)), math.sin(rng.uniform(0, 6.3))
+                tilt = rng.uniform(0.2, 1.0)
+                rings, sectors = 5, 8
+                grid: list[list[Vec3]] = []
+                for r_i in range(rings + 1):
+                    phi = math.pi * r_i / rings
+                    ring_row: list[Vec3] = []
+                    for s_i in range(sectors):
+                        th = 2.0 * math.pi * s_i / sectors
+                        v = Vec3(math.sin(phi) * math.cos(th),
+                                 math.cos(phi) * tilt,
+                                 math.sin(phi) * math.sin(th))
+                        v = Vec3(v[0] * cr - v[2] * sr, v[1], v[0] * sr + v[2] * cr)
+                        lump = 1.0 + 0.25 * math.sin(5.0 * th + a * 37.0)
+                        ring_row.append(centre + v * (radius * lump))
+                    grid.append(ring_row)
+                for r_i in range(rings):
+                    for s_i in range(sectors):
+                        a0 = grid[r_i][s_i]
+                        b0 = grid[r_i + 1][s_i]
+                        a1 = grid[r_i][(s_i + 1) % sectors]
+                        b1 = grid[r_i + 1][(s_i + 1) % sectors]
+                        vertices += [a0, b0, a1, b0, b1, a1]
+            OrbitalScene._BELT_VERTICES_CACHE = vertices
+
         mesh = Mesh(vertices=vertices, mode="triangle")
         self.belt_mesh = Entity(parent=self.parent, model=mesh,
                                 color=color.rgb(0.45, 0.45, 0.52), unlit=True)

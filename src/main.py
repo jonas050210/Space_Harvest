@@ -24,24 +24,17 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config import (  # noqa: E402
-    LIFE_ELECTROLYSIS_ENERGY_PER_O2,
     LIFE_ELECTROLYSIS_WATER_PER_O2,
     LIFE_FOOD_PER_CREW_DAY,
-    LIFE_HYDROPONICS_ENERGY_PER_FOOD,
     LIFE_HYDROPONICS_WATER_PER_FOOD,
     LIFE_ICE_HORIZON_DAYS,
-    LIFE_ICE_MELT_RATE_PER_DAY,
     LIFE_ICE_PREMIUM_MAX,
-    LIFE_ICE_RESERVE_T,
     LIFE_ICE_TO_WATER_YIELD,
     LIFE_OXYGEN_PER_CREW_DAY,
-    LIFE_SHORTAGE_MORALE_DRAIN_PER_DAY,
-    LIFE_SOLAR_ENERGY_PER_DAY,
     LIFE_START_FOOD,
     LIFE_START_OXYGEN,
     LIFE_START_WATER,
     LIFE_WATER_PER_CREW_DAY,
-    LIFE_WATER_RECYCLE_FRACTION,
     CREW_HIRE_COST,
     DEFAULT_DIFFICULTY,
     DEFAULT_SETTINGS,
@@ -49,9 +42,7 @@ from src.config import (  # noqa: E402
     DIFFICULTY_MODES,
     FIRSTS,
     GAME_VERSION,
-    GARDEN_SCORE_PER_ICE,
     HULL_CRITICAL_PCT,
-    PARTS_CATALOG,
     QUALITY_ORDER,
     QUALITY_PRESETS,
     TECHS,
@@ -79,11 +70,9 @@ from src.campaign import (  # noqa: E402
     AchievementTracker,
     apply_difficulty_to_market,
     apply_difficulty_to_sim,
-    campaign_blob,
     check_victory,
     dispatch_preview,
     is_ironman,
-    restore_campaign_blob,
     starting_credits,
     year_report,
 )
@@ -681,19 +670,12 @@ class Game:
     SETTINGS_SLOT = "_settings"
 
     def _load_settings(self) -> dict:
-        data = colony_savegame.load_slot(self.SETTINGS_SLOT)
-        settings = dict(DEFAULT_SETTINGS)
-        if isinstance(data, dict):
-            for key in settings:
-                if key in data:
-                    settings[key] = data[key]
-        # Clamp quality to a known preset (older saves may say "high" only).
-        if settings.get("quality") not in QUALITY_ORDER:
-            settings["quality"] = "medium"
-        return settings
+        from src.game.save_manager import load_settings as _load_settings
+        return _load_settings(self)
 
     def save_settings(self) -> None:
-        colony_savegame.save_slot(self.SETTINGS_SLOT, dict(self.settings))
+        from src.game.save_manager import save_settings as _save_settings
+        return _save_settings(self)
 
     def apply_settings(self) -> None:
         """Push the settings into scene, mixer, window and camera; persist them."""
@@ -824,54 +806,12 @@ class Game:
 
     # -- market & fleet actions ----------------------------------------------
     def sell_all(self, fraction: float = 1.0) -> None:
-        """Sell marketable ore at today's prices, honouring the ice reserve.
-
-        ``fraction`` (0..1) sells 25/50/100% — skill ceiling against flooding.
-        """
-        fraction = max(0.0, min(1.0, float(fraction)))
-        resources = self.colony.state.get("resources", {})
-        lots: dict[str, float] = {}
-        for res, amount in resources.items():
-            if res not in MARKET_BASE_PRICES or amount < 1.0:
-                continue
-            if res == "ice":
-                amount = max(0.0, amount - LIFE_ICE_RESERVE_T)
-            amount = float(amount) * fraction
-            if amount >= 1.0:
-                lots[res] = amount
-        if not lots:
-            self.say("No ore in colony storage worth selling (ice reserve held back).")
-            return
-        multiplier = self.contracts.price_multiplier()
-        proceeds, sold = self.market.sell(lots)
-        proceeds *= multiplier
-        colony_state.add_resources(self.colony.state, {res: -amount for res, amount in sold.items()})
-        self.credits += proceeds
-        self._tut["sold"] = True
-        self.sim.crew_payday()
-        detail = ", ".join(f"{res} {amount:,.0f} t" for res, amount in sorted(sold.items()))
-        note = f" (Earth standing x{multiplier:.2f})" if abs(multiplier - 1.0) > 0.005 else ""
-        self.say(f"Sold {detail} to Earth for {proceeds:,.0f} cr{note}.", seconds=8.0)
+        from src.game.economy import sell_all as _sell_all
+        return _sell_all(self, fraction)
 
     def buy_ship_class(self, cls_key: str) -> None:
-        """Commission a new ship class from the treasury."""
-        if cls_key not in SHIP_CLASSES:
-            self.say(f"Unknown ship class '{cls_key}'.")
-            return
-        spec = SHIP_CLASSES[cls_key]
-        if self.credits < spec["price"]:
-            self.say(
-                f"A {spec['name']} costs {spec['price']:,.0f} cr; "
-                f"the treasury holds {self.credits:,.0f} cr."
-            )
-            return
-        ship, message = self.sim.buy_ship(cls_key)
-        if ship is None:
-            self.say(message)
-            return
-        self.credits -= spec["price"]
-        self._tut["bought"] = True
-        self.say(f"{message} Bill: {spec['price']:,.0f} cr.", seconds=8.0)
+        from src.game.economy import buy_ship_class as _buy_ship_class
+        return _buy_ship_class(self, cls_key)
 
     def toggle_drill(self) -> None:
         self.sim.mining_mode = "drill" if self.sim.mining_mode == "scrape" else "scrape"
@@ -890,71 +830,14 @@ class Game:
 
     # -- save / load ----------------------------------------------------------
     def save_game(self, slot: str = "quick") -> None:
-        payload = {
-            "version": self.SAVE_VERSION,
-            "credits": self.credits,
-            "auto_repair": self.auto_repair,
-            "market": self.market.to_json(),
-            "contracts": self.contracts.to_json(),
-            "firsts": dict(self.firsts),
-            "techs": sorted(self.techs),
-            "colony": self.colony.state,
-            "sim": self.sim.to_json(),
-            "campaign": campaign_blob(self),
-            "game_version": GAME_VERSION,
-        }
-        path = colony_savegame.save_slot(slot, payload)
-        self._tut["saved"] = True
-        self.say(f"Game saved ({os.path.basename(path)}).")
+        from src.game.save_manager import save_game as _save_game
+        return _save_game(self, slot)
 
-    # Bump this whenever the save payload shape changes and supply a migration
-    # in ``load_game`` below. v1.6 writes version 3; older saves (pre-1.5) are
-    # version 2 and lack fields added since (multi-hop routes, station modules,
-    # garden score, etc.) -- we refuse them with a clear message instead of
-    # silently misloading.
     SAVE_VERSION = 3
 
     def load_game(self, slot: str = "quick") -> None:
-        data = colony_savegame.load_slot(slot)
-        if not data:
-            self.say("No readable savegame found in saves/.")
-            return
-        save_version = data.get("version", 0)
-        if save_version > self.SAVE_VERSION:
-            self.say(
-                f"Save is from a newer version (v{save_version}); "
-                f"this build is v{self.SAVE_VERSION}. Update Space Harvest to load it.",
-                seconds=10.0,
-            )
-            return
-        if save_version < self.SAVE_VERSION:
-            # v2 saves (pre-1.5) are structurally missing too many fields
-            # (routes, station modules, garden score) to migrate safely.
-            self.say(
-                f"Save is v{save_version} (pre-1.5 format); this build reads "
-                f"v{self.SAVE_VERSION}. Start a new harvest.",
-                seconds=10.0,
-            )
-            return
-        self.credits = float(data.get("credits", START_CREDITS))
-        self.auto_repair = bool(data.get("auto_repair", True))
-        self.market = Market.from_json(data["market"])
-        self.contracts = Contracts.from_json(data.get("contracts", {}), self.market)
-        self.firsts = {k: bool(v) for k, v in data.get("firsts", {}).items()}
-        self.techs = set(data.get("techs", []))
-        self.colony.state = data["colony"]
-        self.sim = OpsSimulation.from_json(data["sim"])
-        restore_campaign_blob(self, data.get("campaign"))
-        self._apply_campaign_rules()
-        self.credits_history = []
-        self._pending_dispatch = None
-        if self.scene is not None:
-            # Drop meshes for ships that no longer exist in the loaded fleet.
-            for name, mesh in list(self.scene.ships.items()):
-                if name not in {ship.name for ship in self.sim.ships}:
-                    mesh.enabled = False
-                    del self.scene.ships[name]
-        self.say("Savegame loaded.", seconds=6.0)
+        from src.game.save_manager import load_game as _load_game
+        return _load_game(self, slot)
 
     def try_load(self, slot: str = "quick") -> None:
         """Load with Ironman guard: no mid-run loads on Ironman campaigns."""
@@ -1152,144 +1035,16 @@ class Game:
 
     # -- colony life support ---------------------------------------------------
     def _tick_life_support(self, dt_days: float) -> None:
-        """Consume and produce oxygen, food and water for the whole crew.
-
-        The loop closes through water: an ice refinery melts stored ice, an
-        electrolyser makes oxygen from water, hydroponics makes food from
-        water -- all drawing on the colony's energy cell, topped up by the
-        solar array. A shortage grinds on every crew's morale. This is why
-        selling every tonne of ice to Earth is a real decision.
-        """
-        state = self.colony.state
-        resources = state.setdefault("resources", {})
-        crew_count = sum(len(roster) for roster in self.sim.crew.values())
-        if crew_count == 0:
-            return
-
-        # The colony's solar array keeps the lights on (difficulty can dim it).
-        max_energy = state.get("max_energy", 30)
-        solar = LIFE_SOLAR_ENERGY_PER_DAY * float(self.sim.tech_mults.get("life_solar", 1.0))
-        resources["energy"] = min(max_energy, resources.get("energy", 0.0) + solar * dt_days)
-        energy_used = 0.0
-
-        # Ice refinery: top the water tank up when it runs low.
-        water_low = 0.5 * LIFE_START_WATER
-        if resources.get("water", 0.0) < water_low and resources.get("ice", 0.0) > 0.0:
-            melt = min(LIFE_ICE_MELT_RATE_PER_DAY * dt_days,
-                       resources.get("ice", 0.0),
-                       max(0.0, water_low - resources.get("water", 0.0)) / LIFE_ICE_TO_WATER_YIELD)
-            resources["ice"] = resources.get("ice", 0.0) - melt
-            resources["water"] = resources.get("water", 0.0) + melt * LIFE_ICE_TO_WATER_YIELD
-            energy_used += 0.1 * melt
-
-        need_o2 = crew_count * LIFE_OXYGEN_PER_CREW_DAY * dt_days
-        need_food = crew_count * LIFE_FOOD_PER_CREW_DAY * dt_days
-        need_water = crew_count * LIFE_WATER_PER_CREW_DAY * dt_days
-
-        # Electrolysis: cover the oxygen need and refill the buffer toward its
-        # starting level, so a transient stall (a fleet-wide refuel, say) can
-        # actually be recovered from instead of draining the tanks forever.
-        want_o2 = need_o2 + max(0.0, LIFE_START_OXYGEN - resources.get("oxygen", 0.0))
-        spare_water = max(0.0, resources.get("water", 0.0) - need_water)
-        budget = max(0.0, resources.get("energy", 0.0))
-        made_o2 = min(want_o2,
-                      spare_water / LIFE_ELECTROLYSIS_WATER_PER_O2,
-                      budget / LIFE_ELECTROLYSIS_ENERGY_PER_O2)
-        resources["water"] = resources.get("water", 0.0) - made_o2 * LIFE_ELECTROLYSIS_WATER_PER_O2
-        resources["energy"] = resources.get("energy", 0.0) - made_o2 * LIFE_ELECTROLYSIS_ENERGY_PER_O2
-        energy_used += made_o2 * LIFE_ELECTROLYSIS_ENERGY_PER_O2
-        resources["oxygen"] = resources.get("oxygen", 0.0) + made_o2
-
-        # Hydroponics: cover the calorie need and refill the food buffer.
-        want_food = need_food + max(0.0, LIFE_START_FOOD - resources.get("food", 0.0))
-        spare_water = max(0.0, resources.get("water", 0.0) - need_water)
-        budget = max(0.0, resources.get("energy", 0.0))
-        water_per_food = LIFE_HYDROPONICS_WATER_PER_FOOD * self.sim.botanist_water_factor()
-        made_food = min(want_food,
-                        spare_water / water_per_food,
-                        budget / LIFE_HYDROPONICS_ENERGY_PER_FOOD)
-        resources["water"] = resources.get("water", 0.0) - made_food * water_per_food
-        resources["energy"] = resources.get("energy", 0.0) - made_food * LIFE_HYDROPONICS_ENERGY_PER_FOOD
-        energy_used += made_food * LIFE_HYDROPONICS_ENERGY_PER_FOOD
-        resources["food"] = resources.get("food", 0.0) + made_food
-
-        # The crew breathes, eats and drinks; the recyclers claw most of the
-        # water back into the tank.
-        water_used = need_water + made_o2 * LIFE_ELECTROLYSIS_WATER_PER_O2 \
-            + made_food * LIFE_HYDROPONICS_WATER_PER_FOOD
-        resources["oxygen"] = max(0.0, resources.get("oxygen", 0.0) - need_o2)
-        resources["food"] = max(0.0, resources.get("food", 0.0) - need_food)
-        resources["water"] = max(0.0, resources.get("water", 0.0) - need_water)
-        resources["water"] = resources.get("water", 0.0) + water_used * LIFE_WATER_RECYCLE_FRACTION
-
-        # Shortages grind everyone down; the HUD and the audio alert pick up
-        # the flag from _life_shortage().
-        self._life_shortage_flag = (
-            resources.get("oxygen", 0.0) <= 0.0 or resources.get("food", 0.0) <= 0.0
-        )
-        if self._life_shortage_flag:
-            self.sim.apply_hardship(LIFE_SHORTAGE_MORALE_DRAIN_PER_DAY * dt_days)
-
-        # Power load feeds the ambient hum and the HUD readout.
-        reference = max(1.0, LIFE_SOLAR_ENERGY_PER_DAY * 4.0)
-        load = 0.15 + 0.6 * (energy_used / dt_days) / reference
-        self.power_load = min(1.0, max(0.05, load))
+        from src.game.systems import tick_life_support
+        return tick_life_support(self, dt_days)
 
     def _tick_garden(self, dt_days: float) -> None:
-        """Greenhouse domes drink colony ice and raise garden score.
-
-        Ice cost is honest (catalogue rate); techs scale the score via
-        ``tech_mults['garden']``. Life support still melts ice separately.
-        """
-        if dt_days <= 0.0:
-            return
-        want = 0.0
-        if hasattr(self.sim, "tick_garden_ice"):
-            want = float(self.sim.tick_garden_ice(dt_days))
-        if want <= 0.0:
-            return
-        resources = self.colony.state.setdefault("resources", {})
-        drink = min(float(resources.get("ice", 0.0)), want)
-        if drink <= 0.0:
-            return
-        resources["ice"] = float(resources.get("ice", 0.0)) - drink
-        garden_mult = float(self.sim.tech_mults.get("garden", 1.0))
-        self.colony.state["garden_score"] = (
-            float(self.colony.state.get("garden_score", 0.0))
-            + drink * GARDEN_SCORE_PER_ICE * garden_mult
-        )
+        from src.game.systems import tick_garden
+        return tick_garden(self, dt_days)
 
     def _tick_contracts(self) -> None:
-        """Post offers, honour decisions, retire overdue and stale paper."""
-        # Sorted: set iteration order is hash-randomised between processes,
-        # and Earth's choice must not depend on it.
-        recent = sorted(ore for ore, day in self._recent_deliveries.items()
-                        if self.market.day - day < 1200.0)
-        if not recent:
-            recent = sorted(self.colony.state.get("logistics", {}).get("lifetime_delivered", {}))
-        offer = self.contracts.maybe_offer(recent)
-        if offer is not None and not self.headless:
-            self.say(
-                f"OFFER from {offer.faction}: {offer.tonnes:,.0f} t of {offer.resource} "
-                f"by day {offer.deadline_day:,.0f} for {offer.reward_credits:,.0f} cr. "
-                "B to accept, V to decline.",
-                seconds=9.0,
-            )
-        # The autopilot accepts orders it plausibly can fill.
-        if self.headless:
-            for pending in list(self.contracts.pending):
-                if pending.resource in recent and len(self.contracts.active) < 2:
-                    self.contracts.accept(pending.id)
-        for withdrawn in self.contracts.expire_pending():
-            if not self.headless:
-                self.say(f"{withdrawn.faction} withdrew its offer for {withdrawn.resource}.")
-        for contract in self.contracts.expire_overdue():
-            if not self.headless:
-                self.say(
-                    f"{contract.faction} cancelled its order for {contract.resource} "
-                    f"-- standing {self.contracts.reputation[contract.faction]:+.0f}.",
-                    seconds=8.0,
-                )
+        from src.game.systems import tick_contracts
+        return tick_contracts(self)
 
     def _best_part_ship(self):
         """Docked-at-colony ship with the fewest upgrades: spread the love."""
@@ -1300,40 +1055,9 @@ class Game:
         return min(candidates, key=lambda s: sum(self.sim.upgrades.get(s.name, {}).values()))
 
     def buy_part(self, part_key: str) -> None:
-        """Buy an upgrade part from the Earth parts market."""
-        info = PARTS_CATALOG.get(part_key)
-        if info is None or part_key == "drones":
-            self.say("Unknown part.")
-            return
-        ship = self._best_part_ship()
-        if ship is None:
-            self.say("No ship is docked at the colony for a refit.")
-            return
-        owned = sum(self.sim.upgrades.get(s.name, {}).get(part_key, 0)
-                    for s in self.sim.ships)
-        price = self.market.part_price(part_key, owned) * (1.0 - self._parts_discount)
-        if self.credits < price:
-            self.say(f"{info['name']} costs {price:,.0f} cr; treasury {self.credits:,.0f} cr.")
-            return
-        aurellium_t = float(info.get("aurellium_t", 0.0))
-        if aurellium_t > 0.0:
-            resources = self.colony.state.get("resources", {})
-            if resources.get("aurellium", 0.0) < aurellium_t:
-                self.say(f"The {info['name']} needs {aurellium_t:.0f} t aurellium -- "
-                         "only Comet Vigil carries it.")
-                return
-        ok, message = self.sim.install_part(ship.name, part_key)
-        if not ok:
-            self.say(message)
-            return
-        self.credits -= price
-        if aurellium_t > 0.0:
-            colony_state.add_resources(self.colony.state, {"aurellium": -aurellium_t})
-        self._play_alert("build")
-        note = f" and {aurellium_t:.0f} t aurellium" if aurellium_t else ""
-        self.say(f"{message} Bill {price:,.0f} cr{note}.", seconds=7.0)
+        from src.game.economy import buy_part as _buy_part
+        return _buy_part(self, part_key)
 
-    # -- science -------------------------------------------------------------------
     def _apply_techs(self) -> None:
         """Translate owned techs into generic sim multipliers + a price break.
 
@@ -1360,42 +1084,12 @@ class Game:
         apply_difficulty_to_sim(self.sim, getattr(self, "difficulty", DEFAULT_DIFFICULTY))
 
     def buy_tech(self) -> None:
-        """Commission the cheapest affordable unowned technology."""
-        research = self.colony.state.get("research_points", 0.0)
-        for key, name, cost, _effects in TECHS:
-            if key in self.techs:
-                continue
-            if research < cost:
-                self.say(f"{name} needs {cost:.0f} RP; the colony holds {research:,.0f} RP.")
-                return
-            self.techs.add(key)
-            self.colony.state["research_points"] = research - cost
-            self._apply_techs()
-            self._play_alert("contract")
-            self.say(f"RESEARCH COMPLETE: {name}.", seconds=8.0)
-            return
-        if not self.headless:
-            self.say("Every technology is already unlocked.")
+        from src.game.economy import buy_tech as _buy_tech
+        return _buy_tech(self)
 
     def buy_drone_bay(self) -> None:
-        """Install a drone bay at the selected target's depot."""
-        target = self.hud.selected_target() if self.hud is not None else "deep_belt"
-        depot = self.sim.depots.get(target)
-        if depot is None:
-            self.say("Build a depot there first (R).")
-            return
-        owned = depot.upgrades.get("drones", 0)
-        price = self.market.part_price("drones", owned)
-        if self.credits < price:
-            self.say(f"A drone bay costs {price:,.0f} cr; treasury {self.credits:,.0f} cr.")
-            return
-        ok, message = self.sim.install_depot_part(target, "drones")
-        if not ok:
-            self.say(message)
-            return
-        self.credits -= price
-        self._play_alert("build")
-        self.say(f"{message} Bill {price:,.0f} cr.", seconds=7.0)
+        from src.game.economy import buy_drone_bay as _buy_drone_bay
+        return _buy_drone_bay(self)
 
     def build_refinery_selected(self) -> None:
         """Build a smelting station at the selected body."""
@@ -1413,24 +1107,8 @@ class Game:
         self.say(f"{message} Bill: {cost:,.0f} cr. Waiting runs arrive refined.", seconds=8.0)
 
     def build_depot_selected(self) -> None:
-        """Build (or upgrade) a refuel depot at the selected body.
-
-        Headless mode has no selection, so it defaults to the deep belt --
-        the depot site that unlocks the far network.
-        """
-        target = self.hud.selected_target() if self.hud is not None else "deep_belt"
-        cost = self.sim.depot_upgrade_cost(target)
-        if self.credits < cost:
-            self.say(f"A depot at {self.sim.bodies[target].name} costs {cost:,.0f} cr; "
-                     f"the treasury holds {self.credits:,.0f} cr.")
-            return
-        ok, message = self.sim.build_depot(target)
-        if not ok:
-            self.say(message)
-            return
-        self.credits -= cost
-        self._play_alert("build")
-        self.say(f"{message} Bill: {cost:,.0f} cr.", seconds=8.0)
+        from src.game.economy import build_depot_selected as _build_depot_selected
+        return _build_depot_selected(self)
 
     def accept_contract(self) -> None:
         """Accept the oldest posted offer."""
@@ -1999,7 +1677,6 @@ def run_windowed() -> None:
     game = Game(headless=False)
     game.build_scene(ursina_scene)
     _setup_audio(game)
-    from src.colony import savegame as colony_savegame
     from src.ui.orbital_hud import MenuOverlay
 
     menus = MenuOverlay(continue_available=bool(colony_savegame.list_saves()))

@@ -110,12 +110,32 @@ class SteamClient:
         """Attempt a real Steamworks bind; succeed quietly if missing."""
         if self.app_id <= 0:
             return False
-        # Placeholder for a future steamworks import. We deliberately do not
-        # hard-require the native DLL so the game runs outside Steam.
-        if os.environ.get("STEAM_OVERLAY") == "1" or os.path.isfile(
-            os.path.join(_app_root(), "steam_api64.dll")
-        ) or os.path.isfile(os.path.join(_app_root(), "libsteam_api.so")):
+        # Try real Steamworks bindings if installed - soft dependency
+        for mod_name in ("steamworks", "steam_api", "steamworks_py", "pysteamworks"):
+            try:
+                __import__(mod_name)
+                return True
+            except ImportError:
+                pass
+        # Check for native DLLs (Windows/Linux) or env flag for testing
+        if os.environ.get("STEAM_OVERLAY") == "1":
             return True
+        for dll in ("steam_api64.dll", "steam_api.dll", "libsteam_api.so"):
+            if os.path.isfile(os.path.join(_app_root(), dll)):
+                return True
+        # Also check if steam_appid.txt exists and contains valid app_id
+        # (overlay will attach when launched via Steam even without DLL in dev)
+        appid_path = os.path.join(_app_root(), "steam_appid.txt")
+        if os.path.isfile(appid_path):
+            try:
+                with open(appid_path, "r", encoding="utf-8") as fh:
+                    content = fh.read().strip()
+                if content and int(content) > 0:
+                    # If we're running under Steam client, env var SteamAppId is set
+                    if os.environ.get("SteamAppId") or os.environ.get("STEAM_APP_ID"):
+                        return True
+            except Exception:
+                pass
         return False
 
     def _load_stats(self) -> None:

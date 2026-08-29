@@ -50,4 +50,5 @@ from .game import *  # noqa: F401,F403
 
 # Explicit re-export list for linters / IDEs - populated dynamically
 # All caps constants from submodules are considered public API
+from .balance import *  # noqa: F401,F403
 from .validation import validate, validate_or_raise  # noqa: F401
