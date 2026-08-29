@@ -50,6 +50,7 @@ def load_game(game, slot: str = "quick") -> None:
         return
     if version == 2:
         game.say("Save version 2 (pre-1.5) - refusing to misload. Start new harvest.")
+        return
 
     try:
         game.credits = float(data.get("credits", game.credits))

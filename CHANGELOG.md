@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.6.2 — One-click launch; window-search and Steam fixes
+
+### First-run / launch
+
+- **Double-click to play.** New `Play.bat` (Windows) and `play.sh`
+  (Linux/macOS) launchers create a private `.venv`, install dependencies
+  into it once, and run the game. Nothing is installed system-wide; after
+  the first run the game starts offline. `setup.py` itself also bootstraps
+  dependencies on the default play path (it previously only did so for
+  `--build`/`--test`), and reports a clear manual-install command instead
+  of a raw `ModuleNotFoundError` traceback when it cannot.
+- README leads with a no-download Quick Start and a `setup.py` command table.
+
+### Fixes
+
+- **Multi-revolution window search ranked the wrong cost.** The slow-arc
+  (Izzo multi-rev) candidate scan scored trajectories by absolute
+  heliocentric velocity instead of the burn relative to the departure and
+  arrival bodies — contradicting the single-rev grid — so it refined onto
+  non-optimal rendezvous and the cheap branch was never chosen. It now
+  scores real delta-v and refines the best six candidates (the single-rev
+  solver already refined six). The slow low-energy arc now correctly wins
+  for the two highly eccentric targets where orbital mechanics says it
+  should — Comet Vigil (~21% less outbound delta-v than the fast perihelion
+  sprint, at the cost of a long transit) and Cinder Moon — while every
+  coplanar belt body keeps its fast Hohmann-class window and Vagrant still
+  demands depot barns.
+- **Save version gate fell through.** A v2 (pre-1.5) save printed the
+  refusal message and then loaded anyway; it now aborts the load.
+- **Steam playtime was double-counted in windowed mode.** The per-frame
+  `tick` accumulated playtime and `shutdown` then added the whole session
+  wall-time again. `shutdown` now adds only the un-ticked remainder.
+- **Headless playtime never persisted.** The self-test / CI path never
+  called `SteamClient.shutdown`, so playtime was dropped; it now shuts down
+  in a `finally`, writing `steam_stats.json`.
+
 ## 1.6.1 — HUD feed extracted; save version gate
 
 ### Safety

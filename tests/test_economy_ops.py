@@ -1000,14 +1000,39 @@ def test_comet_lives_in_the_campaign_not_the_module_table():
 
 def test_comet_windows_are_rare_and_expensive_but_real():
     from src.config import SIM_SECONDS_PER_DAY
+    from src.maths import windows as window_solver
+    from src.config import MU_SUN
 
     sim = OpsSimulation(ship_names=("Scout",), ship_classes={"Scout": "scout"})
+    origin = sim.bodies["colony"].elements
+    comet = sim.bodies["comet_vigil"].elements
+
+    # The cheap, multi-revolution low-energy rendezvous: a real but very long
+    # arc (near-aphelion) that a scout can fly.
     window = sim.launch_window("colony", "comet_vigil")
     assert window is not None
     assert window.tof / SIM_SECONDS_PER_DAY > 120.0  # a long arc
     rt = sim.round_trip_cost_ms("colony", "comet_vigil")
-    assert rt is not None and rt > SHIP_CLASSES["freighter"]["delta_v"]
+    assert rt is not None
     assert rt < SHIP_CLASSES["scout"]["delta_v"] * 1.15  # a scout can do it
+
+    # The fast single-rev sprint to perihelion is still brutally expensive on
+    # the round trip -- rushing the comet is what depot runs and big tanks are
+    # for, even though a one-way outbound burn alone fits a freighter.
+    fast = window_solver.solve_window(
+        origin, comet, MU_SUN, origin_key="colony", target_key="comet_vigil",
+        n_depart=72, n_tof=30, epoch=sim.time, min_departure_time=sim.time)
+    assert fast is not None and fast.revs == 0
+    arrival = fast.departure_time + fast.tof
+    fast_back = window_solver.solve_window(
+        comet, origin, MU_SUN, origin_key="comet_vigil", target_key="colony",
+        n_depart=72, n_tof=30, epoch=arrival, min_departure_time=arrival)
+    fast_rt = sim.delta_v_km_s(fast.total_delta_v + fast_back.total_delta_v) * 1000.0
+    assert fast_rt > SHIP_CLASSES["freighter"]["delta_v"]
+    # ...and the slow multi-rev arc actually buys propellant over that sprint
+    # (about a fifth less outbound delta-v, at the cost of years in transit).
+    slow_out = sim.delta_v_km_s(window.total_delta_v) * 1000.0
+    assert slow_out < sim.delta_v_km_s(fast.total_delta_v) * 1000.0 * 0.80
 
 
 def test_comet_ore_is_primordial_and_unique():

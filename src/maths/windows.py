@@ -298,42 +298,55 @@ def solve_window_multi(origin: OrbitalElements, target: OrbitalElements, mu: flo
     if not depart:
         return baseline
 
-    best: tuple[float, float, float, int] | None = None  # (dv, t_dep, tof, revs)
+    candidates_scored: list[tuple[float, float, float, int]] = []  # (dv, t_dep, tof, revs)
     for t_dep in depart:
-        r1, _ = body_state(origin, mu, t_dep)
+        r1, v1_body = body_state(origin, mu, t_dep)
         r2_ref, _ = body_state(target, mu, t_dep)
         a_transfer = 0.55 * (float(np.linalg.norm(r1)) + float(np.linalg.norm(r2_ref)))
         period = 2.0 * math.pi * math.sqrt(a_transfer ** 3 / mu)
         for revs in range(1, max_revs + 1):
             for tof in np.linspace((revs + 0.35) * period, (revs + 0.95) * period, 7):
-                r2, _ = body_state(target, mu, t_dep + float(tof))
+                r2, v2_body = body_state(target, mu, t_dep + float(tof))
                 try:
-                    candidates = lambert_multi(r1, r2, float(tof), mu, revs=revs)
+                    lamberts = lambert_multi(r1, r2, float(tof), mu, revs=revs)
                 except (ValueError, RuntimeError, ZeroDivisionError):
                     continue
-                if not candidates:
+                if not lamberts:
                     continue
-                dv = min(float(np.linalg.norm(v1) + np.linalg.norm(v2))
-                         for v1, v2 in candidates)
-                if best is None or dv < best[0]:
-                    best = (dv, t_dep, float(tof), revs)
-    if best is None:
+                # Rank by real burn cost: departure/arrival burns are velocity
+                # differences *relative to the moving bodies*, not absolute
+                # heliocentric speeds (which favour slow orbits that never meet
+                # the target). Mirrors the scoring in coarse_grid().
+                dv = min(float(np.linalg.norm(v1 - v1_body))
+                         + float(np.linalg.norm(v2 - v2_body))
+                         for v1, v2 in lamberts)
+                candidates_scored.append((dv, float(t_dep), float(tof), revs))
+    if not candidates_scored:
         return baseline
 
-    refined = _solve_to_target_multi(origin, target, mu, best[1], best[2], best[3])
-    if refined is None:
+    # The cheapest coarse node is not always refinable (the secant can diverge),
+    # so refine the best handful — the single-rev search does the same.
+    candidates_scored.sort(key=lambda c: c[0])
+    multi: LaunchWindow | None = None
+    for _dv, t_dep, tof, revs in candidates_scored[:6]:
+        refined = _solve_to_target_multi(origin, target, mu, t_dep, tof, revs)
+        if refined is None:
+            continue
+        r1, v1, r2, v2, miss, tof_solved = refined
+        v1_body = body_state(origin, mu, t_dep)[1]
+        v2_body = body_state(target, mu, t_dep + tof_solved)[1]
+        window = LaunchWindow(
+            departure_time=t_dep, tof=tof_solved,
+            dv_depart=float(np.linalg.norm(v1 - v1_body)),
+            dv_arrive=float(np.linalg.norm(v2 - v2_body)),
+            origin_key=origin_key, target_key=target_key,
+            miss_distance=miss, r1=r1, v1=v1, r2=r2, v2=v2,
+            v1_body=v1_body, v2_body=v2_body, revs=revs,
+        )
+        if multi is None or window.total_delta_v < multi.total_delta_v:
+            multi = window
+    if multi is None:
         return baseline
-    r1, v1, r2, v2, miss, tof_solved = refined
-    v1_body = body_state(origin, mu, best[1])[1]
-    v2_body = body_state(target, mu, best[1] + tof_solved)[1]
-    multi = LaunchWindow(
-        departure_time=best[1], tof=tof_solved,
-        dv_depart=float(np.linalg.norm(v1 - v1_body)),
-        dv_arrive=float(np.linalg.norm(v2 - v2_body)),
-        origin_key=origin_key, target_key=target_key,
-        miss_distance=miss, r1=r1, v1=v1, r2=r2, v2=v2,
-        v1_body=v1_body, v2_body=v2_body, revs=best[3],
-    )
     if baseline is None:
         return multi
     if multi.total_delta_v < baseline.total_delta_v * (1.0 - multi_rev_min_saving):

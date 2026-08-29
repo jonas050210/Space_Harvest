@@ -22,9 +22,10 @@ DEPOT_UPGRADE_COST_GROWTH = 1.6
 # routes). Izzo multi-rev branches only replace the single-rev plan when they
 # save at least MIN_SAVING of its cost, so the extra flight time must buy
 # real propellant. In this near-coplanar network single-rev Hohmann-class
-# windows dominate (as orbital mechanics predicts), so the gate rarely opens;
-# strongly perturbed or inclined future targets are where it pays off. Set
-# the saving to a negative value to force multi-rev plans (used by tests).
+# windows dominate (as orbital mechanics predicts); the slow arc genuinely
+# wins for Comet Vigil, where a long low-energy rendezvous beats the brutal
+# fast perihelion sprint. Set the saving negative to force multi-rev plans
+# (used by tests).
 PLANNING_MAX_REVS = 1
 PLANNING_MULTI_REV_MIN_SAVING = 0.15
 

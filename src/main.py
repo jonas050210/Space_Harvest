@@ -1604,37 +1604,45 @@ def run_headless(sim_days: float, frames_per_day: int = 4, verbose: bool = True,
     next_sale = sell_period_days * SIM_SECONDS_PER_DAY
     buy_index = 0
     next_buy_check = 180.0 * SIM_SECONDS_PER_DAY
-    for _ in range(int(sim_days * frames_per_day)):
-        game.update(dt_days)
-        if sell_period_days and game.sim.time >= next_sale:
-            next_sale += sell_period_days * SIM_SECONDS_PER_DAY
-            game.sell_all()
-        # Reinvest profits: keep a small standing fleet growing while the
-        # treasury can cushion the bill, so the demo shows real progression.
-        if game.sim.time >= next_buy_check:
-            next_buy_check += 180.0 * SIM_SECONDS_PER_DAY
-            if len(game.sim.ships) < 6:
-                cls_key = BUY_MENU[buy_index % len(BUY_MENU)]
-                price = SHIP_CLASSES[cls_key]["price"]
-                if game.credits > price + 3000.0:
-                    buy_index += 1
-                    game.buy_ship_class(cls_key)
-        # A deep-belt depot unlocks the far network for the whole fleet.
-        depot_cost = game.sim.depot_upgrade_cost("deep_belt")
-        depot_level = game.sim.depots["deep_belt"].level if "deep_belt" in game.sim.depots else 0
-        if depot_level < 2 and game.credits > depot_cost + 6000.0:
-            game.build_depot_selected()
-        # A refinery turns runs into refined stock: free margin every visit.
-        if "inner_belt" not in game.sim.refineries:
-            refinery_cost = game.sim.refinery_upgrade_cost("inner_belt")
-            if game.credits > refinery_cost + 9000.0:
-                game.sim.build_refinery("inner_belt")
-        # Science: spend research as it accumulates so the self-test
-        # exercises the tech path end to end (multipliers, discounts).
-        if (game.colony.state.get("research_points", 0.0) > 80.0
-                and len(game.techs) < len(TECHS)):
-            game.buy_tech()
+    try:
+        for _ in range(int(sim_days * frames_per_day)):
+            game.update(dt_days)
+            if sell_period_days and game.sim.time >= next_sale:
+                next_sale += sell_period_days * SIM_SECONDS_PER_DAY
+                game.sell_all()
+            # Reinvest profits: keep a small standing fleet growing while the
+            # treasury can cushion the bill, so the demo shows real progression.
+            if game.sim.time >= next_buy_check:
+                next_buy_check += 180.0 * SIM_SECONDS_PER_DAY
+                if len(game.sim.ships) < 6:
+                    cls_key = BUY_MENU[buy_index % len(BUY_MENU)]
+                    price = SHIP_CLASSES[cls_key]["price"]
+                    if game.credits > price + 3000.0:
+                        buy_index += 1
+                        game.buy_ship_class(cls_key)
+            # A deep-belt depot unlocks the far network for the whole fleet.
+            depot_cost = game.sim.depot_upgrade_cost("deep_belt")
+            depot_level = game.sim.depots["deep_belt"].level if "deep_belt" in game.sim.depots else 0
+            if depot_level < 2 and game.credits > depot_cost + 6000.0:
+                game.build_depot_selected()
+            # A refinery turns runs into refined stock: free margin every visit.
+            if "inner_belt" not in game.sim.refineries:
+                refinery_cost = game.sim.refinery_upgrade_cost("inner_belt")
+                if game.credits > refinery_cost + 9000.0:
+                    game.sim.build_refinery("inner_belt")
+            # Science: spend research as it accumulates so the self-test
+            # exercises the tech path end to end (multipliers, discounts).
+            if (game.colony.state.get("research_points", 0.0) > 80.0
+                    and len(game.techs) < len(TECHS)):
+                game.buy_tech()
 
+    finally:
+        # Persist playtime the windowed loop saves on quit;
+        # headless runs (self-test / CI) otherwise drop it.
+        try:
+            game.steam.shutdown()
+        except Exception:
+            pass
     if verbose:
         print(f"[headless] {game.frames} frames over {sim_days:,.0f} sim-days")
         for report in game.sim.fleet_report():

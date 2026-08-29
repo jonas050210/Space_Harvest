@@ -60,6 +60,66 @@ def install_deps(include_build: bool = False) -> None:
     # Use: pip install -e ".[dev]" for full dev loop
 
 
+# Modules the game needs at runtime (import name -> pip project note for messages).
+RUNTIME_MODULES = ("ursina", "numpy", "PIL")
+
+
+def _missing_runtime_deps() -> list[str]:
+    """Return runtime modules that are not importable.
+
+    Uses ``find_spec`` so heavy modules (ursina/panda3d) are not actually
+    imported just to check for their presence.
+    """
+    import importlib.util
+
+    missing = []
+    for module in RUNTIME_MODULES:
+        try:
+            if importlib.util.find_spec(module) is None:
+                missing.append(module)
+        except (ImportError, ValueError):
+            # ValueError can occur on partially-initialised packages
+            missing.append(module)
+    return missing
+
+
+def ensure_runtime_deps(auto_install: bool = True) -> bool:
+    """Make sure runtime dependencies are present, pip-installing them if not.
+
+    This is what the default ``python setup.py`` (play) path runs first, so a
+    fresh checkout works without a separate manual install step. Returns True
+    when the game is safe to launch. When ``auto_install`` is False (the
+    ``--skip-deps`` flag) a missing dependency is reported but not installed.
+    """
+    missing = _missing_runtime_deps()
+    if not missing:
+        return True
+
+    print(f"[setup] Missing runtime dependency: {', '.join(missing)}")
+    if not auto_install:
+        print("[setup] --skip-deps given; not installing automatically.")
+        print("[setup] Install the dependencies manually, then run setup.py again:")
+        print(f'        "{sys.executable}" -m pip install -r requirements.txt')
+        return False
+
+    print("[setup] Installing dependencies from requirements.txt (one-time setup)...")
+    try:
+        install_deps(include_build=False)
+    except Exception as exc:
+        print(f"[setup] WARNING: automatic dependency install failed: {exc}")
+
+    still_missing = _missing_runtime_deps()
+    if still_missing:
+        print()
+        print("[setup] Could not install: " + ", ".join(still_missing))
+        print("[setup] Install the dependencies manually, then run setup.py again:")
+        print(f'        "{sys.executable}" -m pip install -r requirements.txt')
+        print("[setup] (If pip itself is missing: use a venv, e.g.")
+        print("         py -3.11 -m venv .venv  &&  .venv\\Scripts\\python setup.py)")
+        return False
+    return True
+
+
 def get_desktop_path() -> str:
     if sys.platform.startswith("win"):
         try:
@@ -250,9 +310,11 @@ def run_tests() -> int:
     )
 
 
-def play() -> int:
+def play(auto_install: bool = True) -> int:
     """Default action: run the game."""
     _ensure_path()
+    if not ensure_runtime_deps(auto_install=auto_install):
+        return 1
     from src.app import run_game
 
     return run_game()
@@ -324,12 +386,15 @@ def main() -> int:
         return 0
 
     # Default: PLAY
+    auto_install = not args.skip_deps
     if game_argv:
         # e.g. python setup.py --headless --sim-days 100
         _ensure_path()
+        if not ensure_runtime_deps(auto_install=auto_install):
+            return 1
         from src.app import run_game
         return run_game(game_argv)
-    return play()
+    return play(auto_install=auto_install)
 
 
 if __name__ == "__main__":
