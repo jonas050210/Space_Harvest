@@ -26,14 +26,21 @@ class OrbitalElements:
     argp: float   # argument of periapsis
     nu: float     # true anomaly
 
-    @property
-    def period(self) -> float:
-        """Orbital period in seconds for the mu used to build these elements."""
-        raise NotImplementedError
-
     def radius(self) -> float:
         """Current orbital radius ``r = a(1-e^2)/(1+e cos nu)``."""
         return self.a * (1.0 - self.e ** 2) / (1.0 + self.e * np.cos(self.nu))
+
+    def period(self, mu: float) -> float:
+        """Orbital period from semi-major axis ``a`` and ``mu``.
+
+        Returns ``inf`` for parabolic/hyperbolic (a <=0 or inf). The old
+        property raised ``NotImplementedError`` and was never used; the new
+        method is explicit about needing ``mu``.
+        """
+        import math
+        if not math.isfinite(self.a) or self.a <= 0.0:
+            return float("inf")
+        return 2.0 * math.pi * math.sqrt(self.a ** 3 / mu)
 
 
 def state_to_elements(r: np.ndarray, v: np.ndarray, mu: float) -> OrbitalElements:

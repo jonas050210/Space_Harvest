@@ -29,30 +29,54 @@ def _app_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _resolve_override() -> str | None:
+    """Env-var override - canonical SPACE_HARVEST_* preferred, OSC_* legacy."""
+    for key in ("SPACE_HARVEST_SAVE_ROOT", "OSC_SAVE_ROOT"):
+        val = os.environ.get(key)
+        if val:
+            return val
+    return None
+
+
+def _use_user_saves() -> bool:
+    """Whether to use OS user directory (Documents/My Games) vs repo saves."""
+    # Canonical flag preferred, legacy fallback
+    for key in ("SPACE_HARVEST_USER_SAVES", "OSC_USE_USER_SAVES"):
+        if os.environ.get(key):
+            return True
+    return False
+
+
 def cloud_root() -> str:
     """Steam Cloud-friendly save root.
 
-    Prefer ``Documents/My Games/SpaceHarvest`` on Windows so cloud sync and
-    multi-user installs stay out of Program Files. Fall back to local
-    ``saves/`` in development.
+    Resolution order:
+    1. SPACE_HARVEST_SAVE_ROOT (or legacy OSC_SAVE_ROOT) env override
+    2. OS user dir when frozen or when SPACE_HARVEST_USER_SAVES=1
+    3. Repo-local ./saves for hermetic dev/CI
     """
-    override = os.environ.get("SPACE_HARVEST_SAVE_ROOT") or os.environ.get("OSC_SAVE_ROOT")
+    override = _resolve_override()
     if override:
         os.makedirs(override, exist_ok=True)
         return override
+
+    # User directory path
     if sys.platform.startswith("win"):
         home = os.environ.get("USERPROFILE") or os.path.expanduser("~")
-        path = os.path.join(home, "Documents", "My Games", "SpaceHarvest")
+        user_path = os.path.join(home, "Documents", "My Games", "SpaceHarvest")
     else:
         home = os.path.expanduser("~")
-        path = os.path.join(home, ".local", "share", "SpaceHarvest")
-    # In the repo / CI we keep saves next to the project so tests stay hermetic
-    # unless SPACE_HARVEST_USER_SAVES=1 is set.
-    if not os.environ.get("SPACE_HARVEST_USER_SAVES") and not os.environ.get("OSC_USE_USER_SAVES") \
-            and not getattr(sys, "frozen", False):
-        path = os.path.join(_app_root(), "saves")
-    os.makedirs(path, exist_ok=True)
-    return path
+        user_path = os.path.join(home, ".local", "share", "SpaceHarvest")
+
+    # In repo/CI keep saves next to project so tests stay hermetic
+    # unless explicit user-saves flag or frozen build.
+    if not _use_user_saves() and not getattr(sys, "frozen", False):
+        repo_path = os.path.join(_app_root(), "saves")
+        os.makedirs(repo_path, exist_ok=True)
+        return repo_path
+
+    os.makedirs(user_path, exist_ok=True)
+    return user_path
 
 
 def ensure_steam_appid(app_id: int | None = None) -> str | None:
@@ -86,12 +110,32 @@ class SteamClient:
         """Attempt a real Steamworks bind; succeed quietly if missing."""
         if self.app_id <= 0:
             return False
-        # Placeholder for a future steamworks import. We deliberately do not
-        # hard-require the native DLL so the game runs outside Steam.
-        if os.environ.get("STEAM_OVERLAY") == "1" or os.path.isfile(
-            os.path.join(_app_root(), "steam_api64.dll")
-        ) or os.path.isfile(os.path.join(_app_root(), "libsteam_api.so")):
+        # Try real Steamworks bindings if installed - soft dependency
+        for mod_name in ("steamworks", "steam_api", "steamworks_py", "pysteamworks"):
+            try:
+                __import__(mod_name)
+                return True
+            except ImportError:
+                pass
+        # Check for native DLLs (Windows/Linux) or env flag for testing
+        if os.environ.get("STEAM_OVERLAY") == "1":
             return True
+        for dll in ("steam_api64.dll", "steam_api.dll", "libsteam_api.so"):
+            if os.path.isfile(os.path.join(_app_root(), dll)):
+                return True
+        # Also check if steam_appid.txt exists and contains valid app_id
+        # (overlay will attach when launched via Steam even without DLL in dev)
+        appid_path = os.path.join(_app_root(), "steam_appid.txt")
+        if os.path.isfile(appid_path):
+            try:
+                with open(appid_path, "r", encoding="utf-8") as fh:
+                    content = fh.read().strip()
+                if content and int(content) > 0:
+                    # If we're running under Steam client, env var SteamAppId is set
+                    if os.environ.get("SteamAppId") or os.environ.get("STEAM_APP_ID"):
+                        return True
+            except Exception:
+                pass
         return False
 
     def _load_stats(self) -> None:
@@ -122,7 +166,6 @@ class SteamClient:
 
     def unlock(self, achievement_id: str) -> None:
         """Unlock on Steam if available; always durable via achievements file."""
-        # Native call would go here: SteamUserStats.SetAchievement / StoreStats
         _ = achievement_id
 
     def shutdown(self) -> None:

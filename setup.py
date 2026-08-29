@@ -44,13 +44,20 @@ def _ensure_path() -> None:
     os.chdir(PROJECT_DIR)
 
 
-def install_deps() -> None:
+def install_deps(include_build: bool = False) -> None:
+    """Install runtime deps from requirements.txt, optionally build deps."""
     print("[setup] Installing dependencies...")
-    _run([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
+    # Don't force pip upgrade - respects user's environment and avoids network churn
     req = os.path.join(PROJECT_DIR, "requirements.txt")
     if os.path.isfile(req):
         _run([sys.executable, "-m", "pip", "install", "-r", req])
-    _run([sys.executable, "-m", "pip", "install", "pyinstaller>=6.0.0"])
+    else:
+        # Fallback to pyproject dependencies
+        _run([sys.executable, "-m", "pip", "install", "-e", "."])
+    if include_build:
+        _run([sys.executable, "-m", "pip", "install", "pyinstaller>=6.0.0"])
+    # Dev extras are optional - not installed by default for players
+    # Use: pip install -e ".[dev]" for full dev loop
 
 
 def get_desktop_path() -> str:
@@ -143,18 +150,23 @@ $Shortcut.Description = "{label} — orbital farming on real launch windows"
 $Shortcut.IconLocation = "{target_path},0"
 $Shortcut.Save()
 '''
-    tmp = os.path.join(PROJECT_DIR, "_tmp_create_sc.ps1")
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(ps_script)
+    import tempfile
+    # Use system temp dir, not project root, and ensure cleanup even on crash
+    fd, tmp = tempfile.mkstemp(suffix=".ps1", prefix="sh_create_sc_")
     try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(ps_script)
         subprocess.run(
             ["powershell", "-ExecutionPolicy", "Bypass", "-File", tmp],
             cwd=PROJECT_DIR, capture_output=True, text=True, timeout=20,
         )
         print(f"[setup] Shortcut created: {shortcut_path}")
     finally:
-        if os.path.isfile(tmp):
-            os.remove(tmp)
+        try:
+            if os.path.isfile(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
 
 
 def build_exe(onefile: bool = False) -> str:
@@ -264,7 +276,7 @@ def main() -> int:
 
     if not args.skip_deps and (args.build or args.install_only or args.test):
         try:
-            install_deps()
+            install_deps(include_build=args.build)
         except Exception as exc:
             print(f"[setup] WARNING: pip install failed: {exc}")
 
@@ -293,7 +305,7 @@ def main() -> int:
         try:
             if not args.skip_deps:
                 try:
-                    install_deps()
+                    install_deps(include_build=False)
                 except Exception:
                     pass
             create_shortcut()
@@ -304,7 +316,7 @@ def main() -> int:
 
     if args.install_only:
         if not args.skip_deps:
-            install_deps()
+            install_deps(include_build=args.build)
         print("[setup] Dependencies ready.")
         print("  Play:      python setup.py")
         print("  Shortcut:  python setup.py --shortcut")

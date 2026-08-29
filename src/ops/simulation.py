@@ -32,76 +32,28 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 
 import numpy as np
 
 from src.config import (
     CAMPAIGN_BODIES,
-    STATION_MODULE_CATALOG,
-    SWARM_BASE_DRONES,
-    SWARM_COOLDOWN_DAYS,
-    SWARM_DRONES_PER_BAY,
-    SWARM_DURATION_DAYS,
-    SWARM_MAX_DRONES,
-    SWARM_YIELD_T_PER_DRONE_DAY,
-    SURFACE_ISRU_DEPOT_GEN_BONUS,
-    SURFACE_ISRU_MAX_PER_BODY,
-    SURFACE_SURVEY_BONUS,
-    SURFACE_SURVEY_DAYS,
     RIVAL_DUMP_PERIOD_DAYS,
-    RIVAL_MINE_T_PER_DAY,
     COMET_ELEMENTS,
     COMET_KEY,
-    CREW_BOTANIST_SAVING_CAP,
     MINING_EXTRA_SPAWNS,
-    CREW_BOTANIST_WATER_SAVING,
-    DEPOT_BUILD_COST,
-    DEPOT_CAPACITY_PER_LEVEL,
-    DEPOT_GENERATION_PER_LEVEL,
-    DEPOT_START_FUEL,
-    DEPOT_UPGRADE_COST,
-    DEPOT_UPGRADE_COST_GROWTH,
     CREW_ENGINEER_REPAIR_BONUS,
     CREW_FATIGUE_EXHAUSTED,
-    CREW_FIRE_MORALE_HIT,
-    CREW_MAX_ROSTER,
-    CREW_PILOT_BURN_DISCOUNT,
-    CREW_PILOT_DISCOUNT_CAP,
-    CREW_FATIGUE_PER_DAY_FLYING,
-    CREW_FATIGUE_PER_DAY_LAYOVER,
-    CREW_FATIGUE_PER_DAY_PENDING,
-    CREW_FATIGUE_RECOVERY_PER_DAY,
-    CREW_IDLE_BOREDOM_DAYS,
-    CREW_MORALE_BOREDOM_DRAIN_PER_DAY,
-    CREW_MORALE_BOREDOM_FLOOR,
     CREW_MORALE_CAPTURE_BONUS,
-    CREW_MORALE_CABIN_FEVER_PER_DAY,
-    CREW_MORALE_LOW_YIELD,
     CREW_MORALE_MAX,
-    CREW_MORALE_OVERWORK_DRAIN_PER_DAY,
-    CREW_MORALE_OVERWORK_FLOOR,
-    CREW_MORALE_REST_PER_DAY,
-    CREW_MORALE_START,
-    CREW_NAMES_FIRST,
-    CREW_NAMES_LAST,
     DEFAULT_SHIP_CLASS,
-    DEBRIS_SEASON_DURATION_DAYS,
     DEBRIS_SEASON_PERIOD_DAYS,
-    DEBRIS_WEAR_PCT_PER_DAY,
-    FLEET_NAME_POOL,
-    FLARE_DURATION_DAYS_RANGE,
-    FLARE_EXPOSURE_BY_BODY,
-    FLARE_MORALE_DRAIN_PER_DAY,
     FLARE_QUIET_DAYS_RANGE,
-    FLARE_WARNING_DAYS,
-    FLARE_WEAR_PCT_PER_DAY,
     HULL_CRITICAL_PCT,
     HULL_MAX_PCT,
     HULL_MIN_PCT,
     HULL_REPAIR_COST_PER_PCT,
     HULL_REPAIR_RATE_PCT_PER_DAY,
-    HULL_WEAR_PCT_PER_MS,
     INCIDENT_CHANCE_DRILL,
     INCIDENT_CHANCE_SCRAPE,
     INCIDENT_CARGO_LOSS,
@@ -110,18 +62,11 @@ from src.config import (
     MINING_LOW_HULL_YIELD_PCT,
     MINING_RECOVERY_TAU_DAYS,
     MU_SUN,
-    PARTS_CATALOG,
     PLANNING_MAX_REVS,
     REFINERY_ARRIVAL_BATCHES,
-    REFINERY_BATCHES_PER_DAY,
-    REFINERY_BUILD_COST,
-    REFINERY_RECIPES,
     PLANNING_MULTI_REV_MIN_SAVING,
-    PERTURB_DA_FRACTION,
-    PERTURB_DE_MAX,
     PERTURB_MAX_INTERVAL_DAYS,
     PERTURB_MIN_INTERVAL_DAYS,
-    SHIP_CLASSES,
     SIM_SECONDS_PER_DAY,
 )
 from src.market import rng_from_json, rng_to_json
@@ -132,83 +77,13 @@ from src.simulation.bodies import BODIES, Body, TRADE_TARGETS
 from src.simulation.orbital_sim import Delivery, Leg, LogEntry, Mission, OrbitalSimulation, Ship
 
 
-@dataclass
-class Depot:
-    """A player-built refuel station at a trade body.
-
-    The tank stores propellant measured in delta-v (m/s) -- the same currency
-    the ships burn -- and an ISRU plant slowly cracks local ice into more.
-    """
-
-    body_key: str
-    level: int = 1
-    fuel_ms: float = DEPOT_START_FUEL
-    #: installed parts: {"drones": n}
-    upgrades: dict = field(default_factory=dict)
-
-    @property
-    def capacity(self) -> float:
-        return DEPOT_CAPACITY_PER_LEVEL * self.level
-
-    @property
-    def generation_per_day(self) -> float:
-        return DEPOT_GENERATION_PER_LEVEL * self.level
-
-    @property
-    def upgrade_cost(self) -> float:
-        return DEPOT_UPGRADE_COST * DEPOT_UPGRADE_COST_GROWTH ** (self.level - 1)
-
-    def to_json(self) -> dict:
-        return {"body_key": self.body_key, "level": self.level,
-                "fuel_ms": self.fuel_ms, "upgrades": dict(self.upgrades)}
-
-    @classmethod
-    def from_json(cls, data: dict) -> "Depot":
-        return cls(body_key=data["body_key"], level=int(data.get("level", 1)),
-                   fuel_ms=float(data.get("fuel_ms", 0.0)),
-                   upgrades={k: int(v) for k, v in data.get("upgrades", {}).items()})
-
-
-@dataclass
-class Refinery:
-    """A player-built smelting station at a trade body.
-
-    While a ship waits at its body for the return window, the refinery
-    converts raw ore in the ship's hold into high-value refined stock
-    (components, electronics). Fractional batches accumulate in ``progress``.
-    """
-
-    body_key: str
-    progress: float = 0.0
-    batches_done: int = 0
-
-    def to_json(self) -> dict:
-        return {"body_key": self.body_key, "progress": self.progress,
-                "batches_done": self.batches_done}
-
-    @classmethod
-    def from_json(cls, data: dict) -> "Refinery":
-        return cls(body_key=data["body_key"], progress=float(data.get("progress", 0.0)),
-                   batches_done=int(data.get("batches_done", 0)))
-
-
-@dataclass
-class CrewMember:
-    """One named crew member aboard a colony ship."""
-
-    name: str
-    role: str
-    morale: float = CREW_MORALE_START
-    fatigue: float = 0.0
-
-    def to_json(self) -> dict:
-        return {"name": self.name, "role": self.role,
-                "morale": self.morale, "fatigue": self.fatigue}
-
-    @classmethod
-    def from_json(cls, data: dict) -> "CrewMember":
-        return cls(name=data["name"], role=data["role"],
-                   morale=float(data["morale"]), fatigue=float(data["fatigue"]))
+# Structures extracted to src/ops/structures.py - keep re-export for backward compat
+from src.ops.structures import CrewMember, Depot, Refinery
+from src.ops.mixins.crew import CrewMixin
+from src.ops.mixins.weather import WeatherMixin
+from src.ops.mixins.depot import DepotMixin
+from src.ops.mixins.swarm import SwarmMixin
+from src.ops.mixins.ships import ShipsMixin
 
 
 # Roster template per ship: role -> seats. Miners outnumber everyone because
@@ -219,7 +94,7 @@ CREW_ROSTER_TEMPLATE = {"pilot": 1, "miner": 2, "engineer": 1}
 _AWAY_LEGS = {Leg.OUTBOUND, Leg.INBOUND, Leg.WAITING, Leg.PENDING}
 
 
-class OpsSimulation(OrbitalSimulation):
+class OpsSimulation(CrewMixin, WeatherMixin, DepotMixin, SwarmMixin, ShipsMixin, OrbitalSimulation):
     """The verified supply-chain sim plus fleet classes, hulls and mining."""
 
     def __init__(self, seed: int = 20260826, ship_names: tuple[str, ...] = ("Kestrel",),
@@ -359,125 +234,21 @@ class OpsSimulation(OrbitalSimulation):
             if key not in self.trade_targets:
                 self.trade_targets = tuple(self.trade_targets) + (key,)
 
-    def _parked_ship(self, name: str, body_key: str) -> Ship:
-        ship = super()._parked_ship(name, body_key)
-        cls = self._pending_classes.pop(name, DEFAULT_SHIP_CLASS)
-        spec = SHIP_CLASSES[cls]
-        ship.capacity = spec["capacity"]
-        ship.delta_v = spec["delta_v"]
-        self.ship_class[name] = cls
-        self.hull[name] = HULL_MAX_PCT
-        self.upgrades[name] = {}
-        self._hire_crew(name)
-        self.last_active[name] = self.time
-        return ship
 
-    def _hire_crew(self, ship_name: str) -> None:
-        """Give a ship its roster: deterministic draws from the name pools."""
-        roster: list[CrewMember] = []
-        for role, seats in CREW_ROSTER_TEMPLATE.items():
-            for _ in range(seats):
-                name = f"{self.rng.choice(CREW_NAMES_FIRST)} {self.rng.choice(CREW_NAMES_LAST)}"
-                roster.append(CrewMember(name=name, role=role))
-        self.crew[ship_name] = roster
 
     # -- fleet management ----------------------------------------------------
-    def class_spec(self, ship_name: str) -> dict:
-        return SHIP_CLASSES[self.ship_class[ship_name]]
 
-    def buy_ship(self, cls_key: str) -> tuple[Ship | None, str]:
-        """Commission a new ship of ``cls_key`` at the colony.
 
-        Payment happens in the game layer; this only validates the class and
-        grows the fleet. Returns ``(ship, message)``.
-        """
-        if cls_key not in SHIP_CLASSES:
-            return None, f"Unknown ship class '{cls_key}'."
-        name = next((n for n in FLEET_NAME_POOL if n not in self.ship_class), None)
-        if name is None:
-            return None, "The registry is full; no callsigns remain."
-        self._pending_classes[name] = cls_key
-        ship = self._parked_ship(name, "colony")
-        self.ships.append(ship)
-        self.note(f"{name} ({self.class_spec(name)['name']}) commissioned at Colony Hub.")
-        return ship, f"{name} ({self.class_spec(name)['name']}) joins the fleet."
-
-    def mining_hull(self, ship: Ship) -> float:
-        return self.hull.get(ship.name, HULL_MAX_PCT)
 
     # -- upgrade parts ---------------------------------------------------------
-    def effective_delta_v(self, ship_name: str) -> float:
-        """Class budget plus drop tanks."""
-        tanks = self.upgrades.get(ship_name, {}).get("tank", 0)
-        return self.class_spec(ship_name)["delta_v"] + tanks * PARTS_CATALOG["tank"]["delta_v"]
 
-    def ship_mine_bonus(self, ship_name: str) -> float:
-        ups = self.upgrades.get(ship_name, {})
-        bonus = 1.0
-        for key, count in ups.items():
-            bonus += int(count) * float(PARTS_CATALOG.get(key, {}).get("mine_bonus", 0.0) or 0.0)
-        bonus *= float(self.tech_mults.get("mine_bonus", 1.0))
-        return bonus
 
-    def ship_capacity(self, ship_name: str) -> float:
-        spec = self.class_spec(ship_name)
-        extra = 0.0
-        for key, count in self.upgrades.get(ship_name, {}).items():
-            extra += int(count) * float(PARTS_CATALOG.get(key, {}).get("capacity", 0.0) or 0.0)
-        return float(spec["capacity"]) + extra
 
-    def body_mine_bonus(self, body_key: str) -> float:
-        mods = self.station_modules.get(body_key, {})
-        yards = int(mods.get("drill_yard", 0))
-        info = STATION_MODULE_CATALOG.get("drill_yard", {})
-        return 1.0 + yards * float(info.get("mine_bonus", 0.0))
 
-    def crew_rest_factor(self, ship_name: str) -> float:
-        quarters = self.upgrades.get(ship_name, {}).get("quarters", 0)
-        return 1.0 + quarters * PARTS_CATALOG["quarters"]["rest_bonus"]
 
-    def install_part(self, ship_name: str, part_key: str) -> tuple[bool, str]:
-        info = PARTS_CATALOG.get(part_key)
-        if info is None or part_key == "drones":
-            return False, "That is not a ship part."
-        owned = self.upgrades.setdefault(ship_name, {})
-        if owned.get(part_key, 0) >= info["max_per_ship"]:
-            return False, f"{ship_name} already carries the maximum {info['name']}s."
-        owned[part_key] = owned.get(part_key, 0) + 1
-        if float(info.get("capacity", 0.0) or 0.0) > 0.0:
-            for ship in self.ships:
-                if ship.name == ship_name:
-                    ship.capacity = self.ship_capacity(ship_name)
-                    break
-        return True, f"{info['name']} installed on {ship_name}."
 
-    def install_depot_part(self, body_key: str, part_key: str) -> tuple[bool, str]:
-        depot = self.depots.get(body_key)
-        if depot is None:
-            return False, "Build a depot there first."
-        info = PARTS_CATALOG.get(part_key)
-        if info is None or part_key != "drones":
-            return False, "That is not a depot part."
-        owned = depot.upgrades.setdefault(part_key, 0)
-        if owned >= info["max_per_depot"]:
-            return False, f"The {self.bodies[body_key].name} depot is at its drone-bay limit."
-        depot.upgrades[part_key] = owned + 1
-        return True, f"Drone bay online at the {self.bodies[body_key].name} depot."
 
     # -- wear & maintenance --------------------------------------------------
-    def _apply_wear(self, ship: Ship, dv_ms: float) -> None:
-        if dv_ms <= 0.0:
-            return
-        factor = self.class_spec(ship.name)["wear_factor"]
-        # Difficulty (and future techs) scale wear via a generic multiplier.
-        factor *= float(self.tech_mults.get("hull_wear", 1.0))
-        for key, count in self.upgrades.get(ship.name, {}).items():
-            wf = PARTS_CATALOG.get(key, {}).get("wear_factor")
-            if wf and int(count) > 0:
-                factor *= float(wf) ** int(count)
-        current = self.hull.get(ship.name, HULL_MAX_PCT)
-        floor = float(getattr(self, "hull_floor", HULL_MIN_PCT))
-        self.hull[ship.name] = max(floor, current - dv_ms * HULL_WEAR_PCT_PER_MS * factor)
 
     def affordable_targets(self, ship: Ship, margin: float = 1.15) -> list[tuple[str, float]]:
         """Campaign-network override of the base affordability scan."""
@@ -746,636 +517,50 @@ class OpsSimulation(OrbitalSimulation):
 
 
 
-    def plant_survey(self, body_key: str) -> tuple[bool, str]:
-        """Chart veins on a body: temporary extraction bonus."""
-        if body_key not in self.bodies or body_key == "colony":
-            return False, "Survey a harvest field."
-        day = self.time / SIM_SECONDS_PER_DAY
-        self.survey_bonus[body_key] = {
-            "bonus": float(SURFACE_SURVEY_BONUS),
-            "expires_day": day + float(SURFACE_SURVEY_DAYS),
-        }
-        self.stats["surveys"] = int(self.stats.get("surveys", 0)) + 1
-        self.note(
-            f"Surface survey complete at {self.bodies[body_key].name}: "
-            f"+{SURFACE_SURVEY_BONUS*100:.0f}% yield for {SURFACE_SURVEY_DAYS:.0f} d."
-        )
-        return True, (
-            f"{self.bodies[body_key].name} surveyed — "
-            f"+{SURFACE_SURVEY_BONUS*100:.0f}% harvest for {SURFACE_SURVEY_DAYS:.0f} d."
-        )
 
-    def plant_isru_spike(self, body_key: str) -> tuple[bool, str]:
-        """Permanent depot-generation boost on this body (needs/creates barn synergy)."""
-        if body_key not in self.bodies or body_key == "colony":
-            return False, "Plant the spike on a harvest field."
-        owned = int(self.isru_spikes.get(body_key, 0))
-        if owned >= SURFACE_ISRU_MAX_PER_BODY:
-            return False, f"{self.bodies[body_key].name} already has {owned} ISRU spikes."
-        self.isru_spikes[body_key] = owned + 1
-        self.stats["isru_spikes"] = int(self.stats.get("isru_spikes", 0)) + 1
-        self.note(
-            f"ISRU spike planted at {self.bodies[body_key].name} "
-            f"(+{SURFACE_ISRU_DEPOT_GEN_BONUS:.1f} m/s/day when a barn is online)."
-        )
-        return True, (
-            f"ISRU spike #{owned+1} online at {self.bodies[body_key].name}."
-        )
 
-    def survey_mult(self, body_key: str) -> float:
-        info = self.survey_bonus.get(body_key)
-        if not info:
-            return 1.0
-        day = self.time / SIM_SECONDS_PER_DAY
-        if day > float(info.get("expires_day", 0.0)):
-            self.survey_bonus.pop(body_key, None)
-            return 1.0
-        return 1.0 + float(info.get("bonus", 0.0))
 
-    def tick_rival(self, dt_days: float) -> None:
-        """Competing charter quietly mines veins and dumps on Earth occasionally."""
-        if not getattr(self, "rival_enabled", True) or dt_days <= 0.0:
-            return
-        targets = [k for k in self.trade_targets if k in self.bodies]
-        if not targets:
-            return
-        # Deterministic pick from RNG already on the sim.
-        key = self.rng.choice(sorted(targets))
-        pull = float(RIVAL_MINE_T_PER_DAY) * dt_days
-        try:
-            from src.mining import plan_extraction
-            payload = plan_extraction(
-                key, self.ledger, self.reserved.get(key),
-                capacity_t=pull, mode="scrape", mine_bonus=0.7, hull_pct=100.0,
-            )
-        except Exception:
-            payload = {}
-        if payload:
-            self.ledger.commit(key, payload)
-            self.stats["rival_mined_t"] = float(self.stats.get("rival_mined_t", 0.0)) + sum(payload.values())
-        self._rival_dump_timer = float(getattr(self, "_rival_dump_timer", RIVAL_DUMP_PERIOD_DAYS)) - dt_days
-        if self._rival_dump_timer <= 0.0:
-            self._rival_dump_timer = float(RIVAL_DUMP_PERIOD_DAYS) * self.rng.uniform(0.8, 1.3)
-            # Signal the game layer via stats flag; market dump applied there.
-            self.stats["rival_dump_pending"] = 1
 
-    def build_station_module(self, body_key: str, module_key: str) -> tuple[bool, str]:
-        """Install a body-side industry module (caller pays credits)."""
-        info = STATION_MODULE_CATALOG.get(module_key)
-        if info is None:
-            return False, f"Unknown station module '{module_key}'."
-        if body_key not in self.bodies or body_key == "colony":
-            return False, "Build modules on a harvest field."
-        owned = int(self.station_modules.setdefault(body_key, {}).get(module_key, 0))
-        if owned >= int(info.get("max_per_body", 1)):
-            return False, f"{self.bodies[body_key].name} already has max {info['name']}."
-        self.station_modules[body_key][module_key] = owned + 1
-        self.stats["modules_built"] = int(self.stats.get("modules_built", 0)) + 1
-        self.note(f"{info['name']} online at {self.bodies[body_key].name}.")
-        return True, f"{info['name']} online at {self.bodies[body_key].name}."
 
-    def body_weather_resist(self, body_key: str) -> float:
-        """0..1 fraction of flare/debris wear blocked while WAITING here."""
-        masts = int(self.station_modules.get(body_key, {}).get("shield_mast", 0))
-        if not masts:
-            return 0.0
-        return min(0.9, masts * float(STATION_MODULE_CATALOG["shield_mast"].get("weather_resist", 0.5)))
 
-    def tick_observatories(self, dt_days: float) -> float:
-        """Passive research from any station module that lists research_per_day."""
-        total = 0.0
-        for mods in self.station_modules.values():
-            for key, count in mods.items():
-                rate = float(STATION_MODULE_CATALOG.get(key, {}).get("research_per_day", 0.0) or 0.0)
-                n = int(count)
-                if rate and n:
-                    total += rate * n * dt_days
-        return total
 
-    def tick_garden_ice(self, dt_days: float) -> float:
-        """Ice tonnes greenhouse domes want to drink this step (caller bills storage)."""
-        if dt_days <= 0.0:
-            return 0.0
-        per = float(STATION_MODULE_CATALOG.get("greenhouse", {}).get("garden_ice_per_day", 0.0) or 0.0)
-        count = 0
-        for mods in self.station_modules.values():
-            count += int(mods.get("greenhouse", 0))
-        return per * count * dt_days
 
-    def warehouse_storage_bonus(self) -> float:
-        total = 0.0
-        per = float(STATION_MODULE_CATALOG.get("warehouse", {}).get("storage_bonus", 0.0))
-        for mods in self.station_modules.values():
-            total += per * int(mods.get("warehouse", 0))
-        return total
 
     # -- harvest drone swarms (window GO moment) --------------------------------
-    def total_drone_bays(self) -> int:
-        return sum(int(d.upgrades.get("drones", 0)) for d in self.depots.values())
 
-    def swarm_capacity(self) -> int:
-        bays = max(0, self.total_drone_bays())
-        return int(min(SWARM_MAX_DRONES, SWARM_BASE_DRONES + SWARM_DRONES_PER_BAY * bays))
 
-    def launch_swarm(self, body_key: str) -> tuple[bool, str, int]:
-        """Flood a field with harvest drones while its window is open.
 
-        Returns (ok, message, drone_count). Caller bills credits/energy.
-        """
-        if body_key not in self.bodies or body_key == "colony":
-            return False, "Pick a harvest field.", 0
-        if body_key in self.swarms:
-            return False, f"A swarm is already working {self.bodies[body_key].name}.", 0
-        now_day = self.time / SIM_SECONDS_PER_DAY
-        ready = self.swarm_cooldown.get(body_key, -1e9)
-        if now_day < ready:
-            return False, (
-                f"Swarm systems cooling down at {self.bodies[body_key].name} "
-                f"({ready - now_day:,.0f} d left)."
-            ), 0
-        # Window must be open (or about to open within a day).
-        window = self.launch_window("colony", body_key)
-        if window is None:
-            return False, f"No launch window to {self.bodies[body_key].name}.", 0
-        wait = (window.departure_time - self.time) / SIM_SECONDS_PER_DAY
-        if wait > 1.0:
-            return False, (
-                f"Window to {self.bodies[body_key].name} opens in {wait:,.0f} d -- "
-                "swarm launches only on GO."
-            ), 0
-        count = self.swarm_capacity()
-        if count < 4:
-            return False, "Build depot drone bays (P) before launching a swarm.", 0
-        self.swarms[body_key] = {
-            "count": count,
-            "remaining_days": float(SWARM_DURATION_DAYS),
-            "yield_t": 0.0,
-            "launched_day": now_day,
-        }
-        self.swarm_cooldown[body_key] = now_day + SWARM_COOLDOWN_DAYS
-        self.stats["swarms_launched"] = int(self.stats.get("swarms_launched", 0)) + 1
-        self.stats["swarm_drones_peak"] = max(
-            int(self.stats.get("swarm_drones_peak", 0)), count)
-        self.note(
-            f"SWARM LAUNCH: {count} harvest drones dive on {self.bodies[body_key].name} "
-            f"(window GO, {SWARM_DURATION_DAYS:.0f} d burst)."
-        )
-        return True, (
-            f"{count} drones inbound to {self.bodies[body_key].name} -- "
-            f"harvest window {SWARM_DURATION_DAYS:.0f} d."
-        ), count
-
-    def tick_swarms(self, dt_days: float) -> list[dict]:
-        """Advance active swarms; return list of finished {body, yield_t, count}."""
-        finished = []
-        if dt_days <= 0.0 or not self.swarms:
-            return finished
-        for key in list(self.swarms):
-            swarm = self.swarms[key]
-            count = int(swarm["count"])
-            # Ore pull into a virtual hold then committed via ledger-aware plan.
-            swarm_mult = float(self.tech_mults.get("swarm_yield", 1.0))
-            pull = count * SWARM_YIELD_T_PER_DRONE_DAY * swarm_mult * dt_days
-            try:
-                from src.mining import plan_extraction
-                payload = plan_extraction(
-                    key, self.ledger, self.reserved.get(key),
-                    capacity_t=pull, mode=self.mining_mode,
-                    mine_bonus=(1.0 + 0.05 * self.total_drone_bays()) * self.survey_mult(key),
-                    hull_pct=100.0,
-                )
-            except Exception:
-                payload = {"ice": pull * 0.5, "iron": pull * 0.5}
-            if payload:
-                self.ledger.commit(key, payload)
-                tonnes = float(sum(payload.values()))
-                swarm["yield_t"] = float(swarm.get("yield_t", 0.0)) + tonnes
-                self.stats["ore_mined_t"] = float(self.stats.get("ore_mined_t", 0.0)) + tonnes
-                # Stage as a pending delivery into the colony.
-                self.pending_deliveries.append(
-                    Delivery(ship=f"swarm:{key}", body=key, time=self.time, cargo=dict(payload))
-                )
-            swarm["remaining_days"] = float(swarm["remaining_days"]) - dt_days
-            if swarm["remaining_days"] <= 0.0:
-                finished.append({
-                    "body": key,
-                    "yield_t": float(swarm.get("yield_t", 0.0)),
-                    "count": count,
-                })
-                self.note(
-                    f"Swarm over {self.bodies[key].name} recovered: "
-                    f"{swarm.get('yield_t', 0.0):,.0f} t hauled by {count} drones."
-                )
-                del self.swarms[key]
-        return finished
 
     # -- refuel depots ---------------------------------------------------------
-    def build_depot(self, body_key: str) -> tuple[bool, str]:
-        """Raise a depot at ``body_key`` (caller pays the credits)."""
-        if body_key not in self.trade_targets and body_key not in TRADE_TARGETS:
-            return False, "Pick a trade body to build at."
-        if body_key in self.depots:
-            depot = self.depots[body_key]
-            depot.level += 1
-            self.note(f"Depot at {self.bodies[body_key].name} upgraded to level {depot.level}.")
-            return True, (f"Depot upgraded to level {depot.level} "
-                          f"(+{DEPOT_GENERATION_PER_LEVEL:.0f} m/s per day).")
-        self.depots[body_key] = Depot(body_key=body_key)
-        self.note(f"Refuel depot online at {self.bodies[body_key].name}.")
-        return True, f"Depot online at {self.bodies[body_key].name}."
 
-    def depot_upgrade_cost(self, body_key: str) -> float:
-        depot = self.depots.get(body_key)
-        if depot is None:
-            return DEPOT_BUILD_COST
-        return depot.upgrade_cost
 
     # -- refinery stations -------------------------------------------------------
-    def build_refinery(self, body_key: str) -> tuple[bool, str]:
-        """Raise a smelting station at ``body_key`` (caller pays the credits)."""
-        if body_key not in self.trade_targets:
-            return False, "Pick a trade body to build at."
-        if body_key in self.refineries:
-            return False, f"A refinery already operates at {self.bodies[body_key].name}."
-        self.refineries[body_key] = Refinery(body_key=body_key)
-        self.note(f"Refinery online at {self.bodies[body_key].name}.")
-        return True, f"Refinery online at {self.bodies[body_key].name}."
 
-    def refinery_upgrade_cost(self, body_key: str) -> float:
-        return REFINERY_BUILD_COST if body_key not in self.refineries else 0.0
 
-    def _refinery_smelt_waiting(self, dt_days: float) -> int:
-        """Smelt raw ore in waiting ships' holds; returns batches executed."""
-        if dt_days <= 0.0 or not self.refineries:
-            return 0
-        batches = 0
-        for ship in self.ships:
-            mission = self.missions.get(ship.name)
-            if mission is None or mission.leg is not Leg.WAITING:
-                continue
-            refinery = self.refineries.get(mission.target)
-            if refinery is None:
-                continue
-            foundry = int(self.station_modules.get(mission.target, {}).get("foundry", 0))
-            foundry_mult = 1.0 + foundry * float(
-                STATION_MODULE_CATALOG.get("foundry", {}).get("refinery_bonus", 0.0) or 0.0)
-            refinery.progress += (
-                REFINERY_BATCHES_PER_DAY * self.tech_mults.get("refinery", 1.0) * foundry_mult * dt_days
-            )
-            while refinery.progress >= 1.0:
-                recipe = self._first_craftable_recipe(ship)
-                if recipe is None:
-                    refinery.progress = min(refinery.progress, 1.0)  # idle: never bank up
-                    break
-                refinery.progress -= 1.0
-                refinery.batches_done += 1
-                batches += 1
-                for ore, amount in recipe["input"].items():
-                    ship.cargo[ore] = ship.cargo.get(ore, 0.0) - amount
-                ship.cargo[recipe["output"]] = ship.cargo.get(recipe["output"], 0.0) + recipe["amount"]
-        return batches
 
-    @staticmethod
-    def _first_craftable_recipe(ship: Ship):
-        for recipe in REFINERY_RECIPES:
-            if all(ship.cargo.get(ore, 0.0) >= amount for ore, amount in recipe["input"].items()):
-                return recipe
-        return None
 
-    def tick_depots(self, dt_days: float) -> None:
-        """ISRU plants crack local ice into propellant."""
-        if dt_days <= 0.0:
-            return
-        gen_mult = self.tech_mults.get("depot_generation", 1.0)
-        for depot in self.depots.values():
-            spikes = int(self.isru_spikes.get(depot.body_key, 0))
-            extra = spikes * SURFACE_ISRU_DEPOT_GEN_BONUS
-            gen = (depot.generation_per_day + extra) * gen_mult
-            depot.fuel_ms = min(depot.capacity, depot.fuel_ms + gen * dt_days)
 
-    def _tanker_fill_depot(self, dt_days: float) -> float:
-        """Tankers waiting at a barn pump propellant into the tank (logistics loop)."""
-        filled = 0.0
-        for ship in self.ships:
-            if self.ship_class.get(ship.name) != "tanker":
-                continue
-            mission = self.missions.get(ship.name)
-            if mission is None or mission.leg.value != "waiting":
-                continue
-            depot = self.depots.get(mission.target)
-            if depot is None:
-                continue
-            bonus = float(self.class_spec(ship.name).get("depot_fill_bonus", 1.0))
-            # Generate into depot from "tanker ISRU assist" using ship refuel rate * bonus.
-            rate = self.class_spec(ship.name)["refuel_rate"] * bonus * float(
-                self.tech_mults.get("refuel_rate", 1.0))
-            room = depot.capacity - depot.fuel_ms
-            add = min(room, rate * dt_days)
-            if add > 0.0:
-                depot.fuel_ms += add
-                filled += add
-        return filled
 
-    def _depot_refuel_waiting(self, dt_days: float) -> float:
-        """Top up ships holding at a depot body; returns m/s transferred."""
-        granted = 0.0
-        for ship in self.ships:
-            mission = self.missions.get(ship.name)
-            if mission is None or mission.leg is not Leg.WAITING:
-                continue
-            depot = self.depots.get(mission.target)
-            if depot is None:
-                continue
-            headroom = self.class_spec(ship.name)["delta_v"] - ship.delta_v
-            if headroom <= 0.0:
-                continue
-            rate = self.class_spec(ship.name)["refuel_rate"] * float(
-                self.tech_mults.get("refuel_rate", 1.0))
-            draw = min(headroom, depot.fuel_ms, rate * dt_days)
-            if draw <= 0.0:
-                continue
-            ship.delta_v += draw
-            depot.fuel_ms -= draw
-            granted += draw
-        return granted
 
-    def _depot_drones_load(self, dt_days: float) -> None:
-        """Drone bays mine the local field into a waiting ship's hold.
-
-        Physically coherent idle income: while the crew holds for the return
-        window, the depot's drones keep hauling ore up, so the ship leaves
-        FULL instead of empty. Ore comes from the same depletion ledgers as
-        everything else -- strong, but not free.
-        """
-        if dt_days <= 0.0:
-            return
-        for ship in self.ships:
-            mission = self.missions.get(ship.name)
-            if mission is None or mission.leg is not Leg.WAITING:
-                continue
-            depot = self.depots.get(mission.target)
-            drone_levels = depot.upgrades.get("drones", 0) if depot else 0
-            if drone_levels <= 0:
-                continue
-            free = ship.capacity - ship.cargo_load
-            if free <= 0.5:
-                continue
-            tonnes = min(free, PARTS_CATALOG["drones"]["mine_per_day"] * drone_levels * dt_days)
-            payload = plan_extraction(
-                mission.target, self.ledger, None,
-                capacity_t=tonnes, mode="scrape",
-                mine_bonus=self.ship_mine_bonus(ship.name),
-                hull_pct=self.mining_hull(ship),
-            )
-            if sum(payload.values()) <= 0.05:
-                continue
-            self.ledger.commit(mission.target, payload)
-            for ore, amount in payload.items():
-                ship.cargo[ore] = ship.cargo.get(ore, 0.0) + amount
 
     # -- crew ----------------------------------------------------------------
-    def crew_stats(self, ship_name: str) -> tuple[float, float]:
-        """``(average morale, max fatigue)`` across a ship's roster."""
-        roster = self.crew.get(ship_name)
-        if not roster:
-            return CREW_MORALE_START, 0.0
-        morale = sum(member.morale for member in roster) / len(roster)
-        fatigue = max(member.fatigue for member in roster)
-        return morale, fatigue
 
-    def crew_yield_factor(self, ship_name: str) -> float:
-        """Unhappy or exhausted crews mine less (multiplicative, in (0, 1])."""
-        morale, fatigue = self.crew_stats(ship_name)
-        factor = 0.85 + 0.15 * morale / CREW_MORALE_MAX
-        if fatigue > 70.0:
-            factor *= 0.9
-        return factor
 
-    def crew_incident_factor(self, ship_name: str) -> float:
-        """Tired crews crash drills; sullen crews get careless (>= 1)."""
-        morale, fatigue = self.crew_stats(ship_name)
-        return 1.0 + max(0.0, fatigue - 60.0) / 100.0 + max(0.0, CREW_MORALE_LOW_YIELD - morale) / 100.0
 
-    def tick_crew(self, dt_days: float) -> None:
-        """Advance fatigue and morale for every roster by ``dt_days``."""
-        if dt_days <= 0.0:
-            return
-        for ship in self.ships:
-            roster = self.crew.get(ship.name)
-            if not roster:
-                continue
-            mission = self.missions.get(ship.name)
-            if mission is None:
-                # Docked: fatigue recovers. A crew with nothing to do for
-                # months slowly gets bored.
-                bored = (
-                    self.time - self.last_active.get(ship.name, self.time)
-                    > CREW_IDLE_BOREDOM_DAYS * SIM_SECONDS_PER_DAY
-                )
-                rest_rate = CREW_FATIGUE_RECOVERY_PER_DAY * self.crew_rest_factor(ship.name)
-                for member in roster:
-                    member.fatigue = max(0.0, member.fatigue - rest_rate * dt_days)
-                    if bored and member.fatigue < 30.0:
-                        member.morale = max(
-                            CREW_MORALE_BOREDOM_FLOOR,
-                            member.morale - CREW_MORALE_BOREDOM_DRAIN_PER_DAY * dt_days,
-                        )
-                    else:
-                        member.morale = min(CREW_MORALE_MAX, member.morale + CREW_MORALE_REST_PER_DAY * dt_days)
-            else:
-                fatigue_mult = self.tech_mults.get("fatigue", 1.0)
-                if mission.leg is Leg.WAITING:
-                    rate = CREW_FATIGUE_PER_DAY_LAYOVER * fatigue_mult
-                elif mission.leg is Leg.PENDING:
-                    rate = CREW_FATIGUE_PER_DAY_PENDING * fatigue_mult
-                else:
-                    rate = CREW_FATIGUE_PER_DAY_FLYING * fatigue_mult
-                for member in roster:
-                    member.fatigue = min(100.0, member.fatigue + rate * dt_days)
-                    if member.fatigue > 70.0:
-                        member.morale = max(
-                            CREW_MORALE_OVERWORK_FLOOR,
-                            member.morale - CREW_MORALE_OVERWORK_DRAIN_PER_DAY * dt_days,
-                        )
-                if mission.leg is Leg.WAITING:
-                    for member in roster:
-                        member.morale -= CREW_MORALE_CABIN_FEVER_PER_DAY * dt_days
-                if self.flare_state == "flare" and mission.leg in (Leg.OUTBOUND, Leg.INBOUND):
-                    for member in roster:
-                        member.morale -= FLARE_MORALE_DRAIN_PER_DAY * dt_days
-            for member in roster:
-                member.morale = min(CREW_MORALE_MAX, max(0.0, member.morale))
 
-    def crew_payday(self, bonus: float = CREW_MORALE_CAPTURE_BONUS) -> None:
-        """A little pride (and cash) for everyone; called on sales by the game."""
-        for roster in self.crew.values():
-            for member in roster:
-                member.morale = min(CREW_MORALE_MAX, member.morale + bonus)
 
     # -- crew specialisations -----------------------------------------------
-    def pilots_discount(self, ship_name: str) -> float:
-        """Fraction of every burn refunded by planning skill (ops-layer):
-        pilots fly tighter courses, Navigation Suites plan them better."""
-        count = sum(1 for member in self.crew.get(ship_name, []) if member.role == "pilot")
-        suites = self.upgrades.get(ship_name, {}).get("navsuite", 0)
-        suite_refund = suites * PARTS_CATALOG["navsuite"]["refund"]
-        return min(CREW_PILOT_DISCOUNT_CAP + suite_refund,
-                   count * CREW_PILOT_BURN_DISCOUNT + suite_refund)
 
-    def has_engineer(self, ship_name: str) -> bool:
-        return any(member.role == "engineer" for member in self.crew.get(ship_name, []))
 
-    def botanist_water_factor(self) -> float:
-        """Hydroponics water multiplier from the colony's botanists."""
-        return 1.0 - min(CREW_BOTANIST_SAVING_CAP, self.botanists * CREW_BOTANIST_WATER_SAVING)
 
-    def hire(self, role: str, ship_name: str | None = None) -> tuple[bool, str]:
-        """Hire a specialist. Botanists join the colony, others a ship."""
-        if role == "botanist":
-            self.botanists += 1
-            self.note("A botanist joins the colony hydroponics roster.")
-            return True, "Botanist hired for the colony."
-        if ship_name is None or ship_name not in self.crew:
-            return False, "Pick a ship for the new hire."
-        roster = self.crew[ship_name]
-        if len(roster) >= CREW_MAX_ROSTER:
-            return False, f"{ship_name}'s roster is full ({CREW_MAX_ROSTER} bunks)."
-        name = f"{self.rng.choice(CREW_NAMES_FIRST)} {self.rng.choice(CREW_NAMES_LAST)}"
-        roster.append(CrewMember(name=name, role=role))
-        self.note(f"{name} signs on aboard {ship_name} as {role}.")
-        return True, f"{name} joins {ship_name} as {role}."
 
-    def fire(self, ship_name: str, member: CrewMember) -> tuple[bool, str]:
-        """Dismiss a crew member; the survivors resent it."""
-        roster = self.crew.get(ship_name, [])
-        if member not in roster or len(roster) <= 1:
-            return False, "Cannot dismiss the last crew member."
-        roster.remove(member)
-        for other in roster:
-            other.morale = max(0.0, other.morale - CREW_FIRE_MORALE_HIT)
-        self.note(f"{member.name} is dismissed from {ship_name}; morale suffers.")
-        return True, f"{member.name} dismissed; {ship_name}'s crew morale drops."
 
-    def apply_hardship(self, amount: float) -> None:
-        """Colony-wide morale damage (life-support shortages, disasters)."""
-        for roster in self.crew.values():
-            for member in roster:
-                member.morale = max(0.0, member.morale - amount)
 
-    def fleet_morale(self) -> float:
-        values = [member.morale for roster in self.crew.values() for member in roster]
-        return sum(values) / len(values) if values else CREW_MORALE_START
 
     # -- space weather ---------------------------------------------------------
-    def tick_weather(self, dt_days: float) -> None:
-        """Advance the deterministic flare cycle and debris seasons."""
-        if dt_days <= 0.0:
-            return
-        dt = dt_days * SIM_SECONDS_PER_DAY
-        self._flare_timer -= dt
-        if self.flare_state == "quiet" and self._flare_timer <= 0.0:
-            self.flare_state = "warning"
-            self._flare_timer = FLARE_WARNING_DAYS * SIM_SECONDS_PER_DAY
-            self.note("Solar observatory: flare inbound. Ships in flight are exposed.")
-        elif self.flare_state == "warning" and self._flare_timer <= 0.0:
-            self.flare_state = "flare"
-            self._flare_duration = self.rng.uniform(*FLARE_DURATION_DAYS_RANGE) * SIM_SECONDS_PER_DAY
-            self.note("Solar flare in progress: radiation and particle storm.")
-        elif self.flare_state == "flare":
-            self._flare_duration -= dt
-            if self._flare_duration <= 0.0:
-                self.flare_state = "quiet"
-                self._flare_timer = self.rng.uniform(*FLARE_QUIET_DAYS_RANGE) * SIM_SECONDS_PER_DAY
-                self.note("Solar flare has passed. Conditions quiet.")
-
-        self._debris_timer -= dt
-        if self.debris_active:
-            if self._debris_timer <= 0.0:
-                self.debris_active = False
-                self._debris_timer = DEBRIS_SEASON_PERIOD_DAYS * SIM_SECONDS_PER_DAY
-                self.note("Debris season has ended.")
-        elif self._debris_timer <= 0.0:
-            self.debris_active = True
-            self._debris_timer = DEBRIS_SEASON_DURATION_DAYS * SIM_SECONDS_PER_DAY
-            self.note("Debris season: micrometeorite flux rising for ships in flight.")
-
-        # Weather wear applies only to ships actually in flight; docked ships
-        # sit inside the colony's shielding.
-        flare_wear = FLARE_WEAR_PCT_PER_DAY if self.flare_state == "flare" else 0.0
-        debris_wear = DEBRIS_WEAR_PCT_PER_DAY if self.debris_active else 0.0
-        if flare_wear <= 0.0 and debris_wear <= 0.0:
-            return
-        for ship in self.ships:
-            mission = self.missions.get(ship.name)
-            if mission is None or mission.leg not in (Leg.OUTBOUND, Leg.INBOUND):
-                continue
-            current = self.hull.get(ship.name, HULL_MAX_PCT)
-            floor = float(getattr(self, "hull_floor", HULL_MIN_PCT))
-            resist = 0.0
-            exposure = 1.0
-            if mission is not None:
-                resist = max(
-                    self.body_weather_resist(mission.target),
-                    self.body_weather_resist(getattr(ship, "origin", "") or ""),
-                )
-                # Solar exposure: bodies that skim the sun ride flares harder.
-                exposure = max(
-                    FLARE_EXPOSURE_BY_BODY.get(mission.target, 1.0),
-                    FLARE_EXPOSURE_BY_BODY.get(getattr(ship, "origin", "") or "", 1.0),
-                )
-            wear = flare_wear * exposure + debris_wear
-            self.hull[ship.name] = max(floor, current - wear * (1.0 - resist) * dt_days)
 
     # -- gravitational perturbations ------------------------------------------
-    def tick_perturbations(self, dt_days: float) -> None:
-        """Occasionally shift a belt body's orbit as a passer-by flies by.
 
-        Only this sim's copy of the body table changes; window caches are
-        dropped so every new plan is solved against the new geometry. Ships
-        already in flight keep their conics -- the capture burn bills whatever
-        the miss actually costs, which is exactly how a perturbation should
-        bite.
-        """
-        if dt_days <= 0.0:
-            return
-        self._perturb_timer -= dt_days * SIM_SECONDS_PER_DAY
-        if self._perturb_timer > 0.0:
-            return
-        self._perturb_timer = self.rng.uniform(
-            PERTURB_MIN_INTERVAL_DAYS, PERTURB_MAX_INTERVAL_DAYS
-        ) * SIM_SECONDS_PER_DAY
-
-        candidates = [key for key in TRADE_TARGETS if key in self.bodies]
-        if not candidates:
-            return
-        key = self.rng.choice(candidates)
-        body = self.bodies[key]
-        el = body.elements
-        da = self.rng.uniform(*PERTURB_DA_FRACTION) * self.rng.choice((-1.0, 1.0))
-        de = self.rng.uniform(-PERTURB_DE_MAX, PERTURB_DE_MAX)
-        new_el = OrbitalElements(
-            a=el.a * (1.0 + da),
-            e=min(0.35, max(0.002, el.e + de)),
-            i=el.i, raan=el.raan, argp=el.argp, nu=el.nu,
-        )
-        self.bodies[key] = replace(body, elements=new_el)
-        self._window_cache.clear()
-        self._round_trip_cache.clear()
-        sign = "outward" if da > 0 else "inward"
-        self.note(
-            f"Gravitational perturbation: {body.name} drifts {sign} "
-            f"({da * 100:+.1f}% semi-major axis). Re-plan transfers."
-        )
-
-    def weather_alert(self) -> str:
-        """One-line status for the HUD; empty when all is quiet."""
-        if self.flare_state == "warning":
-            return "ALERT: solar flare warning - ships in flight"
-        if self.flare_state == "flare":
-            return "ALERT: solar flare in progress"
-        if self.debris_active:
-            return "Debris season: elevated hull wear in flight"
-        return ""
 
     # -- multi-rev-aware window planning ---------------------------------------
     def _solve_window(self, origin_key: str, target_key: str, *,
