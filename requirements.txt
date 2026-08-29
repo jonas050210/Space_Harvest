@@ -4,11 +4,11 @@
 ursina>=6.0.0
 numpy>=1.26
 pillow>=10.0
+pytest>=8,<9
+ruff
 
 # Dev / optional (install with pip install -r requirements.txt or via [dev] extra):
 # matplotlib>=3.8        # optional: porkchop plotting helper in tools/
 # pyinstaller>=6.0.0     # optional: single-exe packaging, see README
-# pytest>=8,<9           # dev: test suite
-# ruff                   # dev: lint
 
 # For full dev install: pip install -e ".[dev]"
