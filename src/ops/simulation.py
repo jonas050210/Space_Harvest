@@ -38,17 +38,6 @@ import numpy as np
 
 from src.config import (
     CAMPAIGN_BODIES,
-    STATION_MODULE_CATALOG,
-    SWARM_BASE_DRONES,
-    SWARM_COOLDOWN_DAYS,
-    SWARM_DRONES_PER_BAY,
-    SWARM_DURATION_DAYS,
-    SWARM_MAX_DRONES,
-    SWARM_YIELD_T_PER_DRONE_DAY,
-    SURFACE_ISRU_DEPOT_GEN_BONUS,
-    SURFACE_ISRU_MAX_PER_BODY,
-    SURFACE_SURVEY_BONUS,
-    SURFACE_SURVEY_DAYS,
     RIVAL_DUMP_PERIOD_DAYS,
     COMET_ELEMENTS,
     COMET_KEY,
@@ -59,14 +48,12 @@ from src.config import (
     CREW_MORALE_MAX,
     DEFAULT_SHIP_CLASS,
     DEBRIS_SEASON_PERIOD_DAYS,
-    FLEET_NAME_POOL,
     FLARE_QUIET_DAYS_RANGE,
     HULL_CRITICAL_PCT,
     HULL_MAX_PCT,
     HULL_MIN_PCT,
     HULL_REPAIR_COST_PER_PCT,
     HULL_REPAIR_RATE_PCT_PER_DAY,
-    HULL_WEAR_PCT_PER_MS,
     INCIDENT_CHANCE_DRILL,
     INCIDENT_CHANCE_SCRAPE,
     INCIDENT_CARGO_LOSS,
@@ -75,14 +62,11 @@ from src.config import (
     MINING_LOW_HULL_YIELD_PCT,
     MINING_RECOVERY_TAU_DAYS,
     MU_SUN,
-    PARTS_CATALOG,
     PLANNING_MAX_REVS,
     REFINERY_ARRIVAL_BATCHES,
-    REFINERY_RECIPES,
     PLANNING_MULTI_REV_MIN_SAVING,
     PERTURB_MAX_INTERVAL_DAYS,
     PERTURB_MIN_INTERVAL_DAYS,
-    SHIP_CLASSES,
     SIM_SECONDS_PER_DAY,
 )
 from src.market import rng_from_json, rng_to_json
@@ -98,6 +82,8 @@ from src.ops.structures import CrewMember, Depot, Refinery
 from src.ops.mixins.crew import CrewMixin
 from src.ops.mixins.weather import WeatherMixin
 from src.ops.mixins.depot import DepotMixin
+from src.ops.mixins.swarm import SwarmMixin
+from src.ops.mixins.ships import ShipsMixin
 
 
 # Roster template per ship: role -> seats. Miners outnumber everyone because
@@ -108,7 +94,7 @@ CREW_ROSTER_TEMPLATE = {"pilot": 1, "miner": 2, "engineer": 1}
 _AWAY_LEGS = {Leg.OUTBOUND, Leg.INBOUND, Leg.WAITING, Leg.PENDING}
 
 
-class OpsSimulation(CrewMixin, WeatherMixin, DepotMixin, OrbitalSimulation):
+class OpsSimulation(CrewMixin, WeatherMixin, DepotMixin, SwarmMixin, ShipsMixin, OrbitalSimulation):
     """The verified supply-chain sim plus fleet classes, hulls and mining."""
 
     def __init__(self, seed: int = 20260826, ship_names: tuple[str, ...] = ("Kestrel",),
@@ -248,105 +234,21 @@ class OpsSimulation(CrewMixin, WeatherMixin, DepotMixin, OrbitalSimulation):
             if key not in self.trade_targets:
                 self.trade_targets = tuple(self.trade_targets) + (key,)
 
-    def _parked_ship(self, name: str, body_key: str) -> Ship:
-        ship = super()._parked_ship(name, body_key)
-        cls = self._pending_classes.pop(name, DEFAULT_SHIP_CLASS)
-        spec = SHIP_CLASSES[cls]
-        ship.capacity = spec["capacity"]
-        ship.delta_v = spec["delta_v"]
-        self.ship_class[name] = cls
-        self.hull[name] = HULL_MAX_PCT
-        self.upgrades[name] = {}
-        self._hire_crew(name)
-        self.last_active[name] = self.time
-        return ship
 
 
     # -- fleet management ----------------------------------------------------
-    def class_spec(self, ship_name: str) -> dict:
-        return SHIP_CLASSES[self.ship_class[ship_name]]
 
-    def buy_ship(self, cls_key: str) -> tuple[Ship | None, str]:
-        """Commission a new ship of ``cls_key`` at the colony.
 
-        Payment happens in the game layer; this only validates the class and
-        grows the fleet. Returns ``(ship, message)``.
-        """
-        if cls_key not in SHIP_CLASSES:
-            return None, f"Unknown ship class '{cls_key}'."
-        name = next((n for n in FLEET_NAME_POOL if n not in self.ship_class), None)
-        if name is None:
-            return None, "The registry is full; no callsigns remain."
-        self._pending_classes[name] = cls_key
-        ship = self._parked_ship(name, "colony")
-        self.ships.append(ship)
-        self.note(f"{name} ({self.class_spec(name)['name']}) commissioned at Colony Hub.")
-        return ship, f"{name} ({self.class_spec(name)['name']}) joins the fleet."
-
-    def mining_hull(self, ship: Ship) -> float:
-        return self.hull.get(ship.name, HULL_MAX_PCT)
 
     # -- upgrade parts ---------------------------------------------------------
-    def effective_delta_v(self, ship_name: str) -> float:
-        """Class budget plus drop tanks."""
-        tanks = self.upgrades.get(ship_name, {}).get("tank", 0)
-        return self.class_spec(ship_name)["delta_v"] + tanks * PARTS_CATALOG["tank"]["delta_v"]
 
-    def ship_mine_bonus(self, ship_name: str) -> float:
-        ups = self.upgrades.get(ship_name, {})
-        bonus = 1.0
-        for key, count in ups.items():
-            bonus += int(count) * float(PARTS_CATALOG.get(key, {}).get("mine_bonus", 0.0) or 0.0)
-        bonus *= float(self.tech_mults.get("mine_bonus", 1.0))
-        return bonus
 
-    def ship_capacity(self, ship_name: str) -> float:
-        spec = self.class_spec(ship_name)
-        extra = 0.0
-        for key, count in self.upgrades.get(ship_name, {}).items():
-            extra += int(count) * float(PARTS_CATALOG.get(key, {}).get("capacity", 0.0) or 0.0)
-        return float(spec["capacity"]) + extra
 
-    def body_mine_bonus(self, body_key: str) -> float:
-        mods = self.station_modules.get(body_key, {})
-        yards = int(mods.get("drill_yard", 0))
-        info = STATION_MODULE_CATALOG.get("drill_yard", {})
-        return 1.0 + yards * float(info.get("mine_bonus", 0.0))
 
-    def crew_rest_factor(self, ship_name: str) -> float:
-        quarters = self.upgrades.get(ship_name, {}).get("quarters", 0)
-        return 1.0 + quarters * PARTS_CATALOG["quarters"]["rest_bonus"]
 
-    def install_part(self, ship_name: str, part_key: str) -> tuple[bool, str]:
-        info = PARTS_CATALOG.get(part_key)
-        if info is None or part_key == "drones":
-            return False, "That is not a ship part."
-        owned = self.upgrades.setdefault(ship_name, {})
-        if owned.get(part_key, 0) >= info["max_per_ship"]:
-            return False, f"{ship_name} already carries the maximum {info['name']}s."
-        owned[part_key] = owned.get(part_key, 0) + 1
-        if float(info.get("capacity", 0.0) or 0.0) > 0.0:
-            for ship in self.ships:
-                if ship.name == ship_name:
-                    ship.capacity = self.ship_capacity(ship_name)
-                    break
-        return True, f"{info['name']} installed on {ship_name}."
 
 
     # -- wear & maintenance --------------------------------------------------
-    def _apply_wear(self, ship: Ship, dv_ms: float) -> None:
-        if dv_ms <= 0.0:
-            return
-        factor = self.class_spec(ship.name)["wear_factor"]
-        # Difficulty (and future techs) scale wear via a generic multiplier.
-        factor *= float(self.tech_mults.get("hull_wear", 1.0))
-        for key, count in self.upgrades.get(ship.name, {}).items():
-            wf = PARTS_CATALOG.get(key, {}).get("wear_factor")
-            if wf and int(count) > 0:
-                factor *= float(wf) ** int(count)
-        current = self.hull.get(ship.name, HULL_MAX_PCT)
-        floor = float(getattr(self, "hull_floor", HULL_MIN_PCT))
-        self.hull[ship.name] = max(floor, current - dv_ms * HULL_WEAR_PCT_PER_MS * factor)
 
     def affordable_targets(self, ship: Ship, margin: float = 1.15) -> list[tuple[str, float]]:
         """Campaign-network override of the base affordability scan."""
@@ -615,51 +517,8 @@ class OpsSimulation(CrewMixin, WeatherMixin, DepotMixin, OrbitalSimulation):
 
 
 
-    def plant_survey(self, body_key: str) -> tuple[bool, str]:
-        """Chart veins on a body: temporary extraction bonus."""
-        if body_key not in self.bodies or body_key == "colony":
-            return False, "Survey a harvest field."
-        day = self.time / SIM_SECONDS_PER_DAY
-        self.survey_bonus[body_key] = {
-            "bonus": float(SURFACE_SURVEY_BONUS),
-            "expires_day": day + float(SURFACE_SURVEY_DAYS),
-        }
-        self.stats["surveys"] = int(self.stats.get("surveys", 0)) + 1
-        self.note(
-            f"Surface survey complete at {self.bodies[body_key].name}: "
-            f"+{SURFACE_SURVEY_BONUS*100:.0f}% yield for {SURFACE_SURVEY_DAYS:.0f} d."
-        )
-        return True, (
-            f"{self.bodies[body_key].name} surveyed — "
-            f"+{SURFACE_SURVEY_BONUS*100:.0f}% harvest for {SURFACE_SURVEY_DAYS:.0f} d."
-        )
 
-    def plant_isru_spike(self, body_key: str) -> tuple[bool, str]:
-        """Permanent depot-generation boost on this body (needs/creates barn synergy)."""
-        if body_key not in self.bodies or body_key == "colony":
-            return False, "Plant the spike on a harvest field."
-        owned = int(self.isru_spikes.get(body_key, 0))
-        if owned >= SURFACE_ISRU_MAX_PER_BODY:
-            return False, f"{self.bodies[body_key].name} already has {owned} ISRU spikes."
-        self.isru_spikes[body_key] = owned + 1
-        self.stats["isru_spikes"] = int(self.stats.get("isru_spikes", 0)) + 1
-        self.note(
-            f"ISRU spike planted at {self.bodies[body_key].name} "
-            f"(+{SURFACE_ISRU_DEPOT_GEN_BONUS:.1f} m/s/day when a barn is online)."
-        )
-        return True, (
-            f"ISRU spike #{owned+1} online at {self.bodies[body_key].name}."
-        )
 
-    def survey_mult(self, body_key: str) -> float:
-        info = self.survey_bonus.get(body_key)
-        if not info:
-            return 1.0
-        day = self.time / SIM_SECONDS_PER_DAY
-        if day > float(info.get("expires_day", 0.0)):
-            self.survey_bonus.pop(body_key, None)
-            return 1.0
-        return 1.0 + float(info.get("bonus", 0.0))
 
 
 
@@ -668,104 +527,9 @@ class OpsSimulation(CrewMixin, WeatherMixin, DepotMixin, OrbitalSimulation):
 
 
     # -- harvest drone swarms (window GO moment) --------------------------------
-    def total_drone_bays(self) -> int:
-        return sum(int(d.upgrades.get("drones", 0)) for d in self.depots.values())
 
-    def swarm_capacity(self) -> int:
-        bays = max(0, self.total_drone_bays())
-        return int(min(SWARM_MAX_DRONES, SWARM_BASE_DRONES + SWARM_DRONES_PER_BAY * bays))
 
-    def launch_swarm(self, body_key: str) -> tuple[bool, str, int]:
-        """Flood a field with harvest drones while its window is open.
 
-        Returns (ok, message, drone_count). Caller bills credits/energy.
-        """
-        if body_key not in self.bodies or body_key == "colony":
-            return False, "Pick a harvest field.", 0
-        if body_key in self.swarms:
-            return False, f"A swarm is already working {self.bodies[body_key].name}.", 0
-        now_day = self.time / SIM_SECONDS_PER_DAY
-        ready = self.swarm_cooldown.get(body_key, -1e9)
-        if now_day < ready:
-            return False, (
-                f"Swarm systems cooling down at {self.bodies[body_key].name} "
-                f"({ready - now_day:,.0f} d left)."
-            ), 0
-        # Window must be open (or about to open within a day).
-        window = self.launch_window("colony", body_key)
-        if window is None:
-            return False, f"No launch window to {self.bodies[body_key].name}.", 0
-        wait = (window.departure_time - self.time) / SIM_SECONDS_PER_DAY
-        if wait > 1.0:
-            return False, (
-                f"Window to {self.bodies[body_key].name} opens in {wait:,.0f} d -- "
-                "swarm launches only on GO."
-            ), 0
-        count = self.swarm_capacity()
-        if count < 4:
-            return False, "Build depot drone bays (P) before launching a swarm.", 0
-        self.swarms[body_key] = {
-            "count": count,
-            "remaining_days": float(SWARM_DURATION_DAYS),
-            "yield_t": 0.0,
-            "launched_day": now_day,
-        }
-        self.swarm_cooldown[body_key] = now_day + SWARM_COOLDOWN_DAYS
-        self.stats["swarms_launched"] = int(self.stats.get("swarms_launched", 0)) + 1
-        self.stats["swarm_drones_peak"] = max(
-            int(self.stats.get("swarm_drones_peak", 0)), count)
-        self.note(
-            f"SWARM LAUNCH: {count} harvest drones dive on {self.bodies[body_key].name} "
-            f"(window GO, {SWARM_DURATION_DAYS:.0f} d burst)."
-        )
-        return True, (
-            f"{count} drones inbound to {self.bodies[body_key].name} -- "
-            f"harvest window {SWARM_DURATION_DAYS:.0f} d."
-        ), count
-
-    def tick_swarms(self, dt_days: float) -> list[dict]:
-        """Advance active swarms; return list of finished {body, yield_t, count}."""
-        finished = []
-        if dt_days <= 0.0 or not self.swarms:
-            return finished
-        for key in list(self.swarms):
-            swarm = self.swarms[key]
-            count = int(swarm["count"])
-            # Ore pull into a virtual hold then committed via ledger-aware plan.
-            swarm_mult = float(self.tech_mults.get("swarm_yield", 1.0))
-            pull = count * SWARM_YIELD_T_PER_DRONE_DAY * swarm_mult * dt_days
-            try:
-                from src.mining import plan_extraction
-                payload = plan_extraction(
-                    key, self.ledger, self.reserved.get(key),
-                    capacity_t=pull, mode=self.mining_mode,
-                    mine_bonus=(1.0 + 0.05 * self.total_drone_bays()) * self.survey_mult(key),
-                    hull_pct=100.0,
-                )
-            except Exception:
-                payload = {"ice": pull * 0.5, "iron": pull * 0.5}
-            if payload:
-                self.ledger.commit(key, payload)
-                tonnes = float(sum(payload.values()))
-                swarm["yield_t"] = float(swarm.get("yield_t", 0.0)) + tonnes
-                self.stats["ore_mined_t"] = float(self.stats.get("ore_mined_t", 0.0)) + tonnes
-                # Stage as a pending delivery into the colony.
-                self.pending_deliveries.append(
-                    Delivery(ship=f"swarm:{key}", body=key, time=self.time, cargo=dict(payload))
-                )
-            swarm["remaining_days"] = float(swarm["remaining_days"]) - dt_days
-            if swarm["remaining_days"] <= 0.0:
-                finished.append({
-                    "body": key,
-                    "yield_t": float(swarm.get("yield_t", 0.0)),
-                    "count": count,
-                })
-                self.note(
-                    f"Swarm over {self.bodies[key].name} recovered: "
-                    f"{swarm.get('yield_t', 0.0):,.0f} t hauled by {count} drones."
-                )
-                del self.swarms[key]
-        return finished
 
     # -- refuel depots ---------------------------------------------------------
 
@@ -774,12 +538,6 @@ class OpsSimulation(CrewMixin, WeatherMixin, DepotMixin, OrbitalSimulation):
 
 
 
-    @staticmethod
-    def _first_craftable_recipe(ship: Ship):
-        for recipe in REFINERY_RECIPES:
-            if all(ship.cargo.get(ore, 0.0) >= amount for ore, amount in recipe["input"].items()):
-                return recipe
-        return None
 
 
 
